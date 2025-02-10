@@ -1,0 +1,19 @@
+[workspace]
+members = [
+    "pw_tokenizer/rust/pw_tokenizer",
+    "pw_tokenizer/rust/pw_tokenizer_core",
+    "pw_tokenizer/rust/pw_tokenizer_macro",
+    "pw_format/rust/pw_format",
+    "pw_format/rust/pw_format_core",
+    "pw_base64/rust/pw_base64",
+    "pw_bytes/rust/pw_bytes",
+    "pw_status/rust/pw_status",
+    "pw_stream/rust/pw_stream",
+    "pw_varint/rust/pw_varint",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+repository = "https://pigweed.googlesource.com/pigweed/pigweed"

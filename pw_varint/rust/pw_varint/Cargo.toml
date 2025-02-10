@@ -1,0 +1,17 @@
+[package]
+name = "pw_varint"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Variable-length integer encoding and decoding"
+
+[lib]
+path = "../pw_varint.rs"
+
+[dependencies]
+pw_status = { path = "../../../pw_status/rust/pw_status" }
+
+[features]
+default = []
+std = []

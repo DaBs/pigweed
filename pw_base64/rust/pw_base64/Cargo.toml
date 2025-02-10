@@ -1,0 +1,18 @@
+[package]
+name = "pw_base64"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Base64 encoding and decoding utilities"
+
+[lib]
+path = "./lib.rs"
+
+[dependencies]
+pw_status = { path = "../../../pw_status/rust/pw_status" }
+pw_stream = { path = "../../../pw_stream/rust/pw_stream" }
+
+[features]
+default = []
+std = []

@@ -1,0 +1,23 @@
+[package]
+name = "pw_format"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Pigweed formatting utilities"
+
+[lib]
+path = "./lib.rs"
+
+[dependencies]
+pw_format_core = { path = "../pw_format_core" }
+pw_status = { path = "../../../pw_status/rust/pw_status" }
+nom = "7.1"
+proc-macro2 = "1.0"
+quote = "1.0"
+syn = { version = "2.0", features = ["full", "extra-traits"] }
+
+[features]
+default = []
+nightly_tait = []
+nightly = ["nightly_tait"]

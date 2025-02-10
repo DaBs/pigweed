@@ -1,0 +1,18 @@
+[package]
+name = "pw_stream"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Stream reading and writing utilities"
+
+[lib]
+path = "./lib.rs"
+
+[dependencies]
+paste = "1.0.15"
+pw_status = { path = "../../../pw_status/rust/pw_status" }
+pw_varint = { path = "../../../pw_varint/rust/pw_varint" }
+[features]
+default = []
+std = []

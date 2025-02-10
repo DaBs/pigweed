@@ -1,0 +1,17 @@
+[package]
+name = "pw_bytes"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Byte manipulation utilities"
+
+[lib]
+path = "../pw_bytes.rs"
+
+[dependencies]
+pw_status = { path = "../../../pw_status/rust/pw_status" }
+
+[features]
+default = []
+std = []

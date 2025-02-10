@@ -1,0 +1,19 @@
+[package]
+name = "pw_tokenizer_macro"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Procedural macros for pw_tokenizer"
+
+[lib]
+proc-macro = true
+path = "../pw_tokenizer_macro.rs"
+
+[dependencies]
+pw_tokenizer_core = { path = "../pw_tokenizer_core" }
+pw_format = { path = "../../../pw_format/rust/pw_format" }
+pw_status = { path = "../../../pw_status/rust/pw_status" }
+proc-macro2 = "1.0"
+quote = "1.0"
+syn = { version = "2.0", features = ["full"] }

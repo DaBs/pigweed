@@ -44,14 +44,12 @@ inline RpcLock& rpc_lock() {
   return *lock;
 }
 
-class PW_SCOPED_LOCKABLE
-RpcLockGuard{public : RpcLockGuard()
-                 PW_EXCLUSIVE_LOCK_FUNCTION(rpc_lock()){rpc_lock().lock();
-}  // namespace pw::rpc::internal
+class PW_SCOPED_LOCKABLE RpcLockGuard {
+ public:
+  RpcLockGuard() PW_EXCLUSIVE_LOCK_FUNCTION(rpc_lock()) { rpc_lock().lock(); }
 
-~RpcLockGuard() PW_UNLOCK_FUNCTION(rpc_lock()) { rpc_lock().unlock(); }
-}
-;
+  ~RpcLockGuard() PW_UNLOCK_FUNCTION(rpc_lock()) { rpc_lock().unlock(); }
+};
 
 // Releases the RPC lock, yields, and reacquires it.
 void YieldRpcLock() PW_EXCLUSIVE_LOCKS_REQUIRED(rpc_lock());

@@ -12,27 +12,23 @@
 // License for the specific language governing permissions and limitations under
 // the License.
 
-#include "base.h"
+#include "pw_containers/size_report/intrusive_forward_list.h"
 
-#ifndef ITEM_COUNT
-#define ITEM_COUNT 1
+#include "pw_bloat/bloat_this_binary.h"
+
+namespace pw::containers::size_report {
+
+int Measure() {
+  volatile uint32_t mask = bloat::kDefaultMask;
+  int rc = MeasureIntrusiveForwardList<ForwardListItem<V1>>(mask);
+
+#ifdef PW_CONTAINERS_SIZE_REPORT_ALTERNATE_VALUE
+  rc += MeasureIntrusiveForwardList<ForwardListItem<V2>>(mask);
 #endif
 
-struct ExampleItem : public pw::IntrusiveForwardList<ExampleItem>::Item {};
-
-struct ExampleContainer {
-  pw::IntrusiveForwardList<ExampleItem> item_list;
-};
-
-static struct IntrusiveListContainer : BaseContainer {
-  ExampleContainer example_container;
-  ExampleItem example_item[ITEM_COUNT];
-} size_report_data;
-
-int main() {
-  for (auto& example_item : size_report_data.example_item) {
-    size_report_data.example_container.item_list.push_front(example_item);
-  }
-
-  return size_report_data.LoadData();
+  return rc;
 }
+
+}  // namespace pw::containers::size_report
+
+int main() { return ::pw::containers::size_report::Measure(); }

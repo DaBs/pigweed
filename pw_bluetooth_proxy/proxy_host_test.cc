@@ -1517,6 +1517,42 @@ TEST_F(DisconnectionCompleteTest, CanReuseConnectionHandleAfterDisconnection) {
   EXPECT_EQ(capture.sends_called, 2);
 }
 
+TEST_F(DisconnectionCompleteTest, DisconnectionErasesAclConnection) {
+  pw::Function<void(H4PacketWithHci && packet)> send_to_host_fn(
+      [](H4PacketWithHci&&) {});
+  int sends_called = 0;
+  pw::Function<void(H4PacketWithH4 && packet)> send_to_controller_fn(
+      [&sends_called](H4PacketWithH4&&) { ++sends_called; });
+  ProxyHost proxy = ProxyHost(std::move(send_to_host_fn),
+                              std::move(send_to_controller_fn),
+                              /*le_acl_credits_to_reserve=*/1,
+                              /*br_edr_acl_credits_to_reserve=*/0);
+  PW_TEST_EXPECT_OK(SendLeReadBufferResponseFromController(proxy, 1));
+
+  uint16_t connection_handle = 0x567;
+  pw::Vector<L2capCoc, ProxyHost::GetMaxNumAclConnections()> channels;
+  for (size_t i = 0; i < ProxyHost::GetMaxNumAclConnections(); ++i) {
+    channels.push_back(
+        BuildCoc(proxy, CocParameters{.handle = ++connection_handle}));
+  }
+  EXPECT_EQ(
+      BuildCocWithResult(
+          proxy,
+          CocParameters{.handle = static_cast<uint16_t>(connection_handle + 1)})
+          .status(),
+      Status::Unavailable());
+
+  PW_TEST_EXPECT_OK(SendDisconnectionCompleteEvent(proxy, connection_handle++));
+  // After erasing the last ACL connection, there should be space for a new one.
+  PW_TEST_ASSERT_OK_AND_ASSIGN(
+      L2capCoc channel,
+      BuildCocWithResult(proxy, CocParameters{.handle = connection_handle}));
+  // Confirm signaling channels are functional.
+  PW_TEST_EXPECT_OK(channel.SendAdditionalRxCredits(3));
+  EXPECT_EQ(sends_called, 1);
+  channels.clear();
+}
+
 // ########## DestructionTest
 
 class DestructionTest : public ProxyHostTest {};
@@ -1551,25 +1587,39 @@ TEST_F(DestructionTest, ChannelsStopOnProxyDestruction) {
                      /*le_acl_credits_to_reserve=*/0,
                      /*br_edr_acl_credits_to_reserve=*/0);
 
-  pw::Vector<L2capCoc, 3> channels;
-  for (int i = 0; i < 3; ++i) {
-    channels.push_back(BuildCoc(
-        proxy.front(),
-        CocParameters{.event_fn = [&events_received](L2capChannelEvent event) {
-          ++events_received;
-          EXPECT_EQ(event, L2capChannelEvent::kChannelClosedByOther);
-        }}));
-  }
+  // This event function will be called by each of the channels' event
+  // functions.
+  Function<void(L2capChannelEvent event)> shared_event_fn =
+      [&events_received](L2capChannelEvent event) {
+        ++events_received;
+        EXPECT_EQ(event, L2capChannelEvent::kChannelClosedByOther);
+      };
+
+  BasicL2capChannel close_first_channel = BuildBasicL2capChannel(
+      proxy.front(),
+      BasicL2capParameters{
+          .event_fn = [&shared_event_fn](L2capChannelEvent event) {
+            shared_event_fn(event);
+          }});
+
+  OneOfEachChannel channel_struct =
+      BuildOneOfEachChannel(proxy.front(), shared_event_fn);
 
   // Channel already closed before Proxy destruction should not be affected.
-  channels.back().Close();
+  close_first_channel.Close();
   EXPECT_EQ(events_received, 1ul);
+  EXPECT_EQ(close_first_channel.state(), L2capChannel::State::kClosed);
+
+  // Proxy dtor should result in close event for each of
+  // the previously still open channels (and they should now be closed).
   proxy.clear();
-  EXPECT_EQ(events_received, channels.size());
-  for (auto& channel : channels) {
-    EXPECT_EQ(channel.state(), L2capChannel::State::kClosed);
+  EXPECT_EQ(events_received, 1 + channel_struct.AllChannels().size());
+  for (L2capChannel* channel : channel_struct.AllChannels()) {
+    EXPECT_EQ(channel->state(), L2capChannel::State::kClosed);
   }
-  channels.clear();
+
+  // And first channel should remain closed of course.
+  EXPECT_EQ(close_first_channel.state(), L2capChannel::State::kClosed);
 }
 
 // ########## ResetTest
@@ -1666,38 +1716,48 @@ TEST_F(ResetTest, ChannelsCloseOnReset) {
       [](H4PacketWithHci&&) {});
   pw::Function<void(H4PacketWithH4 && packet)>&& send_to_controller_fn(
       [](H4PacketWithH4&&) {});
-
+  size_t events_received = 0;
   ProxyHost proxy = ProxyHost(std::move(send_to_host_fn),
                               std::move(send_to_controller_fn),
                               /*le_acl_credits_to_reserve=*/0,
                               /*br_edr_acl_credits_to_reserve=*/0);
 
-  constexpr uint16_t kRemoteCid = 0x123;
-  constexpr size_t kNumChannels = 3;
-  pw::Vector<L2capCoc, kNumChannels> channels;
-  size_t events_received = 0;
-  for (uint16_t i = 0; i < kNumChannels; ++i) {
-    channels.push_back(BuildCoc(
-        proxy,
-        CocParameters{.remote_cid = static_cast<uint16_t>(kRemoteCid + i),
-                      .event_fn = [&events_received](L2capChannelEvent event) {
-                        if (++events_received == 1) {
-                          EXPECT_EQ(event,
-                                    L2capChannelEvent::kChannelClosedByOther);
-                        } else {
-                          EXPECT_EQ(event, L2capChannelEvent::kReset);
-                        }
-                      }}));
+  // This event function will be called by each of the channels' event
+  // functions.
+  Function<void(L2capChannelEvent event)> shared_event_fn =
+      [&events_received](L2capChannelEvent event) {
+        if (++events_received == 1) {
+          EXPECT_EQ(event, L2capChannelEvent::kChannelClosedByOther);
+        } else {
+          EXPECT_EQ(event, L2capChannelEvent::kReset);
+        }
+      };
+
+  BasicL2capChannel close_first_channel = BuildBasicL2capChannel(
+      proxy,
+      BasicL2capParameters{
+          .event_fn = [&shared_event_fn](L2capChannelEvent event) {
+            shared_event_fn(event);
+          }});
+
+  OneOfEachChannel channel_struct =
+      BuildOneOfEachChannel(proxy, shared_event_fn);
+
+  // Channel already closed before Proxy reset should not be affected.
+  close_first_channel.Close();
+  EXPECT_EQ(events_received, 1ul);
+  EXPECT_EQ(close_first_channel.state(), L2capChannel::State::kClosed);
+
+  // Proxy reset should result in close event for each of
+  // the previously still open channels (and they should now be closed).
+  proxy.Reset();
+  EXPECT_EQ(events_received, 1 + channel_struct.AllChannels().size());
+  for (L2capChannel* channel : channel_struct.AllChannels()) {
+    EXPECT_EQ(channel->state(), L2capChannel::State::kClosed);
   }
 
-  // Channel already closed before Proxy destruction should not be affected.
-  channels.back().Close();
-  proxy.Reset();
-  EXPECT_EQ(events_received, channels.size());
-  for (auto& channel : channels) {
-    EXPECT_EQ(channel.state(), L2capChannel::State::kClosed);
-  }
-  channels.clear();
+  // And first channel should remain closed of course.
+  EXPECT_EQ(close_first_channel.state(), L2capChannel::State::kClosed);
 }
 
 TEST_F(ResetTest, ProxyHandlesMultipleResets) {

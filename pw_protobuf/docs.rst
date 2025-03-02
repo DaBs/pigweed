@@ -495,8 +495,9 @@ complex than encoding or using the message structure.
      uint32_t age = 0;
      char name[32] = "";
      Customer::Status status = Customer::Status::UNKNOWN;
+     pw::Status decode_status;
 
-     while ((status = decoder.Next()).ok()) {
+     while ((decode_status = decoder.Next()).ok()) {
        switch (decoder.Field().value()) {
          case Customer::Fields::kAge: {
            PW_TRY_ASSIGN(age, decoder.ReadAge());
@@ -513,7 +514,7 @@ complex than encoding or using the message structure.
        }
      }
 
-     return status.IsOutOfRange() ? OkStatus() : status;
+     return decode_status.IsOutOfRange() ? OkStatus() : decode_status;
    }
 
 .. warning:: ``Fields::SNAKE_CASE`` is deprecated. Use ``Fields::kCamelCase``.
@@ -691,8 +692,9 @@ through the fields and checking the field numbers, along with casting types.
      uint32_t age;
      char name[32];
      Customer::Status status;
+     pw::Status decode_status;
 
-     while ((status = decoder.Next()).ok()) {
+     while ((decode_status = decoder.Next()).ok()) {
        switch (decoder.FieldNumber().value()) {
          case static_cast<uint32_t>(Customer::Fields::kAge): {
            PW_TRY_ASSIGN(age, decoder.ReadInt32());
@@ -711,7 +713,7 @@ through the fields and checking the field numbers, along with casting types.
        }
      }
 
-     return status.IsOutOfRange() ? OkStatus() : status;
+     return decode_status.IsOutOfRange() ? OkStatus() : decode_status;
    }
 
 Find APIs
@@ -2408,9 +2410,7 @@ This report demonstrates the size of using the entire decoder with all of its
 decode methods and a decode callback for a proto message containing each of the
 protobuf field types.
 
-.. TODO: b/388905812 - Re-enable the size report.
-.. .. include:: size_report/decoder_partial
-.. include:: ../size_report_notice
+.. include:: size_report/decoder_partial
 
 
 Incremental size report
@@ -2420,9 +2420,7 @@ This report is generated using the full report as a base and adding some int32
 fields to the decode callback to demonstrate the incremental cost of decoding
 fields in a message.
 
-.. TODO: b/388905812 - Re-enable the size report.
-.. .. include:: size_report/decoder_incremental
-.. include:: ../size_report_notice
+.. include:: size_report/decoder_incremental
 
 ---------------------------
 Serialized size calculation

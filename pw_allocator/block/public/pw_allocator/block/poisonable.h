@@ -67,7 +67,7 @@ class PoisonableBlock : public internal::PoisonableBase {
   }
 
   /// Returns whether this block has been poisoned.
-  inline bool IsPoisoned() const;
+  constexpr bool IsPoisoned() const;
 
   /// Poisons the block's usable space.
   ///
@@ -75,7 +75,7 @@ class PoisonableBlock : public internal::PoisonableBase {
   /// a block is delegated to the allocator to allow for more nuanced strategies
   /// than simply all or nothing. For example, an allocator may want to balance
   /// security and performance by only poisoning every n-th free block.
-  void Poison();
+  constexpr void Poison();
 
  protected:
   constexpr uintptr_t DoGetPoisonWord() const {
@@ -84,19 +84,19 @@ class PoisonableBlock : public internal::PoisonableBase {
   }
 
   /// @copydoc ContiguousBlock::DoSplitFirst
-  Derived* DoSplitFirst(size_t new_inner_size);
+  constexpr Derived* DoSplitFirst(size_t new_inner_size);
 
   /// @copydoc ContiguousBlock::DoSplitLast
-  Derived* DoSplitLast(size_t new_inner_size);
+  constexpr Derived* DoSplitLast(size_t new_inner_size);
 
   /// @copydoc ContiguousBlock::DoMergeNext
-  void DoMergeNext();
+  constexpr void DoMergeNext();
 
   /// @copydoc BasicBlock::CheckInvariants
-  bool DoCheckInvariants(bool crash_on_failure) const;
+  constexpr bool DoCheckInvariants(bool strict) const;
 
   /// Clears the poisoned state if a block is not free.
-  inline void SetFree(bool is_free);
+  constexpr void SetFree(bool is_free);
 
  private:
   constexpr Derived* derived() { return static_cast<Derived*>(this); }
@@ -128,40 +128,49 @@ struct is_poisonable : std::is_base_of<internal::PoisonableBase, BlockType> {};
 
 /// Helper variable template for `is_poisonable<BlockType>::value`.
 template <typename BlockType>
-inline constexpr bool is_poisonable_v = is_poisonable<BlockType>::value;
+constexpr bool is_poisonable_v = is_poisonable<BlockType>::value;
 
 namespace internal {
 
-/// Functions to crash with an error message describing which block invariant
-/// has been violated. These functions are implemented independent of any
-/// template parameters to allow it to use `PW_CHECK`.
-void CrashPoisonCorrupted(uintptr_t addr);
-void CrashPoisonedWhileInUse(uintptr_t addr);
+/// Crashes with an error message about the previous block being corrupted if
+/// `is_free` is false.
+void CheckPoisonedWhileInUse(const void* block, bool is_free);
+
+/// Crashes with an error message about the block being corrupted if
+/// `pattern_is_intact` is false.
+void CheckPoisonCorrupted(const void* block, bool pattern_is_intact);
 
 }  // namespace internal
 
 // Template method implementations.
 
 template <typename Derived>
-bool PoisonableBlock<Derived>::IsPoisoned() const {
-  derived()->CheckInvariantsIfStrict();
+constexpr bool PoisonableBlock<Derived>::IsPoisoned() const {
+  if constexpr (Hardening::kIncludesDebugChecks) {
+    derived()->CheckInvariants();
+  }
   return derived()->IsPoisonedUnchecked();
 }
 
 template <typename Derived>
-void PoisonableBlock<Derived>::Poison() {
-  derived()->CheckInvariantsIfStrict();
+constexpr void PoisonableBlock<Derived>::Poison() {
+  if constexpr (Hardening::kIncludesDebugChecks) {
+    derived()->CheckInvariants();
+  }
   auto* begin = PoisonableBegin();
   auto* end = PoisonableEnd();
   if (begin < end) {
     std::fill(begin, end, derived()->GetPoisonWord());
     derived()->SetPoisoned(true);
   }
-  derived()->CheckInvariantsIfStrict();
+  if constexpr (Hardening::kIncludesDebugChecks) {
+    derived()->CheckInvariants();
+  }
 }
 
 template <typename Derived>
-Derived* PoisonableBlock<Derived>::DoSplitFirst(size_t new_inner_size) {
+constexpr Derived* PoisonableBlock<Derived>::DoSplitFirst(
+    size_t new_inner_size) {
   bool should_poison = derived()->IsPoisoned();
   derived()->SetPoisoned(false);
   Derived* trailing =
@@ -173,7 +182,8 @@ Derived* PoisonableBlock<Derived>::DoSplitFirst(size_t new_inner_size) {
 }
 
 template <typename Derived>
-Derived* PoisonableBlock<Derived>::DoSplitLast(size_t new_inner_size) {
+constexpr Derived* PoisonableBlock<Derived>::DoSplitLast(
+    size_t new_inner_size) {
   bool should_poison = derived()->IsPoisoned();
   derived()->SetPoisoned(false);
   Derived* trailing =
@@ -185,42 +195,38 @@ Derived* PoisonableBlock<Derived>::DoSplitLast(size_t new_inner_size) {
 }
 
 template <typename Derived>
-void PoisonableBlock<Derived>::DoMergeNext() {
+constexpr void PoisonableBlock<Derived>::DoMergeNext() {
   // Repoisoning is handle by the `BlockAllocator::DoDeallocate`.
   derived()->SetPoisoned(false);
   derived()->ContiguousBlock<Derived>::DoMergeNext();
 }
 
 template <typename Derived>
-bool PoisonableBlock<Derived>::DoCheckInvariants(bool crash_on_failure) const {
-  auto addr = cpp20::bit_cast<uintptr_t>(this);
+constexpr bool PoisonableBlock<Derived>::DoCheckInvariants(bool strict) const {
   if (!derived()->IsPoisonedUnchecked()) {
     return true;
   }
-  if (!derived()->IsFreeUnchecked()) {
-    if (crash_on_failure) {
-      internal::CrashPoisonedWhileInUse(addr);
-    }
-    return false;
+
+  bool valid = derived()->IsFreeUnchecked();
+  if constexpr (Hardening::kIncludesDebugChecks) {
+    internal::CheckPoisonedWhileInUse(this, valid || !strict);
   }
+
   auto* begin = PoisonableBegin();
   auto* end = PoisonableEnd();
-  if (begin >= end) {
-    return true;
+  if (begin < end) {
+    valid &= std::all_of(
+        begin, end, [this](uintptr_t word) { return word == GetPoisonWord(); });
   }
-  bool poison_intact = std::all_of(
-      begin, end, [this](uintptr_t word) { return word == GetPoisonWord(); });
-  if (!poison_intact) {
-    if (crash_on_failure) {
-      internal::CrashPoisonCorrupted(addr);
-    }
-    return false;
+  if constexpr (Hardening::kIncludesDebugChecks) {
+    internal::CheckPoisonCorrupted(this, valid || !strict);
   }
-  return true;
+
+  return valid;
 }
 
 template <typename Derived>
-void PoisonableBlock<Derived>::SetFree(bool is_free) {
+constexpr void PoisonableBlock<Derived>::SetFree(bool is_free) {
   if (!is_free) {
     derived()->SetPoisoned(false);
   }

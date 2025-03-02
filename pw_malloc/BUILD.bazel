@@ -35,13 +35,6 @@ alias(
     actual = "pw_malloc.facade",
 )
 
-_COMMON_SRCS = ["malloc.cc"]
-
-_COMMON_HDRS = [
-    "public/pw_malloc/config.h",
-    "public/pw_malloc/malloc.h",
-]
-
 cc_library(
     name = "common",
     linkopts = [
@@ -61,7 +54,6 @@ cc_library(
         "//pw_allocator:allocator",
         "//pw_allocator:synchronized_allocator",
         "//pw_allocator:tracking_allocator",
-        "//pw_assert",
         "//pw_bytes",
         "//pw_preprocessor",
     ],
@@ -69,13 +61,17 @@ cc_library(
 
 pw_facade(
     name = "pw_malloc",
-    srcs = _COMMON_SRCS,
-    hdrs = _COMMON_HDRS,
+    srcs = ["malloc.cc"],
+    hdrs = [
+        "public/pw_malloc/config.h",
+        "public/pw_malloc/malloc.h",
+    ],
     backend = ":backend",
     strip_include_prefix = "public",
     deps = [
         ":common",
         ":config_override",
+        "//pw_assert:check",
     ],
     alwayslink = 1,
 )
@@ -238,8 +234,12 @@ cc_library(
 cc_library(
     name = "testing",
     testonly = True,
-    srcs = _COMMON_SRCS,
-    hdrs = _COMMON_HDRS + ["public/pw_malloc/internal/testing.h"],
+    srcs = ["malloc.cc"],
+    hdrs = [
+        "public/pw_malloc/config.h",
+        "public/pw_malloc/internal/testing.h",
+        "public/pw_malloc/malloc.h",
+    ],
     defines = [
         "PW_MALLOC_METRICS_INCLUDE=\\\"pw_malloc/internal/testing.h\\\"",
         "PW_MALLOC_METRICS_TYPE=::pw::malloc::internal::TestMetrics",
@@ -248,6 +248,7 @@ cc_library(
         "PW_MALLOC_NUM_BUCKETS=4",
     ],
     implementation_deps = [
+        "//pw_assert:check",
         "//pw_tokenizer:decoder",
     ],
     strip_include_prefix = "public",

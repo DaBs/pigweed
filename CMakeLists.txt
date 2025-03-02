@@ -12,7 +12,7 @@
 # License for the specific language governing permissions and limitations under
 # the License.
 
-cmake_minimum_required(VERSION 3.16)
+cmake_minimum_required(VERSION 3.20)
 project(Pigweed)
 
 # Do not rely on the PW_ROOT environment variable being set through bootstrap.
@@ -109,8 +109,8 @@ add_subdirectory(pw_hex_dump EXCLUDE_FROM_ALL)
 add_subdirectory(pw_hdlc EXCLUDE_FROM_ALL)
 add_subdirectory(pw_i2c EXCLUDE_FROM_ALL)
 add_subdirectory(pw_interrupt EXCLUDE_FROM_ALL)
-add_subdirectory(pw_interrupt_cortex_a EXCLUDE_FROM_ALL)
 add_subdirectory(pw_interrupt_cortex_m EXCLUDE_FROM_ALL)
+add_subdirectory(pw_interrupt_freertos EXCLUDE_FROM_ALL)
 add_subdirectory(pw_interrupt_zephyr EXCLUDE_FROM_ALL)
 add_subdirectory(pw_intrusive_ptr EXCLUDE_FROM_ALL)
 add_subdirectory(pw_json EXCLUDE_FROM_ALL)

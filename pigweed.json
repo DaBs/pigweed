@@ -213,12 +213,12 @@
           ],
           [
             "build",
-            "--config=k_qemu_lm3s6965evb",
+            "--config=k_qemu_mps2_an505",
             "//pw_kernel/..."
           ],
           [
             "test",
-            "--config=k_qemu_lm3s6965evb",
+            "--config=k_qemu_mps2_an505",
             "//pw_kernel/..."
           ],
           [
@@ -227,12 +227,14 @@
             "//pw_kernel/..."
           ]
         ],
-        "sanitizers": [
+        "clang-tidy": [
           [
             "build",
             "--config=clang-tidy",
             "//..."
-          ],
+          ]
+        ],
+        "asan": [
           [
             "test",
             "--config=asan",
@@ -243,7 +245,9 @@
             "--config=asan",
             "--config=googletest",
             "//..."
-          ],
+          ]
+        ],
+        "tsan": [
           [
             "test",
             "--config=tsan",
@@ -254,7 +258,9 @@
             "--config=tsan",
             "--config=googletest",
             "//..."
-          ],
+          ]
+        ],
+        "ubsan": [
           [
             "test",
             "--config=ubsan",

@@ -25,7 +25,7 @@
 #include "pw_containers/flat_map.h"
 #include "pw_status/status.h"
 #include "pw_status/try.h"
-#include "pw_unit_test/framework.h"  // IWYU pragma: keep
+#include "pw_unit_test/framework.h"
 
 namespace pw::bluetooth::proxy {
 namespace {
@@ -357,12 +357,11 @@ TEST_F(RfcommWriteTest, WriteFlowControl) {
       [](H4PacketWithHci&&) {});
   pw::Function<void(H4PacketWithH4 && packet)> send_to_controller_fn(
       [&capture](H4PacketWithH4&&) { ++capture.sends_called; });
-  pw::Function<void(L2capChannelEvent event)> event_fn(
-      [&capture](L2capChannelEvent event) {
-        if (event == L2capChannelEvent::kWriteAvailable) {
-          ++capture.queue_unblocked;
-        }
-      });
+  ChannelEventCallback event_fn([&capture](L2capChannelEvent event) {
+    if (event == L2capChannelEvent::kWriteAvailable) {
+      ++capture.queue_unblocked;
+    }
+  });
 
   ProxyHost proxy = ProxyHost(
       std::move(send_to_host_fn),

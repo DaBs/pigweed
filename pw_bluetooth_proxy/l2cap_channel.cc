@@ -24,6 +24,7 @@
 #include "pw_bluetooth_proxy/internal/l2cap_channel_manager.h"
 #include "pw_bluetooth_proxy/l2cap_channel_common.h"
 #include "pw_log/log.h"
+#include "pw_span/cast.h"
 #include "pw_status/status.h"
 #include "pw_status/try.h"
 
@@ -131,6 +132,20 @@ void L2capChannel::InternalClose(L2capChannelEvent event) {
 
 void L2capChannel::Undefine() { state_ = State::kUndefined; }
 
+StatusWithMultiBuf L2capChannel::Write(pw::multibuf::MultiBuf&& payload) {
+  StatusWithMultiBuf result = WriteLocked(std::move(payload));
+  l2cap_channel_manager_.DrainChannelQueuesIfNewTx();
+  return result;
+}
+
+StatusWithMultiBuf L2capChannel::WriteLocked(pw::multibuf::MultiBuf&& payload) {
+  if (UsesPayloadQueue()) {
+    return WriteToPayloadQueue(std::move(payload));
+  } else {
+    return WriteToPduQueue(std::move(payload));
+  }
+}
+
 Status L2capChannel::QueuePacket(H4PacketWithH4&& packet) {
   PW_CHECK(!UsesPayloadQueue());
 
@@ -149,18 +164,9 @@ Status L2capChannel::QueuePacket(H4PacketWithH4&& packet) {
       status = OkStatus();
     }
   }
-  ReportPacketsMayBeReadyToSend();
+  l2cap_channel_manager_.ForceDrainChannelQueues();
   return status;
 }
-
-namespace {
-
-// TODO: https://pwbug.dev/389724307 - Move to pw utility function once created.
-pw::span<const uint8_t> AsConstUint8Span(ConstByteSpan s) {
-  return {reinterpret_cast<const uint8_t*>(s.data()), s.size_bytes()};
-}
-
-}  // namespace
 
 StatusWithMultiBuf L2capChannel::WriteToPayloadQueue(
     multibuf::MultiBuf&& payload) {
@@ -192,7 +198,7 @@ StatusWithMultiBuf L2capChannel::WriteToPduQueue(multibuf::MultiBuf&& payload) {
 
   std::optional<ByteSpan> span = payload.ContiguousSpan();
   PW_CHECK(span.has_value());
-  Status status = Write(AsConstUint8Span(span.value()));
+  Status status = Write(span_cast<const uint8_t>(*span));
 
   if (!status.ok()) {
     return {status, std::move(payload)};
@@ -263,7 +269,7 @@ StatusWithMultiBuf L2capChannel::QueuePayload(multibuf::MultiBuf&& buf) {
     payload_queue_.push(std::move(buf));
   }
 
-  ReportPacketsMayBeReadyToSend();
+  ReportNewTxPacketsOrCredits();
   return {OkStatus(), std::nullopt};
 }
 
@@ -305,7 +311,7 @@ L2capChannel::L2capChannel(
     uint16_t remote_cid,
     OptionalPayloadReceiveCallback&& payload_from_controller_fn,
     OptionalPayloadReceiveCallback&& payload_from_host_fn,
-    Function<void(L2capChannelEvent event)>&& event_fn)
+    ChannelEventCallback&& event_fn)
     : l2cap_channel_manager_(l2cap_channel_manager),
       state_(State::kRunning),
       connection_handle_(connection_handle),
@@ -460,8 +466,13 @@ std::optional<uint16_t> L2capChannel::MaxL2capPayloadSize() const {
   return max_acl_data_size - emboss::BasicL2capHeader::IntrinsicSizeInBytes();
 }
 
-void L2capChannel::ReportPacketsMayBeReadyToSend() {
-  l2cap_channel_manager_.DrainChannelQueues();
+void L2capChannel::ReportNewTxPacketsOrCredits() {
+  l2cap_channel_manager_.ReportNewTxPacketsOrCredits();
+}
+
+void L2capChannel::DrainChannelQueuesIfNewTx()
+    PW_LOCKS_EXCLUDED(send_queue_mutex_) {
+  l2cap_channel_manager_.DrainChannelQueuesIfNewTx();
 }
 
 void L2capChannel::ClearQueue() {

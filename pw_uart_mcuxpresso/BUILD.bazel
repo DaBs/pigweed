@@ -30,6 +30,7 @@ cc_library(
     name = "dma_uart",
     srcs = ["dma_uart.cc"],
     hdrs = ["public/pw_uart_mcuxpresso/dma_uart.h"],
+    implementation_deps = ["//pw_assert:check"],
     local_defines = log_defines,
     strip_include_prefix = "public",
     target_compatible_with = [
@@ -52,13 +53,14 @@ pw_cc_test(
     target_compatible_with = [
         "//pw_build/constraints/board:mimxrt595_evk",
     ],
-    deps = [":pw_uart_mcuxpresso"],
+    deps = [":dma_uart"],
 )
 
 cc_library(
     name = "dma_uart_nonblocking",
     srcs = ["dma_uart_nonblocking.cc"],
     hdrs = ["public/pw_uart_mcuxpresso/dma_uart_nonblocking.h"],
+    implementation_deps = ["//pw_assert:check"],
     local_defines = log_defines,
     strip_include_prefix = "public",
     target_compatible_with = [
@@ -67,6 +69,7 @@ cc_library(
     deps = [
         "//pw_clock_tree",
         "//pw_dma_mcuxpresso",
+        "//pw_log",
         "//pw_preprocessor",
         "//pw_sync:interrupt_spin_lock",
         "//pw_uart:uart_non_blocking",
@@ -80,7 +83,10 @@ pw_cc_test(
     target_compatible_with = [
         "//pw_build/constraints/board:mimxrt595_evk",
     ],
-    deps = [":pw_uart_mcuxpresso"],
+    deps = [
+        ":dma_uart_nonblocking",
+        "//pw_uart:blocking_adapter",
+    ],
 )
 
 sphinx_docs_library(

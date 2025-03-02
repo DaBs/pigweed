@@ -13,7 +13,7 @@
 # the License.
 include_guard(GLOBAL)
 
-cmake_minimum_required(VERSION 3.19)
+cmake_minimum_required(VERSION 3.20)
 
 # The PW_ROOT environment variable should be set in bootstrap. If it is not set,
 # set it to the root of the Pigweed repository.
@@ -51,7 +51,9 @@ include("$ENV{PW_ROOT}/pw_unit_test/test.cmake")
 #                        <multi_value_keywords>)
 #
 macro(pw_parse_arguments)
-  # First parse the arguments to this macro.
+  if(POLICY CMP0174)
+    cmake_policy(SET CMP0174 NEW)  # Remove when CMake 3.31 or newer is required.
+  endif()
   cmake_parse_arguments(
     pw_parse_arg "" "NUM_POSITIONAL_ARGS"
     "OPTION_ARGS;ONE_VALUE_ARGS;MULTI_VALUE_ARGS;REQUIRED_ARGS"
@@ -64,30 +66,26 @@ macro(pw_parse_arguments)
   endif()
 
   # Now that we have the macro's arguments, process the caller's arguments.
-  pw_parse_arguments_strict("${CMAKE_CURRENT_FUNCTION}"
+  cmake_parse_arguments(PARSE_ARGV
     "${pw_parse_arg_NUM_POSITIONAL_ARGS}"
+    arg
     "${pw_parse_arg_OPTION_ARGS}"
     "${pw_parse_arg_ONE_VALUE_ARGS}"
     "${pw_parse_arg_MULTI_VALUE_ARGS}"
   )
-  pw_require_args("${CMAKE_CURRENT_FUNCTION}" "arg_"
-                  ${pw_parse_arg_REQUIRED_ARGS})
-endmacro()
-
-# TODO(ewout, hepler): Deprecate this function in favor of pw_parse_arguments.
-# Wrapper around cmake_parse_arguments that fails with an error if any arguments
-# remained unparsed.
-macro(pw_parse_arguments_strict function start_arg options one multi)
-  cmake_parse_arguments(PARSE_ARGV
-      "${start_arg}" arg "${options}" "${one}" "${multi}"
-  )
   if(NOT "${arg_UNPARSED_ARGUMENTS}" STREQUAL "")
-    set(_all_args ${options} ${one} ${multi})
+    set(_all_args
+        ${pw_parse_arg_OPTION_ARGS}
+        ${pw_parse_arg_ONE_VALUE_ARGS}
+        ${pw_parse_arg_MULTI_VALUE_ARGS})
     message(FATAL_ERROR
-        "Unexpected arguments to ${function}: ${arg_UNPARSED_ARGUMENTS}\n"
+        "Unexpected arguments to ${CMAKE_CURRENT_FUNCTION}: "
+        "${arg_UNPARSED_ARGUMENTS}\n"
         "Valid arguments: ${_all_args}"
     )
   endif()
+  pw_require_args("${CMAKE_CURRENT_FUNCTION}" "arg_"
+                  ${pw_parse_arg_REQUIRED_ARGS})
 endmacro()
 
 # Checks that one or more variables are set. This is used to check that

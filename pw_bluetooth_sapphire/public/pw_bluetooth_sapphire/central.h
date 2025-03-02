@@ -15,6 +15,7 @@
 #pragma once
 
 #include "pw_bluetooth/low_energy/central2.h"
+#include "pw_bluetooth_sapphire/internal/connection.h"
 #include "pw_bluetooth_sapphire/internal/host/gap/adapter.h"
 #include "pw_multibuf/allocator.h"
 
@@ -89,7 +90,6 @@ class Central final : public pw::bluetooth::low_energy::Central2 {
     // Must be run on Bluetooth thread. Not thread safe.
     explicit ScanState(
         std::unique_ptr<bt::gap::LowEnergyDiscoverySession> session,
-        std::vector<bt::gap::DiscoveryFilter> filters,
         ScanHandleImpl* scan_handle,
         uint16_t scan_id,
         Central* central);
@@ -115,12 +115,16 @@ class Central final : public pw::bluetooth::low_energy::Central2 {
     // Members must only be accessed on Bluetooth thread.
     Central* const central_;
     std::unique_ptr<bt::gap::LowEnergyDiscoverySession> session_;
-    const std::vector<bt::gap::DiscoveryFilter> filters_;
   };
 
   // Asynchronously stops the scan corresponding to `scan_id` and synchronously
   // clears `ScanState.scan_handle_`.
   void StopScanLocked(uint16_t scan_id) PW_EXCLUSIVE_LOCKS_REQUIRED(lock());
+
+  void OnConnectionResult(bt::PeerId peer_id,
+                          bt::gap::Adapter::LowEnergy::ConnectionResult result,
+                          async2::OnceSender<ConnectResult> result_sender)
+      PW_LOCKS_EXCLUDED(lock());
 
   std::unordered_map<uint16_t, ScanState> scans_ PW_GUARDED_BY(lock());
 
@@ -128,7 +132,8 @@ class Central final : public pw::bluetooth::low_energy::Central2 {
   bt::gap::Adapter::WeakPtr adapter_;
 
   // Dispatcher for Bluetooth thread. Thread safe.
-  pw::async::HeapDispatcher dispatcher_;
+  pw::async::Dispatcher& dispatcher_;
+  pw::async::HeapDispatcher heap_dispatcher_;
 
   pw::multibuf::MultiBufAllocator& allocator_;
 

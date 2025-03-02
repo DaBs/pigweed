@@ -29,10 +29,9 @@
 #include "pw_bluetooth_proxy/l2cap_channel_common.h"
 #include "pw_bluetooth_proxy/l2cap_status_delegate.h"
 #include "pw_bluetooth_proxy/proxy_host.h"
-#include "pw_function/function.h"
 #include "pw_status/status.h"
 #include "pw_status/try.h"
-#include "pw_unit_test/framework.h"  // IWYU pragma: keep
+#include "pw_unit_test/framework.h"
 
 namespace pw::bluetooth::proxy {
 
@@ -506,7 +505,7 @@ RfcommChannel ProxyHostTest::BuildRfcomm(
     ProxyHost& proxy,
     RfcommParameters params,
     Function<void(multibuf::MultiBuf&& payload)>&& receive_fn,
-    Function<void(L2capChannelEvent event)>&& event_fn) {
+    ChannelEventCallback&& event_fn) {
   pw::Result<RfcommChannel> channel = proxy.AcquireRfcommChannel(
       sut_multibuf_allocator_,
       params.handle,
@@ -526,8 +525,7 @@ RfcommChannel ProxyHostTest::BuildRfcomm(
 }
 
 OneOfEachChannel ProxyHostTest::BuildOneOfEachChannel(
-    ProxyHost& proxy,
-    Function<void(L2capChannelEvent event)>& shared_event_fn) {
+    ProxyHost& proxy, ChannelEventCallback& shared_event_fn) {
   // Each channel its unique cids and its own rvalue lambda which calls the
   // shared_event_fn.
   return OneOfEachChannel(

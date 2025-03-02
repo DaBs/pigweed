@@ -27,11 +27,11 @@ cc_library(
     hdrs = [
         "metrics.h",
     ],
+    implementation_deps = ["//pw_assert:check"],
     includes = ["."],
     deps = [
-        "//pw_assert",
         "//pw_bytes",
-        "//pw_containers",
+        "//pw_containers:vector",
         "//pw_status",
         "//pw_string",
     ],
@@ -50,7 +50,6 @@ pw_cc_test(
     deps = [
         ":metrics_lib",
         "//pw_fuzzer:fuzztest",  # <- Added!
-        "//pw_unit_test",
     ],
 )
 # DOCSTAG: [pwfuzzer_examples_fuzztest-bazel]

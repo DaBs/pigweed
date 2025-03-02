@@ -18,10 +18,12 @@ import { glob } from 'glob';
 
 import { settings, workingDir } from '../settings/vscode';
 
-const CDB_FILE_NAME = 'compile_commands.json' as const;
+export const CDB_FILE_NAME = 'compile_commands.json' as const;
+
+export const CDB_FILE_DIR = '.compile_commands';
 
 const CDB_FILE_DIRS = [
-  '.compile_commands',
+  CDB_FILE_DIR,
   '.pw_ide', // The legacy pw_ide directory
 ];
 
@@ -47,7 +49,7 @@ export class Target {
   }
 
   get path() {
-    return path.join(this._dir, this._name);
+    return path.join(this._dir, this._name, CDB_FILE_NAME);
   }
 }
 

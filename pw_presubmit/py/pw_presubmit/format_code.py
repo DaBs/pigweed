@@ -36,7 +36,6 @@ from typing import (
     Collection,
     Iterable,
     NamedTuple,
-    Optional,
     Pattern,
 )
 
@@ -337,13 +336,11 @@ def _enumerate_black_configs() -> Iterable[Path]:
         yield Path(directory, 'pyproject.toml')
 
 
-def _select_black_config_file() -> Optional[Path]:
-    config = None
+def _select_black_config_file() -> Path | bool:
     for config_location in _enumerate_black_configs():
         if config_location.is_file():
-            config = config_location
-            break
-    return config
+            return config_location
+    return False
 
 
 def check_py_format_black(ctx: _Context) -> dict[Path, str]:
@@ -516,14 +513,14 @@ JAVA_FORMAT: CodeFormat = CodeFormat(
 
 JAVASCRIPT_FORMAT: CodeFormat = CodeFormat(
     'JavaScript',
-    FileFilter(endswith=['.js']),
+    FileFilter(endswith=['.js', '.mjs', '.cjs']),
     typescript_format_check,
     typescript_format_fix,
 )
 
 TYPESCRIPT_FORMAT: CodeFormat = CodeFormat(
     'TypeScript',
-    FileFilter(endswith=['.ts']),
+    FileFilter(endswith=['.ts', '.mts', '.cts']),
     typescript_format_check,
     typescript_format_fix,
 )

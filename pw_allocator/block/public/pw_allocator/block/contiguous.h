@@ -15,9 +15,8 @@
 
 #include "lib/stdcompat/bit.h"
 #include "pw_allocator/block/basic.h"
+#include "pw_allocator/hardening.h"
 #include "pw_bytes/span.h"
-#include "pw_result/result.h"
-#include "pw_status/status.h"
 
 namespace pw::allocator {
 namespace internal {
@@ -37,10 +36,6 @@ struct ContiguousBase {};
 /// This mix-in requires its derived type also derive from `BasicBlock`, and
 /// provide the following symbols:
 ///
-/// - static constexpr size_t MaxAddressableSize()
-///   - Size of the largest region that can be addressed by a block.
-/// - static Derived* AsBlock(BytesSpan)
-///   - Instantiates and returns a block for the given region of memory.
 /// - size_t PrevOuterSizeUnchecked() const
 ///   - Returns the outer size of the previous block, if any, or zero.  Must be
 ///     multiple of `kAlignment`.
@@ -58,32 +53,13 @@ class ContiguousBlock : public internal::ContiguousBase {
   }
 
  public:
-  static constexpr size_t kMaxAddressableSize = Derived::MaxAddressableSize();
-
-  /// @brief Creates the first block for a given memory region.
-  ///
-  /// @returns @rst
-  ///
-  /// .. pw-status-codes::
-  ///
-  ///    OK: Returns a block representing the region.
-  ///
-  ///    INVALID_ARGUMENT: The region is null.
-  ///
-  ///    RESOURCE_EXHAUSTED: The region is too small for a block.
-  ///
-  ///    OUT_OF_RANGE: The region is larger than `kMaxAddressableSize`.
-  ///
-  /// @endrst
-  static Result<Derived*> Init(ByteSpan region);
-
   /// @returns the block immediately before this one, or null if this is the
   /// first block.
-  inline Derived* Prev() const;
+  constexpr Derived* Prev() const;
 
   /// @returns the block immediately after this one, or null if this is the last
   /// block.
-  inline Derived* Next() const;
+  constexpr Derived* Next() const;
 
  protected:
   /// Split a block into two smaller blocks.
@@ -95,7 +71,7 @@ class ContiguousBlock : public internal::ContiguousBase {
   /// @pre The block must not be in use.
   /// @pre The block must have enough usable space for the requested size.
   /// @pre The space remaining after a split can hold a new block.
-  Derived* DoSplitFirst(size_t new_inner_size);
+  constexpr Derived* DoSplitFirst(size_t new_inner_size);
 
   /// Split a block into two smaller blocks.
   ///
@@ -106,7 +82,7 @@ class ContiguousBlock : public internal::ContiguousBase {
   /// @pre The block must not be in use.
   /// @pre The block must have enough usable space for the requested size.
   /// @pre The space remaining after a split can hold a new block.
-  Derived* DoSplitLast(size_t new_inner_size);
+  constexpr Derived* DoSplitLast(size_t new_inner_size);
 
   /// Merges this block with next block.
   ///
@@ -114,10 +90,10 @@ class ContiguousBlock : public internal::ContiguousBase {
   /// pointer with a pointer to the new, larger block.
   ///
   /// @pre The blocks must not be in use.
-  void DoMergeNext();
+  constexpr void DoMergeNext();
 
   /// Performs the ContiguousBlock invariant checks.
-  bool DoCheckInvariants(bool crash_on_failure) const;
+  constexpr bool DoCheckInvariants(bool strict) const;
 
  private:
   constexpr Derived* derived() { return static_cast<Derived*>(this); }
@@ -126,10 +102,10 @@ class ContiguousBlock : public internal::ContiguousBase {
   }
 
   /// @copydoc Prev
-  Derived* PrevUnchecked() const;
+  constexpr Derived* PrevUnchecked() const;
 
   /// @copydoc Next
-  Derived* NextUnchecked() const;
+  constexpr Derived* NextUnchecked() const;
 
   /// Split a block into two smaller blocks.
   ///
@@ -140,10 +116,10 @@ class ContiguousBlock : public internal::ContiguousBase {
   /// @pre The block must not be in use.
   /// @pre The block must have enough usable space for the requested size.
   /// @pre The space remaining after a split can hold a new block.
-  static Derived* Split(Derived*& block, size_t new_inner_size);
+  static constexpr Derived* Split(Derived*& block, size_t new_inner_size);
 
   /// Consumes the block and returns as a span of bytes.
-  static ByteSpan AsBytes(Derived*&& block);
+  static constexpr ByteSpan AsBytes(Derived*&& block);
 
   // PoisonableBlock calls DoSplitFirst, DoSplitLast, and DoMergeNext
   template <typename>
@@ -156,76 +132,85 @@ struct is_contiguous : std::is_base_of<internal::ContiguousBase, BlockType> {};
 
 /// Helper variable template for `is_contiguous<BlockType>::value`.
 template <typename BlockType>
-inline constexpr bool is_contiguous_v = is_contiguous<BlockType>::value;
+constexpr bool is_contiguous_v = is_contiguous<BlockType>::value;
 
 namespace internal {
 
 /// Functions to crash with an error message describing which block invariant
 /// has been violated. These functions are implemented independent of any
 /// template parameters to allow them to use `PW_CHECK`.
-void CrashNextMisaligned(uintptr_t addr, uintptr_t next);
-void CrashNextPrevMismatched(uintptr_t addr,
-                             uintptr_t next,
-                             uintptr_t next_prev);
-void CrashPrevMisaligned(uintptr_t addr, uintptr_t prev);
-void CrashPrevNextMismatched(uintptr_t addr,
-                             uintptr_t prev,
-                             uintptr_t prev_next);
+
+/// Crashes with an error message about the next block being misaligned if
+/// `next_is_aligned` is false.
+void CheckNextMisaligned(const void* block,
+                         const void* next,
+                         bool next_is_aligned);
+
+/// Crashes with an error message about the next block being corrupted if
+/// `next_prev_matches` is false.
+void CheckNextPrevMismatched(const void* block,
+                             const void* next,
+                             const void* next_prev,
+                             bool next_prev_matches);
+
+/// Crashes with an error message about the previous block being misaligned if
+/// `prev_is_aligned` is false.
+void CheckPrevMisaligned(const void* block,
+                         const void* prev,
+                         bool prev_is_aligned);
+
+/// Crashes with an error message about the previous block being corrupted if
+/// `prev_next_matches` is false.
+void CheckPrevNextMismatched(const void* block,
+                             const void* prev,
+                             const void* prev_next,
+                             bool prev_next_matches);
 
 }  // namespace internal
 
 // Template method implementations.
 
 template <typename Derived>
-Result<Derived*> ContiguousBlock<Derived>::Init(ByteSpan region) {
-  region = GetAlignedSubspan(region, Derived::kAlignment);
-  if (region.size() <= Derived::kBlockOverhead) {
-    return Status::ResourceExhausted();
+constexpr Derived* ContiguousBlock<Derived>::Prev() const {
+  if constexpr (Hardening::kIncludesDebugChecks) {
+    derived()->CheckInvariants();
   }
-  if (region.size() > Derived::MaxAddressableSize()) {
-    return Status::OutOfRange();
-  }
-  auto* block = Derived::AsBlock(region);
-  block->CheckInvariantsIfStrict();
-  return block;
-}
-
-template <typename Derived>
-Derived* ContiguousBlock<Derived>::Prev() const {
-  derived()->CheckInvariantsIfStrict();
   return PrevUnchecked();
 }
 
 template <typename Derived>
-Derived* ContiguousBlock<Derived>::PrevUnchecked() const {
+constexpr Derived* ContiguousBlock<Derived>::PrevUnchecked() const {
   size_t prev_outer_size = derived()->PrevOuterSizeUnchecked();
   if (prev_outer_size == 0) {
     return nullptr;
   }
   auto addr = cpp20::bit_cast<uintptr_t>(this);
-  PW_ASSERT(!PW_SUB_OVERFLOW(addr, prev_outer_size, &addr));
+  Hardening::Decrement(addr, prev_outer_size);
   return std::launder(reinterpret_cast<Derived*>(addr));
 }
 
 template <typename Derived>
-Derived* ContiguousBlock<Derived>::Next() const {
-  derived()->CheckInvariantsIfStrict();
+constexpr Derived* ContiguousBlock<Derived>::Next() const {
+  if constexpr (Hardening::kIncludesDebugChecks) {
+    derived()->CheckInvariants();
+  }
   return NextUnchecked();
 }
 
 template <typename Derived>
-Derived* ContiguousBlock<Derived>::NextUnchecked() const {
+constexpr Derived* ContiguousBlock<Derived>::NextUnchecked() const {
   if (derived()->IsLastUnchecked()) {
     return nullptr;
   }
   size_t outer_size = derived()->OuterSizeUnchecked();
   auto addr = cpp20::bit_cast<uintptr_t>(this);
-  PW_ASSERT(!PW_ADD_OVERFLOW(addr, outer_size, &addr));
+  Hardening::Increment(addr, outer_size);
   return std::launder(reinterpret_cast<Derived*>(addr));
 }
 
 template <typename Derived>
-Derived* ContiguousBlock<Derived>::DoSplitFirst(size_t new_inner_size) {
+constexpr Derived* ContiguousBlock<Derived>::DoSplitFirst(
+    size_t new_inner_size) {
   Derived* next = derived()->Next();
   size_t new_outer_size = Derived::kBlockOverhead + new_inner_size;
   ByteSpan bytes(derived()->UsableSpace(), derived()->InnerSize());
@@ -237,13 +222,14 @@ Derived* ContiguousBlock<Derived>::DoSplitFirst(size_t new_inner_size) {
 }
 
 template <typename Derived>
-Derived* ContiguousBlock<Derived>::DoSplitLast(size_t new_inner_size) {
+constexpr Derived* ContiguousBlock<Derived>::DoSplitLast(
+    size_t new_inner_size) {
   size_t new_outer_size = Derived::kBlockOverhead + new_inner_size;
   return DoSplitFirst(derived()->InnerSize() - new_outer_size);
 }
 
 template <typename Derived>
-void ContiguousBlock<Derived>::DoMergeNext() {
+constexpr void ContiguousBlock<Derived>::DoMergeNext() {
   Derived* next = derived()->Next();
   if (next != nullptr) {
     size_t outer_size = derived()->OuterSize() + next->OuterSize();
@@ -252,45 +238,40 @@ void ContiguousBlock<Derived>::DoMergeNext() {
 }
 
 template <typename Derived>
-bool ContiguousBlock<Derived>::DoCheckInvariants(bool crash_on_failure) const {
-  auto addr = cpp20::bit_cast<uintptr_t>(this);
+constexpr bool ContiguousBlock<Derived>::DoCheckInvariants(bool strict) const {
+  bool valid = true;
+
   Derived* next = derived()->NextUnchecked();
   if (next != nullptr) {
-    auto next_addr = cpp20::bit_cast<uintptr_t>(next);
-    if (next_addr % Derived::kAlignment != 0) {
-      if (crash_on_failure) {
-        internal::CrashNextMisaligned(addr, next_addr);
-      }
-      return false;
+    valid &= (cpp20::bit_cast<uintptr_t>(next) % Derived::kAlignment) == 0;
+    if constexpr (Hardening::kIncludesDebugChecks) {
+      internal::CheckNextMisaligned(this, next, valid || !strict);
     }
+
     Derived* next_prev = next->PrevUnchecked();
-    if (this != next_prev) {
-      if (crash_on_failure) {
-        auto next_prev_addr = cpp20::bit_cast<uintptr_t>(next_prev);
-        internal::CrashNextPrevMismatched(addr, next_addr, next_prev_addr);
-      }
-      return false;
+    valid &= this == next_prev;
+    if constexpr (Hardening::kIncludesDebugChecks) {
+      internal::CheckNextPrevMismatched(
+          this, next, next_prev, valid || !strict);
     }
   }
+
   Derived* prev = derived()->PrevUnchecked();
   if (prev != nullptr) {
-    auto prev_addr = cpp20::bit_cast<uintptr_t>(prev);
-    if (prev_addr % Derived::kAlignment != 0) {
-      if (crash_on_failure) {
-        internal::CrashPrevMisaligned(addr, prev_addr);
-      }
-      return false;
+    valid &= (cpp20::bit_cast<uintptr_t>(prev) % Derived::kAlignment) == 0;
+    if constexpr (Hardening::kIncludesDebugChecks) {
+      internal::CheckPrevMisaligned(this, prev, valid || !strict);
     }
+
     Derived* prev_next = prev->NextUnchecked();
-    auto prev_next_addr = cpp20::bit_cast<uintptr_t>(prev_next);
-    if (this != prev_next) {
-      if (crash_on_failure) {
-        internal::CrashPrevNextMismatched(addr, prev_addr, prev_next_addr);
-      }
-      return false;
+    valid &= this == prev_next;
+    if constexpr (Hardening::kIncludesDebugChecks) {
+      internal::CheckPrevNextMismatched(
+          this, prev, prev_next, valid || !strict);
     }
   }
-  return true;
+
+  return valid;
 }
 
 }  // namespace pw::allocator

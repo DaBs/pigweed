@@ -21,6 +21,8 @@ cc_library_static {
     cpp_std: "c++20",
     vendor_available: true,
     host_supported: true,
+
+    // LINT.IfChange
     srcs: [
         "acl_data_channel.cc",
         "basic_l2cap_channel.cc",
@@ -33,6 +35,7 @@ cc_library_static {
         "l2cap_leu_signaling_channel.cc",
         "l2cap_signaling_channel.cc",
         "l2cap_status_tracker.cc",
+        "multibuf_writer.cc",
         "proxy_host.cc",
         "rfcomm_channel.cc",
         "rfcomm_fcs.cc",
@@ -50,6 +53,7 @@ cc_library_static {
         "pw_multibuf",
         "pw_result",
         "pw_span",
+        "pw_span_cast",
         "pw_status",
     ],
     export_static_lib_headers: [
@@ -86,4 +90,6 @@ cc_library_static {
         "pw_bluetooth_generate_emboss_l2cap_frames",
         "pw_bluetooth_generate_emboss_rfcomm_frames",
     ],
+    // LINT.ThenChange(BUILD.gn, BUILD.bazel, CMakeLists.txt)
+
 }

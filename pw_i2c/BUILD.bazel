@@ -39,10 +39,8 @@ cc_library(
     hdrs = [
         "public/pw_i2c/address.h",
     ],
+    implementation_deps = ["//pw_assert:check"],
     strip_include_prefix = "public",
-    deps = [
-        "//pw_assert",
-    ],
 )
 
 cc_library(
@@ -80,12 +78,12 @@ cc_library(
     hdrs = [
         "public/pw_i2c/register_device.h",
     ],
+    implementation_deps = ["//pw_assert:check"],
     strip_include_prefix = "public",
     deps = [
         ":address",
         ":device",
         ":initiator",
-        "//pw_assert",
         "//pw_bytes",
         "//pw_chrono:system_clock",
         "//pw_result",
@@ -98,10 +96,7 @@ pw_cc_test(
     srcs = [
         "address_test.cc",
     ],
-    deps = [
-        ":address",
-        "//pw_unit_test",
-    ],
+    deps = [":address"],
 )
 
 cc_library(
@@ -109,15 +104,16 @@ cc_library(
     testonly = True,
     srcs = ["initiator_mock.cc"],
     hdrs = ["public/pw_i2c/initiator_mock.h"],
+    implementation_deps = [
+        "//pw_assert:check",
+        "//pw_containers:algorithm",
+    ],
     strip_include_prefix = "public",
     deps = [
         ":address",
         ":initiator",
-        "//pw_assert",
         "//pw_bytes",
         "//pw_chrono:system_clock",
-        "//pw_containers",
-        "//pw_containers:algorithm",
         "//pw_containers:to_array",
         "//pw_unit_test",
     ],
@@ -150,7 +146,6 @@ pw_cc_test(
         "//pw_chrono:system_clock",
         "//pw_containers:algorithm",
         "//pw_span",
-        "//pw_unit_test",
     ],
 )
 
@@ -162,10 +157,8 @@ pw_cc_test(
     deps = [
         ":device",
         ":initiator_mock",
-        "//pw_assert",
         "//pw_bytes",
         "//pw_containers:algorithm",
-        "//pw_unit_test",
     ],
 )
 
@@ -176,9 +169,8 @@ pw_cc_test(
     ],
     deps = [
         ":register_device",
-        "//pw_assert",
+        "//pw_assert:check",
         "//pw_bytes",
-        "//pw_unit_test",
     ],
 )
 
@@ -213,15 +205,17 @@ cc_library(
     name = "i2c_service",
     srcs = ["i2c_service.cc"],
     hdrs = ["public/pw_i2c/i2c_service.h"],
+    implementation_deps = [
+        "//pw_assert:check",
+        "//pw_containers:vector",
+    ],
     strip_include_prefix = "public",
     deps = [
         ":address",
         ":i2c_pwpb",
         ":i2c_pwpb_rpc",
         ":initiator",
-        "//pw_assert",
         "//pw_chrono:system_clock",
-        "//pw_containers:vector",
         "//pw_function",
         "//pw_rpc/pwpb:server_api",
         "//pw_status",
@@ -237,7 +231,6 @@ pw_cc_test(
         ":initiator",
         ":initiator_mock",
         "//pw_chrono:system_clock",
-        "//pw_containers:vector",
         "//pw_rpc/pwpb:test_method_context",
         "//pw_status",
     ],

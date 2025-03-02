@@ -15,28 +15,10 @@
 
 # Standard flags required for all Pigweed projects.
 import %workspace%/pw_build/pigweed.bazelrc
+import %workspace%/pw_build/pigweed_recommended.bazelrc
 
 # TODO: https://pwbug.dev/258836641 - Only until bzlmod migration is done.
 common --enable_workspace
-
-# UX flags
-# ========
-# Improve debugability by printing all arguments for failing commands.
-common --verbose_failures
-
-# Suppress the DEBUG: log messages from bazel. We get lots of spammy DEBUG:
-# messages from our third-party dependencies.
-build --ui_event_filters=-debug
-
-# Specifies desired output mode for running tests.
-# Valid values are
-#   'summary' to output only test status summary
-#   'errors' to also print test logs for failed tests
-#   'all' to print logs for all tests
-#   'streamed' to output logs for all tests in real time
-#     (this will force tests to be executed locally one at a time regardless
-#     of --test_strategy value).
-test --test_output=errors
 
 # Default build_tag_filters and test_tag_filters
 # ==============================================
@@ -51,16 +33,6 @@ test --test_tag_filters=-integration,-do_not_build,-do_not_run_test,-kernel
 
 # C++ related flags
 # =================
-# Do not strip debug symbols by default.
-common --strip=never
-
-# Silence all C/C++ warnings in external code.
-#
-# Note that this will not silence warnings from external headers #include'd in
-# first-party code.
-common --per_file_copt=external/.*@-w
-common --host_per_file_copt=external/.*@-w
-
 # Picotool needs to build with exceptions and RTTI enabled.
 common --per_file_copt=external.*picotool.*@-fexceptions,-frtti
 common --host_per_file_copt=external.*picotool.*@-fexceptions,-frtti
@@ -117,6 +89,21 @@ build --java_language_version=11
 build --tool_java_language_version=11
 build --java_runtime_version=remotejdk_11
 build --repo_env=JAVA_HOME=../bazel_tools/jdk
+
+# JavaScript related flags
+# ========================
+# Allow the Bazel server to check directory sources for changes. Ensures that the Bazel server
+# notices when a directory changes, if you have a directory listed in the srcs of some target.
+# Recommended when using
+# [copy_directory](https://github.com/aspect-build/bazel-lib/blob/main/docs/copy_directory.md) and
+# [rules_js](https://github.com/aspect-build/rules_js) since npm package are source directories
+# inputs to copy_directory actions.
+# Docs: https://bazel.build/reference/command-line-reference#flag--host_jvm_args
+#
+# Ultimately, this is a workaround for
+# https://github.com/aspect-build/rules_js/issues/1408. See also
+# https://github.com/bazelbuild/bazel/commit/c64421bc35214f0414e4f4226cc953e8c55fa0d2.
+startup --host_jvm_args=-DBAZEL_TRACK_SOURCE_DIRECTORIES=1
 
 # Default label flags values
 # ==========================
@@ -231,10 +218,6 @@ build:microbit --platforms=//targets/microbit
 # of the default //pw_unit_test:light framework.
 common:googletest --//pw_unit_test:backend=//pw_unit_test:googletest
 common:googletest --//pw_unit_test:main=@com_google_googletest//:gtest_main
-common:googletest --platforms=//pw_unit_test:googletest_platform
-# TODO: https://pwbug.dev/390709187 - Re-enable layering check once the layering
-# issues in the googletest backend are fixed.
-common:googletest --features=-layering_check
 
 # Remote execution config definitions
 # ===================================

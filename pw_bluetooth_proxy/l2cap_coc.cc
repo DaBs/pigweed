@@ -18,7 +18,7 @@
 #include <cstdint>
 #include <mutex>
 
-#include "pw_assert/check.h"  // IWYU pragma: keep
+#include "pw_assert/check.h"
 #include "pw_bluetooth/emboss_util.h"
 #include "pw_bluetooth/hci_data.emb.h"
 #include "pw_bluetooth/l2cap_frames.emb.h"
@@ -83,7 +83,7 @@ pw::Result<L2capCoc> L2capCoc::Create(
     uint16_t connection_handle,
     CocConfig rx_config,
     CocConfig tx_config,
-    Function<void(L2capChannelEvent event)>&& event_fn,
+    ChannelEventCallback&& event_fn,
     Function<void(multibuf::MultiBuf&& payload)>&& receive_fn) {
   if (!AreValidParameters(/*connection_handle=*/connection_handle,
                           /*local_cid=*/rx_config.cid,
@@ -142,6 +142,7 @@ pw::Status L2capCoc::SendAdditionalRxCredits(uint16_t additional_rx_credits) {
         rx_total_credits_,
         rx_remaining_credits_);
   }
+  DrainChannelQueuesIfNewTx();
   return status;
 }
 
@@ -305,7 +306,7 @@ L2capCoc::L2capCoc(pw::multibuf::MultiBufAllocator& rx_multibuf_allocator,
                    uint16_t connection_handle,
                    CocConfig rx_config,
                    CocConfig tx_config,
-                   Function<void(L2capChannelEvent event)>&& event_fn,
+                   ChannelEventCallback&& event_fn,
                    Function<void(multibuf::MultiBuf&& payload)>&& receive_fn)
     : L2capChannel(l2cap_channel_manager,
                    &rx_multibuf_allocator,
@@ -461,7 +462,7 @@ void L2capCoc::AddTxCredits(uint16_t credits) {
     tx_credits_ += credits;
   }
   if (credits_previously_zero) {
-    ReportPacketsMayBeReadyToSend();
+    ReportNewTxPacketsOrCredits();
   }
 }
 

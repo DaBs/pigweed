@@ -14,21 +14,24 @@
 
 #include "pw_allocator/fallback_allocator.h"
 
-#include "pw_allocator/first_fit.h"
-#include "pw_allocator/size_reporter.h"
+#include "pw_allocator/best_fit.h"
+#include "pw_allocator/size_report/size_report.h"
+#include "pw_bloat/bloat_this_binary.h"
+#include "pw_bytes/span.h"
 
-int main() {
-  pw::allocator::SizeReporter reporter;
-  reporter.SetBaseline();
+namespace pw::allocator::size_report {
 
-  std::array<std::byte, 0x1000> buffer;
-  pw::allocator::FirstFitAllocator<> primary(reporter.buffer());
-  pw::allocator::FirstFitAllocator<> secondary(buffer);
-  reporter.Measure(secondary);
-  reporter.Measure(primary);
-
-  pw::allocator::FallbackAllocator allocator(primary, secondary);
-  reporter.Measure(allocator);
-
-  return 0;
+int Measure() {
+  volatile uint32_t mask = bloat::kDefaultMask;
+  ByteSpan buffer = GetBuffer();
+  ByteSpan buffer1 = buffer.subspan(0, buffer.size() / 2);
+  ByteSpan buffer2 = buffer.subspan(buffer.size() / 2);
+  static BestFitAllocator<BlockType> primary(buffer1);
+  static BestFitAllocator<BlockType> secondary(buffer2);
+  static FallbackAllocator alloc(primary, secondary);
+  return MeasureAllocator(alloc, mask);
 }
+
+}  // namespace pw::allocator::size_report
+
+int main() { return pw::allocator::size_report::Measure(); }

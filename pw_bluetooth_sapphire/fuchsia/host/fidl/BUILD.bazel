@@ -13,7 +13,7 @@
 # the License.
 
 load(
-    "@fuchsia_sdk//fuchsia:defs.bzl",
+    "@rules_fuchsia//fuchsia:defs.bzl",
     "fuchsia_cc_library",
     "fuchsia_cc_test",
     "fuchsia_unittest_package",
@@ -101,6 +101,7 @@ fuchsia_cc_library(
         "//pw_bluetooth_sapphire/host/common:uuid_string_util",
         "//pw_bluetooth_sapphire/host/gap",
         "//pw_bluetooth_sapphire/host/gatt",
+        "//pw_bluetooth_sapphire/host/hci",
         "//pw_bluetooth_sapphire/host/sdp",
         "@fuchsia_sdk//fidl/fuchsia.bluetooth.bredr:fuchsia.bluetooth.bredr_cpp",
         "@fuchsia_sdk//fidl/fuchsia.bluetooth:fuchsia.bluetooth_hlcpp",
@@ -108,6 +109,23 @@ fuchsia_cc_library(
         "@fuchsia_sdk//fidl/fuchsia.bluetooth.gatt2:fuchsia.bluetooth.gatt2_hlcpp",
         "@fuchsia_sdk//fidl/fuchsia.bluetooth.host:fuchsia.bluetooth.host_hlcpp",
         "@fuchsia_sdk//fidl/fuchsia.hardware.bluetooth:fuchsia.hardware.bluetooth_cpp",
+    ],
+)
+
+fuchsia_cc_library(
+    name = "activity_governor_lease_provider",
+    srcs = [
+        "activity_governor_lease_provider.cc",
+    ],
+    hdrs = [
+        "public/pw_bluetooth_sapphire/fuchsia/host/fidl/activity_governor_lease_provider.h",
+    ],
+    implementation_deps = ["//pw_assert:check"],
+    strip_include_prefix = "public",
+    deps = [
+        "//pw_bluetooth_sapphire:lease",
+        "//pw_bluetooth_sapphire/host/common",
+        "@fuchsia_sdk//fidl/fuchsia.power.system:fuchsia.power.system_cpp",
     ],
 )
 
@@ -183,6 +201,7 @@ fuchsia_cc_test(
     name = "fidl_test",
     testonly = True,
     srcs = [
+        "activity_governor_lease_provider_test.cc",
         "channel_server_test.cc",
         "gatt2_client_server_test.cc",
         "gatt2_remote_service_server_test.cc",
@@ -200,6 +219,7 @@ fuchsia_cc_test(
     death_unittest = True,
     visibility = ["//visibility:public"],
     deps = [
+        ":activity_governor_lease_provider",
         ":adapter_test_fixture",
         ":fake_adapter_test_fixture",
         ":fake_gatt_test_fixture",

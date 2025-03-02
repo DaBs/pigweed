@@ -43,7 +43,6 @@ cc_library(
     strip_include_prefix = "public",
     deps = [
         ":config",
-        "//pw_assert",
         "//pw_preprocessor",
         "//third_party/fuchsia:fit",
     ],
@@ -134,6 +133,7 @@ sphinx_docs_library(
     srcs = [
         "Kconfig",
         "docs.rst",
+        "function_test.cc",
     ],
     prefix = "pw_function/",
     target_compatible_with = incompatible_with_mcu(),

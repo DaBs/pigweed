@@ -35,10 +35,10 @@ cc_library(
         "public/pw_hdlc/encoder.h",
         "public/pw_hdlc/internal/protocol.h",
     ],
+    implementation_deps = ["//pw_assert:check"],
     strip_include_prefix = "public",
     deps = [
         "//pw_assert:assert",
-        "//pw_assert:check",
         "//pw_bytes",
         "//pw_checksum",
         "//pw_log",
@@ -56,6 +56,7 @@ cc_library(
     strip_include_prefix = "public",
     deps = [
         ":pw_hdlc",
+        "//pw_assert:assert",
         "//pw_rpc",
         "//pw_span",
     ],
@@ -74,7 +75,6 @@ cc_library(
     strip_include_prefix = "public",
     deps = [
         ":pw_hdlc",
-        "//pw_assert",
         "//pw_bytes",
         "//pw_checksum",
         "//pw_router:packet_parser",
@@ -92,13 +92,20 @@ cc_library(
     srcs = [
         "hdlc_sys_io_system_server.cc",
     ],
+    implementation_deps = ["//pw_assert:check"],
+    # This target uses those parts of the pw_log_basic interface which are not
+    # part of the interface of pw_log itself, so it's only compatible with
+    # platforms that use pw_log_basic as the pw_log backend.
+    target_compatible_with = select({
+        "//pw_log_basic:is_active_backend": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
     deps = [
         ":default_addresses",
         ":pw_hdlc",
         ":rpc_channel_output",
-        "//pw_assert",
         "//pw_log",
-        "//pw_log_basic:headers",
+        "//pw_log_basic:extension",
         "//pw_rpc/system_server:facade",
         "//pw_status",
         "//pw_stream:sys_io_stream",
@@ -112,7 +119,6 @@ pw_cc_test(
         ":pw_hdlc",
         "//pw_bytes",
         "//pw_stream",
-        "//pw_unit_test",
     ],
 )
 
@@ -136,7 +142,6 @@ pw_cc_test(
         "//pw_bytes",
         "//pw_result",
         "//pw_stream",
-        "//pw_unit_test",
         "//pw_varint",
     ],
 )
@@ -159,7 +164,6 @@ pw_cc_test(
         ":rpc_channel_output",
         "//pw_bytes",
         "//pw_stream",
-        "//pw_unit_test",
     ],
 )
 
@@ -174,7 +178,6 @@ cc_library(
         "//pw_async2:poll",
         "//pw_bytes",
         "//pw_channel",
-        "//pw_containers:inline_queue",
         "//pw_containers:vector",
         "//pw_log",
         "//pw_multibuf",
@@ -199,7 +202,6 @@ pw_cc_test(
         "//pw_containers:inline_queue",
         "//pw_containers:vector",
         "//pw_multibuf:simple_allocator",
-        "//pw_unit_test",
     ],
 )
 

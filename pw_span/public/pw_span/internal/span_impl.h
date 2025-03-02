@@ -44,15 +44,7 @@
 
 #include "pw_span/internal/config.h"
 
-#if PW_SPAN_ENABLE_ASSERTS
-
-#include "pw_assert/assert.h"
-
-#define _PW_SPAN_ASSERT(arg) PW_ASSERT(arg)
-
-#else
-#define _PW_SPAN_ASSERT(arg)
-#endif  // PW_SPAN_ENABLE_ASSERTS
+// IWYU pragma: private, include "pw_span/span.h"
 
 namespace pw {
 
@@ -476,5 +468,3 @@ span(const Container&) -> span<pw_span_internal::ValueType<const Container>>;
 #endif  // __cpp_deduction_guides
 
 }  // namespace pw
-
-#undef _PW_SPAN_ASSERT

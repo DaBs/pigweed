@@ -196,6 +196,7 @@ cc_library(
         "thread_snapshot_service.cc",
     ],
     hdrs = ["public/pw_thread/thread_snapshot_service.h"],
+    implementation_deps = ["//pw_containers:vector"],
     strip_include_prefix = "public",
     tags = ["noclangtidy"],
     deps = [
@@ -279,7 +280,7 @@ cc_library(
     strip_include_prefix = "public",
     visibility = ["//visibility:private"],
     deps = [
-        "//pw_assert",
+        "//pw_assert:assert",
         "//pw_numeric:integer_division",
         "//pw_polyfill",
         "//third_party/fuchsia:stdcompat",
@@ -357,7 +358,6 @@ pw_cc_test(
         ":test_thread_context",
         ":thread",
         "//pw_sync:binary_semaphore",
-        "//pw_unit_test",
     ],
 )
 
@@ -366,10 +366,7 @@ pw_cc_test(
     srcs = [
         "id_facade_test.cc",
     ],
-    deps = [
-        ":thread",
-        "//pw_unit_test",
-    ],
+    deps = [":thread"],
 )
 
 pw_cc_test(
@@ -392,7 +389,6 @@ pw_cc_test(
         ":thread",
         "//pw_chrono:system_clock",
         "//pw_preprocessor",
-        "//pw_unit_test",
     ],
 )
 
@@ -436,7 +432,6 @@ pw_cc_test(
     deps = [
         ":generic_priority",
         "//pw_compilation_testing:negative_compilation_testing",
-        "//pw_unit_test",
         "//pw_unit_test:constexpr",
     ],
 )
@@ -476,7 +471,6 @@ pw_cc_test(
         ":thread",
         ":yield",
         "//pw_preprocessor",
-        "//pw_unit_test",
     ],
 )
 

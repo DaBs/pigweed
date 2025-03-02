@@ -33,7 +33,7 @@ cc_library(
     strip_include_prefix = "public",
     tags = ["noclangtidy"],
     deps = [
-        "//pw_assert",
+        "//pw_assert:assert",
         "//pw_async2:dispatcher",
         "//pw_async2:poll",
         "//pw_bytes",
@@ -57,7 +57,6 @@ pw_cc_test(
         "//pw_multibuf:allocator_async",
         "//pw_multibuf:simple_allocator",
         "//pw_preprocessor",
-        "//pw_unit_test",
     ],
 )
 
@@ -86,7 +85,6 @@ pw_cc_test(
         "//pw_multibuf:header_chunk_region_tracker",
         "//pw_multibuf:simple_allocator",
         "//pw_string:string",
-        "//pw_unit_test",
     ],
 )
 
@@ -118,7 +116,6 @@ pw_cc_test(
         "//pw_multibuf:allocator_async",
         "//pw_multibuf:testing",
         "//pw_status",
-        "//pw_unit_test",
     ],
 )
 
@@ -156,7 +153,6 @@ pw_cc_test(
         "//pw_thread:sleep",
         "//pw_thread:thread",
         "//pw_thread_stl:options",
-        "//pw_unit_test",
     ],
 )
 
@@ -164,6 +160,7 @@ cc_library(
     name = "rp2_stdio_channel",
     srcs = ["rp2_stdio_channel.cc"],
     hdrs = ["public/pw_channel/rp2_stdio_channel.h"],
+    implementation_deps = ["//pw_assert:check"],
     strip_include_prefix = "public",
     target_compatible_with = [
         "//pw_build/constraints/chipset:rp2040",
@@ -213,7 +210,6 @@ pw_cc_test(
         "//pw_thread:thread",
         "//pw_toolchain:globals",
         "//pw_toolchain:no_destructor",
-        "//pw_unit_test",
     ],
 )
 

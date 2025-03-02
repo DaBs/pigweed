@@ -19,9 +19,10 @@
 #include <type_traits>
 
 #include "lib/stdcompat/bit.h"
-#include "pw_allocator/config.h"
-#include "pw_assert/assert.h"
+#include "pw_allocator/hardening.h"
 #include "pw_bytes/alignment.h"
+#include "pw_result/result.h"
+#include "pw_status/status.h"
 
 namespace pw::allocator {
 namespace internal {
@@ -79,9 +80,13 @@ struct BasicBase {};
 /// - static constexpr size_t BlockOverhead()
 ///   - Returns the size of the metadata at the start of a block, before its
 ///     usable space.
+/// - static constexpr size_t MaxAddressableSize()
+///   - Size of the largest region that can be addressed by a block.
 /// - static constexpr size_t MinInnerSize()
-///   - Returns the minimum inner size of a block. Should be 1 unless the usable
+///   - Returns the minimum inner size of a block. Can be 1 unless the usable
 ///     space is used to track blocks when they are free.
+/// - static Derived* AsBlock(BytesSpan)
+///   - Instantiates and returns a block for the given region of memory.
 /// - size_t OuterSizeUnchecked() const
 ///   - Returns the size of the block. Must be multiple of `kAlignment`.
 template <typename Derived>
@@ -93,12 +98,28 @@ class BasicBlock : public internal::BasicBase {
   static constexpr size_t kMinOuterSize =
       kBlockOverhead + AlignUp(Derived::MinInnerSize(), kAlignment);
 
-  BasicBlock() = default;
   ~BasicBlock() = default;
 
   // No copy or move.
   BasicBlock(const BasicBlock& other) = delete;
   BasicBlock& operator=(const BasicBlock& other) = delete;
+
+  /// @brief Creates the first block for a given memory region.
+  ///
+  /// @returns @rst
+  ///
+  /// .. pw-status-codes::
+  ///
+  ///    OK: Returns a block representing the region.
+  ///
+  ///    INVALID_ARGUMENT: The region is null.
+  ///
+  ///    RESOURCE_EXHAUSTED: The region is too small for a block.
+  ///
+  ///    OUT_OF_RANGE: The region is larger than `kMaxAddressableSize`.
+  ///
+  /// @endrst
+  static constexpr Result<Derived*> Init(ByteSpan region);
 
   /// @returns  A pointer to a `Block`, given a pointer to the start of the
   ///           usable space inside the block.
@@ -107,16 +128,13 @@ class BasicBlock : public internal::BasicBase {
   ///
   /// @warning  This method does not do any checking; passing a random
   ///           pointer will return a non-null pointer.
-  static inline Derived* FromUsableSpace(void* usable_space) {
-    return FromUsableSpaceImpl(usable_space);
-  }
-  static inline const Derived* FromUsableSpace(const void* usable_space) {
-    return FromUsableSpaceImpl(usable_space);
-  }
+  template <typename Ptr>
+  static constexpr internal::copy_const_ptr_t<Ptr, Derived*> FromUsableSpace(
+      Ptr usable_space);
 
   /// @returns A pointer to the usable space inside this block.
-  inline std::byte* UsableSpace();
-  inline const std::byte* UsableSpace() const;
+  constexpr std::byte* UsableSpace();
+  constexpr const std::byte* UsableSpace() const;
   constexpr std::byte* UsableSpaceUnchecked() {
     return UsableSpaceUncheckedImpl(this);
   }
@@ -125,53 +143,42 @@ class BasicBlock : public internal::BasicBase {
   }
 
   /// @returns The outer size of a block from the corresponding inner size.
-  static size_t OuterSizeFromInnerSize(size_t inner_size);
+  static constexpr size_t OuterSizeFromInnerSize(size_t inner_size);
 
   /// @returns The inner size of a block from the corresponding outer size.
-  static size_t InnerSizeFromOuterSize(size_t outer_size);
+  static constexpr size_t InnerSizeFromOuterSize(size_t outer_size);
 
   /// @returns The total size of the block in bytes, including the header.
-  inline size_t OuterSize() const;
+  constexpr size_t OuterSize() const;
 
   /// @returns The number of usable bytes inside the block.
-  inline size_t InnerSize() const;
-  size_t InnerSizeUnchecked() const;
+  constexpr size_t InnerSize() const;
+  constexpr size_t InnerSizeUnchecked() const;
 
   /// @return whether a block is valid.
-  inline bool IsValid() const;
+  constexpr bool IsValid() const;
 
-  /// Does nothing unless `PW_ALLOCATOR_STRICT_VALIDATION` is set in the module
-  /// configuration. If it is, calls `CheckInvariants` with `crash_on_failure`
-  /// set. The method is static to avoid any checks of the pointer when strict
-  /// validation is disabled.
-  inline void CheckInvariantsIfStrict() const;
+  /// Like `IsValid`, but crashes if invalid.
+  constexpr bool CheckInvariants() const;
 
  protected:
-  /// Like `IsValid`, but crashes if invalid and `crash_on_failure` is set.
-  inline bool CheckInvariants(bool crash_on_failure) const;
+  constexpr BasicBlock() = default;
 
-  /// Performs the BasicBlock invariant checks.
-  bool DoCheckInvariants(bool crash_on_failure) const;
+  /// Checks that the various block conditions that should always be true are
+  /// indeed true.
+  ///
+  /// Triggers a fatal error if `strict` is true.
+  constexpr bool DoCheckInvariants(bool strict) const;
 
  private:
   constexpr const Derived* derived() const {
     return static_cast<const Derived*>(this);
   }
 
-  /// Static version of `FromUsableSpace` that preserves constness.
-  template <typename Ptr>
-  static internal::copy_const_ptr_t<Ptr, Derived*> FromUsableSpaceImpl(
-      Ptr usable_space);
-
   /// Static version of `UsableSpace` that preserves constness.
   template <typename Ptr>
   static constexpr internal::copy_const_ptr_t<Ptr, std::byte*>
-  UsableSpaceUncheckedImpl(Ptr block) {
-    using BytePtr = internal::copy_const_ptr_t<Derived, std::byte*>;
-    auto addr = cpp20::bit_cast<uintptr_t>(block);
-    PW_ASSERT(!PW_ADD_OVERFLOW(addr, Derived::kBlockOverhead, &addr));
-    return cpp20::bit_cast<BytePtr>(addr);
-  }
+  UsableSpaceUncheckedImpl(Ptr block);
 };
 
 /// Trait type that allows interrogating whether a type is a block.
@@ -181,113 +188,128 @@ struct is_block : std::is_base_of<internal::BasicBase, T> {};
 
 /// Helper variable template for `is_block<T>::value`.
 template <typename T>
-inline constexpr bool is_block_v = is_block<T>::value;
+constexpr bool is_block_v = is_block<T>::value;
 
 namespace internal {
 
-/// Function to crash with an error message describing which block invariant
-/// has been violated. This function is implemented independent of any template
-/// parameters to allow it to use `PW_CHECK`.
-void CrashMisaligned(uintptr_t addr);
+/// Crashes with an error message about the given block being misaligned if
+/// `is_aligned` is false.
+void CheckMisaligned(const void* block, bool is_aligned);
 
 }  // namespace internal
 
 // Template method implementations.
 
 template <typename Derived>
-template <typename Ptr>
-internal::copy_const_ptr_t<Ptr, Derived*>
-BasicBlock<Derived>::FromUsableSpaceImpl(Ptr usable_space) {
-  using BlockPtr = internal::copy_const_ptr_t<Ptr, Derived*>;
-  auto addr = cpp20::bit_cast<uintptr_t>(usable_space);
-  if constexpr (PW_ALLOCATOR_STRICT_VALIDATION) {
-    PW_ASSERT(!PW_SUB_OVERFLOW(addr, kBlockOverhead, &addr));
-  } else {
-    addr -= kBlockOverhead;
+constexpr Result<Derived*> BasicBlock<Derived>::Init(ByteSpan region) {
+  region = GetAlignedSubspan(region, Derived::kAlignment);
+  if (region.size() <= Derived::kBlockOverhead) {
+    return Status::ResourceExhausted();
   }
-  auto* block = std::launder(reinterpret_cast<BlockPtr>(addr));
-  block->CheckInvariantsIfStrict();
+  if (region.size() > Derived::MaxAddressableSize()) {
+    return Status::OutOfRange();
+  }
+  auto* block = Derived::AsBlock(region);
+  if constexpr (Hardening::kIncludesDebugChecks) {
+    block->CheckInvariants();
+  }
   return block;
 }
 
 template <typename Derived>
-std::byte* BasicBlock<Derived>::UsableSpace() {
-  CheckInvariantsIfStrict();
+template <typename Ptr>
+constexpr internal::copy_const_ptr_t<Ptr, Derived*>
+BasicBlock<Derived>::FromUsableSpace(Ptr usable_space) {
+  using BlockPtr = internal::copy_const_ptr_t<Ptr, Derived*>;
+  auto addr = cpp20::bit_cast<uintptr_t>(usable_space);
+  Hardening::Decrement(addr, kBlockOverhead);
+  auto* block = std::launder(reinterpret_cast<BlockPtr>(addr));
+  if constexpr (Hardening::kIncludesBasicChecks) {
+    block->CheckInvariants();
+  }
+  return block;
+}
+
+template <typename Derived>
+constexpr std::byte* BasicBlock<Derived>::UsableSpace() {
+  if constexpr (Hardening::kIncludesDebugChecks) {
+    CheckInvariants();
+  }
   return UsableSpaceUnchecked();
 }
 
 template <typename Derived>
-const std::byte* BasicBlock<Derived>::UsableSpace() const {
-  CheckInvariantsIfStrict();
+constexpr const std::byte* BasicBlock<Derived>::UsableSpace() const {
+  if constexpr (Hardening::kIncludesDebugChecks) {
+    CheckInvariants();
+  }
   return UsableSpaceUnchecked();
 }
 
 template <typename Derived>
-size_t BasicBlock<Derived>::OuterSizeFromInnerSize(size_t inner_size) {
-  if constexpr (PW_ALLOCATOR_STRICT_VALIDATION) {
-    size_t outer_size;
-    PW_ASSERT(!PW_ADD_OVERFLOW(inner_size, kBlockOverhead, &outer_size));
-    return outer_size;
-  } else {
-    return inner_size + kBlockOverhead;
-  }
+template <typename Ptr>
+constexpr internal::copy_const_ptr_t<Ptr, std::byte*>
+BasicBlock<Derived>::UsableSpaceUncheckedImpl(Ptr block) {
+  using BytePtr = internal::copy_const_ptr_t<Derived, std::byte*>;
+  auto addr = cpp20::bit_cast<uintptr_t>(block);
+  Hardening::Increment(addr, kBlockOverhead);
+  return cpp20::bit_cast<BytePtr>(addr);
 }
 
 template <typename Derived>
-size_t BasicBlock<Derived>::InnerSizeFromOuterSize(size_t outer_size) {
-  if constexpr (PW_ALLOCATOR_STRICT_VALIDATION) {
-    size_t inner_size;
-    PW_ASSERT(!PW_SUB_OVERFLOW(outer_size, kBlockOverhead, &inner_size));
-    return inner_size;
-  } else {
-    return outer_size - kBlockOverhead;
-  }
+constexpr size_t BasicBlock<Derived>::OuterSizeFromInnerSize(
+    size_t inner_size) {
+  size_t outer_size = inner_size;
+  Hardening::Increment(outer_size, kBlockOverhead);
+  return outer_size;
 }
 
 template <typename Derived>
-size_t BasicBlock<Derived>::OuterSize() const {
-  CheckInvariantsIfStrict();
+constexpr size_t BasicBlock<Derived>::InnerSizeFromOuterSize(
+    size_t outer_size) {
+  size_t inner_size = outer_size;
+  Hardening::Decrement(inner_size, kBlockOverhead);
+  return inner_size;
+}
+
+template <typename Derived>
+constexpr size_t BasicBlock<Derived>::OuterSize() const {
+  if constexpr (Hardening::kIncludesDebugChecks) {
+    CheckInvariants();
+  }
   return derived()->OuterSizeUnchecked();
 }
 
 template <typename Derived>
-size_t BasicBlock<Derived>::InnerSize() const {
-  CheckInvariantsIfStrict();
+constexpr size_t BasicBlock<Derived>::InnerSize() const {
+  if constexpr (Hardening::kIncludesDebugChecks) {
+    CheckInvariants();
+  }
   return InnerSizeUnchecked();
 }
 
 template <typename Derived>
-size_t BasicBlock<Derived>::InnerSizeUnchecked() const {
+constexpr size_t BasicBlock<Derived>::InnerSizeUnchecked() const {
   return InnerSizeFromOuterSize(derived()->OuterSizeUnchecked());
 }
 
 template <typename Derived>
-bool BasicBlock<Derived>::IsValid() const {
-  return CheckInvariants(/*crash_on_failure=*/false);
+constexpr bool BasicBlock<Derived>::IsValid() const {
+  return derived()->DoCheckInvariants(/*strict=*/false);
 }
 
 template <typename Derived>
-void BasicBlock<Derived>::CheckInvariantsIfStrict() const {
-  if constexpr (PW_ALLOCATOR_STRICT_VALIDATION) {
-    CheckInvariants(/* crash_on_failure: */ true);
+constexpr bool BasicBlock<Derived>::CheckInvariants() const {
+  return derived()->DoCheckInvariants(/*strict=*/true);
+}
+
+template <typename Derived>
+constexpr bool BasicBlock<Derived>::DoCheckInvariants(bool strict) const {
+  bool is_aligned = (cpp20::bit_cast<uintptr_t>(this) % kAlignment) == 0;
+  if constexpr (Hardening::kIncludesDebugChecks) {
+    internal::CheckMisaligned(this, is_aligned || !strict);
   }
-}
-
-template <typename Derived>
-bool BasicBlock<Derived>::CheckInvariants(bool crash_on_failure) const {
-  return derived()->DoCheckInvariants(crash_on_failure);
-}
-
-template <typename Derived>
-bool BasicBlock<Derived>::DoCheckInvariants(bool crash_on_failure) const {
-  auto addr = cpp20::bit_cast<uintptr_t>(this);
-  if (addr % Derived::kAlignment != 0) {
-    if (crash_on_failure) {
-      internal::CrashMisaligned(addr);
-    }
-    return false;
-  }
-  return true;
+  return is_aligned;
 }
 
 }  // namespace pw::allocator

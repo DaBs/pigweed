@@ -52,19 +52,18 @@ cc_library(
         "public/pw_allocator/benchmarks/benchmark.h",
         "public/pw_allocator/benchmarks/config.h",
     ],
+    implementation_deps = ["//pw_assert:check"],
     strip_include_prefix = "public",
-    tags = ["noclangtidy"],
     target_compatible_with = select({
         "@platforms//os:linux": [],
         "//conditions:default": ["@platforms//:incompatible"],
     }),
     deps = [
         ":measurements",
+        "//pw_allocator",
         "//pw_allocator:block_allocator",
-        "//pw_allocator:deallocator",
         "//pw_allocator:fragmentation",
         "//pw_allocator:test_harness",
-        "//pw_assert",
         "//pw_chrono:system_clock",
         "//pw_metric:metric",
         "//pw_tokenizer",
@@ -82,7 +81,6 @@ cc_binary(
     deps = [
         ":benchmark",
         "//pw_allocator:best_fit",
-        "//pw_allocator:deallocator",
         "//pw_random",
     ],
 )

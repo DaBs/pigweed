@@ -15,10 +15,9 @@
 
 #include <cstddef>
 
-#include "pw_allocator/allocator.h"
 #include "pw_allocator/chunk_pool.h"
+#include "pw_allocator/hardening.h"
 #include "pw_bytes/span.h"
-#include "pw_result/result.h"
 
 namespace pw::allocator {
 
@@ -37,7 +36,7 @@ class TypedPool : public ChunkPool {
   /// Returns the amount of memory needed to allocate ``num_objects``.
   static constexpr size_t SizeNeeded(size_t num_objects) {
     size_t needed = std::max(sizeof(T), ChunkPool::kMinSize);
-    PW_ASSERT(!PW_MUL_OVERFLOW(needed, num_objects, &needed));
+    Hardening::Multiply(needed, num_objects);
     return needed;
   }
 
@@ -89,7 +88,7 @@ class TypedPool : public ChunkPool {
   /// to the pool's object type.
   ///
   /// @param[in]  args...     Arguments passed to the object constructor.
-  template <int&... ExplicitGuard, typename... Args>
+  template <int&... kExplicitGuard, typename... Args>
   T* New(Args&&... args) {
     void* ptr = Allocate();
     return ptr != nullptr ? new (ptr) T(std::forward<Args>(args)...) : nullptr;
@@ -101,7 +100,7 @@ class TypedPool : public ChunkPool {
   /// specific to the pool's object type.
   ///
   /// @param[in]  args...     Arguments passed to the object constructor.
-  template <int&... ExplicitGuard, typename... Args>
+  template <int&... kExplicitGuard, typename... Args>
   UniquePtr<T> MakeUnique(Args&&... args) {
     return Deallocator::WrapUnique<T>(New(std::forward<Args>(args)...));
   }

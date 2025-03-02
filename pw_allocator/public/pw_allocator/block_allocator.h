@@ -70,14 +70,14 @@ class GenericBlockAllocator : public Allocator {
   /// This method is meant to be called by ``SplitFreeListAllocator``s
   /// destructor. There must not be any outstanding allocations from an
   /// when it is destroyed.
-  static void CrashOnAllocated(void* allocated);
+  [[noreturn]] static void CrashOnAllocated(const void* allocated);
 
   /// Crashes with an informational message that a given pointer does not belong
   /// to this allocator.
-  static void CrashOnInvalidFree(void* freed);
+  [[noreturn]] static void CrashOnInvalidFree(const void* freed);
 
   /// Crashes with an informational message that a given block was freed twice.
-  static void CrashOnDoubleFree(void* freed);
+  [[noreturn]] static void CrashOnDoubleFree(const void* freed);
 };
 
 }  // namespace internal
@@ -145,16 +145,10 @@ class BlockAllocator : public internal::GenericBlockAllocator {
   ///
   /// At the time of the call, there MUST NOT be any outstanding allocated
   /// blocks from this allocator.
-  void Reset();
+  virtual void Reset();
 
  protected:
-  using ReverseRange = typename BlockType::ReverseRange;
-
   constexpr explicit BlockAllocator() : Base(kCapabilities) {}
-
-  /// Returns a ``ReverseRange`` of blocks tracking the memory of this
-  /// allocator.
-  ReverseRange rblocks();
 
   /// Returns the block associated with a pointer.
   ///
@@ -176,6 +170,12 @@ class BlockAllocator : public internal::GenericBlockAllocator {
   template <typename Ptr>
   Result<internal::copy_const_ptr_t<Ptr, BlockType*>> FromUsableSpace(
       Ptr ptr) const;
+
+  /// Frees the given block.
+  ///
+  /// Derived classes may override this method to hook or even defer freeing
+  /// blocks.
+  virtual void DeallocateBlock(BlockType*&& block);
 
  private:
   using BlockResultPrev = internal::GenericBlockResult::Prev;
@@ -225,6 +225,20 @@ class BlockAllocator : public internal::GenericBlockAllocator {
   /// @param  block   The block being freed.
   virtual void RecycleBlock(BlockType&) {}
 
+  /// Completes any pending deallocations.
+  ///
+  /// After calling this method, all memory that has been passed to `Deallocate`
+  /// will be free and available for subsequent allocations.
+  ///
+  /// An allocator implementation may wish to defer doing the work of freeing a
+  /// block and potentially merging it with its neighbors in case it
+  /// subsequently receives a request for the block's exact size. In this case
+  /// it must override this method and clear any caches of freed blocks.
+  ///
+  /// Allocators that free blocks immediately upon a call to `DoDeallocate` can
+  /// simply use the default implementation that does nothing.
+  virtual void Flush() {}
+
   /// Returns if the previous block exists and is free.
   static bool PrevIsFree(const BlockType* block) {
     auto* prev = block->Prev();
@@ -258,15 +272,6 @@ typename BlockAllocator<BlockType>::Range BlockAllocator<BlockType>::blocks()
 }
 
 template <typename BlockType>
-typename BlockAllocator<BlockType>::ReverseRange
-BlockAllocator<BlockType>::rblocks() {
-  if constexpr (is_reverse_iterable_v<BlockType>) {
-    PW_ASSERT(last_ == nullptr || last_->Next() == nullptr);
-    return ReverseRange(last_);
-  }
-}
-
-template <typename BlockType>
 void BlockAllocator<BlockType>::Init(ByteSpan region) {
   Result<BlockType*> result = BlockType::Init(region);
   Init(*result, nullptr);
@@ -274,8 +279,10 @@ void BlockAllocator<BlockType>::Init(ByteSpan region) {
 
 template <typename BlockType>
 void BlockAllocator<BlockType>::Init(BlockType* begin, BlockType* end) {
-  PW_ASSERT(begin != nullptr);
-  PW_ASSERT(begin->Prev() == nullptr);
+  if constexpr (Hardening::kIncludesRobustChecks) {
+    PW_ASSERT(begin != nullptr);
+    PW_ASSERT(begin->Prev() == nullptr);
+  }
   Reset();
   if (end == nullptr) {
     end = begin;
@@ -283,8 +290,10 @@ void BlockAllocator<BlockType>::Init(BlockType* begin, BlockType* end) {
       end = next;
     }
   } else {
-    PW_ASSERT(begin <= end);
-    PW_ASSERT(end->Next() == nullptr);
+    if constexpr (Hardening::kIncludesRobustChecks) {
+      PW_ASSERT(begin <= end);
+      PW_ASSERT(end->Next() == nullptr);
+    }
   }
   first_ = begin;
   last_ = end;
@@ -299,6 +308,7 @@ void BlockAllocator<BlockType>::Init(BlockType* begin, BlockType* end) {
 
 template <typename BlockType>
 void BlockAllocator<BlockType>::Reset() {
+  Flush();
   for (auto* block : blocks()) {
     if (!block->IsFree()) {
       CrashOnAllocated(block);
@@ -318,7 +328,9 @@ void* BlockAllocator<BlockType>::DoAllocate(Layout layout) {
     return nullptr;
   }
 
-  PW_ASSERT(last_->Next() == nullptr);
+  if constexpr (Hardening::kIncludesDebugChecks) {
+    PW_ASSERT(last_->Next() == nullptr);
+  }
   auto result = ChooseBlock(layout);
   if (!result.ok()) {
     // No valid block for request.
@@ -344,7 +356,9 @@ void* BlockAllocator<BlockType>::DoAllocate(Layout layout) {
   }
 
   UpdateLast(block);
-  PW_ASSERT(block <= last_);
+  if constexpr (Hardening::kIncludesDebugChecks) {
+    PW_ASSERT(block <= last_);
+  }
 
   return block->UsableSpace();
 }
@@ -357,9 +371,17 @@ void BlockAllocator<BlockType>::DoDeallocate(void* ptr) {
   }
   BlockType* block = *from_usable_space_result;
   if (block->IsFree()) {
-    CrashOnDoubleFree(block);
+    if constexpr (Hardening::kIncludesBasicChecks) {
+      CrashOnDoubleFree(block);
+    } else {
+      return;
+    }
   }
+  DeallocateBlock(std::move(block));
+}
 
+template <typename BlockType>
+void BlockAllocator<BlockType>::DeallocateBlock(BlockType*&& block) {
   // Neighboring blocks may be merged when freeing.
   if (auto* prev = block->Prev(); prev != nullptr && prev->IsFree()) {
     ReserveBlock(*prev);
@@ -426,11 +448,13 @@ Result<Layout> BlockAllocator<BlockType>::DoGetInfo(InfoType info_type,
     return Layout(capacity_);
   }
   // Get a block from the given pointer.
-  auto result = FromUsableSpace(ptr);
-  if (!result.ok()) {
+  if (ptr < first_->UsableSpace() || last_->UsableSpace() < ptr) {
     return Status::NotFound();
   }
-  const BlockType* block = result.value();
+  const auto* block = BlockType::FromUsableSpace(ptr);
+  if (!block->IsValid()) {
+    return Status::DataLoss();
+  }
   if (block->IsFree()) {
     return Status::FailedPrecondition();
   }
@@ -469,9 +493,19 @@ template <typename Ptr>
 Result<internal::copy_const_ptr_t<Ptr, BlockType*>>
 BlockAllocator<BlockType>::FromUsableSpace(Ptr ptr) const {
   if (ptr < first_->UsableSpace() || last_->UsableSpace() < ptr) {
+    if constexpr (Hardening::kIncludesBasicChecks) {
+      CrashOnInvalidFree(ptr);
+    }
     return Status::OutOfRange();
   }
-  return BlockType::FromUsableSpace(ptr);
+  auto* block = BlockType::FromUsableSpace(ptr);
+  if (!block->IsValid()) {
+    if constexpr (Hardening::kIncludesBasicChecks) {
+      block->CheckInvariants();
+    }
+    return Status::DataLoss();
+  }
+  return block;
 }
 
 template <typename BlockType>

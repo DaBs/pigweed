@@ -69,7 +69,8 @@ cc_library(
     strip_include_prefix = "public",
     deps = [
         ":config",
-        "//pw_assert",
+        "//pw_assert:assert",
+        "//pw_assert:check",
         "//pw_bytes",
         "//pw_bytes:bit",
         "//pw_containers:vector",
@@ -105,17 +106,13 @@ pw_cc_test(
     deps = [
         ":pw_protobuf",
         "//pw_preprocessor",
-        "//pw_unit_test",
     ],
 )
 
 pw_cc_test(
     name = "encoder_test",
     srcs = ["encoder_test.cc"],
-    deps = [
-        ":pw_protobuf",
-        "//pw_unit_test",
-    ],
+    deps = [":pw_protobuf"],
 )
 
 pw_cc_fuzz_test(
@@ -148,44 +145,31 @@ pw_cc_test(
     deps = [
         ":pw_protobuf",
         "//pw_string",
-        "//pw_unit_test",
     ],
 )
 
 pw_cc_test(
     name = "serialized_size_test",
     srcs = ["serialized_size_test.cc"],
-    deps = [
-        ":pw_protobuf",
-        "//pw_unit_test",
-    ],
+    deps = [":pw_protobuf"],
 )
 
 pw_cc_test(
     name = "stream_decoder_test",
     srcs = ["stream_decoder_test.cc"],
-    deps = [
-        ":pw_protobuf",
-        "//pw_unit_test",
-    ],
+    deps = [":pw_protobuf"],
 )
 
 pw_cc_test(
     name = "map_utils_test",
     srcs = ["map_utils_test.cc"],
-    deps = [
-        ":pw_protobuf",
-        "//pw_unit_test",
-    ],
+    deps = [":pw_protobuf"],
 )
 
 pw_cc_test(
     name = "message_test",
     srcs = ["message_test.cc"],
-    deps = [
-        ":pw_protobuf",
-        "//pw_unit_test",
-    ],
+    deps = [":pw_protobuf"],
 )
 
 pw_cc_perf_test(
@@ -343,8 +327,8 @@ pw_cc_test(
     deps = [
         ":codegen_test_proto_pwpb",
         ":pw_protobuf",
+        "//pw_containers:vector",
         "//pw_span",
-        "//pw_unit_test",
     ],
 )
 
@@ -358,7 +342,6 @@ pw_cc_test(
         ":pw_protobuf",
         "//pw_bytes",
         "//pw_span",
-        "//pw_unit_test",
     ],
 )
 
@@ -371,7 +354,6 @@ pw_cc_test(
         ":codegen_test_proto_pwpb",
         ":pw_protobuf",
         "//pw_span",
-        "//pw_unit_test",
     ],
 )
 
@@ -387,7 +369,6 @@ pw_cc_test(
         "//pw_span",
         "//pw_status",
         "//pw_stream",
-        "//pw_unit_test",
     ],
 )
 
@@ -413,6 +394,11 @@ sphinx_docs_library(
         "pw_protobuf_test_protos/size_report.proto",
         "pw_protobuf_test_protos/size_report.pwpb_options",
         "size_report.rst",
+        "//pw_protobuf/size_report:decoder_incremental",
+        "//pw_protobuf/size_report:decoder_partial",
+        "//pw_protobuf/size_report:oneof_codegen_size_comparison",
+        "//pw_protobuf/size_report:protobuf_overview",
+        "//pw_protobuf/size_report:simple_codegen_size_comparison",
     ],
     prefix = "pw_protobuf/",
     target_compatible_with = incompatible_with_mcu(),

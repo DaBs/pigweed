@@ -38,6 +38,7 @@
 #include "pw_bluetooth_sapphire/internal/host/hci-spec/util.h"
 #include "pw_bluetooth_sapphire/internal/host/hci-spec/vendor_protocol.h"
 #include "pw_bluetooth_sapphire/internal/host/hci/android_extended_low_energy_advertiser.h"
+#include "pw_bluetooth_sapphire/internal/host/hci/discovery_filter.h"
 #include "pw_bluetooth_sapphire/internal/host/hci/extended_low_energy_advertiser.h"
 #include "pw_bluetooth_sapphire/internal/host/hci/extended_low_energy_scanner.h"
 #include "pw_bluetooth_sapphire/internal/host/hci/legacy_low_energy_advertiser.h"
@@ -183,9 +184,11 @@ class AdapterImpl final : public Adapter {
       adapter_->metrics_.le.start_advertising_events.Add();
     }
 
-    void StartDiscovery(bool active, SessionCallback callback) override {
-      adapter_->le_discovery_manager_->StartDiscovery(active,
-                                                      std::move(callback));
+    void StartDiscovery(bool active,
+                        std::vector<hci::DiscoveryFilter> discovery_filters,
+                        SessionCallback callback) override {
+      adapter_->le_discovery_manager_->StartDiscovery(
+          active, std::move(discovery_filters), std::move(callback));
       adapter_->metrics_.le.start_discovery_events.Add();
     }
 

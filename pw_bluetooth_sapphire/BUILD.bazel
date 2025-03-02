@@ -45,9 +45,115 @@ cc_library(
     strip_include_prefix = "public",
     tags = ["noclangtidy"],
     deps = [
+        ":connection",
+        ":uuid",
         "//pw_bluetooth:pw_bluetooth2",
         "//pw_bluetooth_sapphire/host/gap",
         "//pw_multibuf:allocator",
+    ],
+)
+
+cc_library(
+    name = "connection",
+    srcs = [
+        "connection.cc",
+        "connection_options.cc",
+    ],
+    hdrs = [
+        "public/pw_bluetooth_sapphire/internal/connection.h",
+        "public/pw_bluetooth_sapphire/internal/connection_options.h",
+    ],
+    strip_include_prefix = "public",
+    tags = ["noclangtidy"],
+    visibility = ["//visibility:private"],
+    deps = [
+        ":uuid",
+        "//pw_bluetooth:pw_bluetooth2",
+        "//pw_bluetooth_sapphire/host/gap",
+    ],
+)
+
+cc_library(
+    name = "uuid",
+    hdrs = [
+        "public/pw_bluetooth_sapphire/internal/uuid.h",
+    ],
+    strip_include_prefix = "public",
+    visibility = ["//visibility:private"],
+    deps = [
+        "//pw_bluetooth:pw_bluetooth2",
+        "//pw_bluetooth_sapphire/host/common",
+        "//pw_span",
+    ],
+)
+
+cc_library(
+    name = "lease",
+    hdrs = [
+        "public/pw_bluetooth_sapphire/lease.h",
+    ],
+    strip_include_prefix = "public",
+    deps = [
+        ":config",
+        "//pw_function",
+        "//pw_result",
+    ],
+)
+
+cc_library(
+    name = "null_lease_provider",
+    hdrs = [
+        "public/pw_bluetooth_sapphire/null_lease_provider.h",
+    ],
+    strip_include_prefix = "public",
+    deps = [
+        ":lease",
+    ],
+)
+
+cc_library(
+    name = "fake_lease_provider",
+    hdrs = [
+        "public/pw_bluetooth_sapphire/fake_lease_provider.h",
+    ],
+    strip_include_prefix = "public",
+    deps = [
+        ":lease",
+    ],
+)
+
+cc_library(
+    name = "power_delegate",
+    hdrs = ["public/pw_bluetooth_sapphire/power_delegate.h"],
+    strip_include_prefix = "public",
+    deps = [":lease"],
+)
+
+pw_cc_test(
+    name = "lease_test",
+    srcs = ["lease_test.cc"],
+    deps = [
+        ":lease",
+    ],
+)
+
+pw_cc_test(
+    name = "null_lease_provider_test",
+    srcs = [
+        "null_lease_provider_test.cc",
+    ],
+    deps = [
+        ":null_lease_provider",
+    ],
+)
+
+pw_cc_test(
+    name = "fake_lease_provider_test",
+    srcs = [
+        "fake_lease_provider_test.cc",
+    ],
+    deps = [
+        ":fake_lease_provider",
     ],
 )
 
@@ -97,7 +203,11 @@ filegroup(
     name = "doxygen",
     srcs = [
         "public/pw_bluetooth_sapphire/central.h",
+        "public/pw_bluetooth_sapphire/fake_lease_provider.h",
+        "public/pw_bluetooth_sapphire/lease.h",
+        "public/pw_bluetooth_sapphire/null_lease_provider.h",
         "public/pw_bluetooth_sapphire/peripheral.h",
+        "public/pw_bluetooth_sapphire/power_delegate.h",
     ],
     visibility = ["//visibility:public"],
 )

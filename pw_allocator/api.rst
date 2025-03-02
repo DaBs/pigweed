@@ -61,6 +61,13 @@ Deallocator
 ===========
 Both ``Allocator`` and ``Pool`` derive from and extend ``Deallocator``. This
 type is intended for allocator implementers and not for module consumers.
+pw_allocator: Add bucket size reports
+
+Separating out the bucket size reports from those of the blocks and
+allocators makes it clearer where contributions to code size are coming
+from.
+
+Change-Id: Ibd719f3d4b88c42aa7833c24963e95253c397e03
 
 .. doxygenclass:: pw::Deallocator
    :members:
@@ -86,6 +93,28 @@ The ``UniquePtr`` smart pointer type can be created by any type deriving from
 .. doxygenclass:: pw::UniquePtr
    :members:
 
+--------------------
+Module configuration
+--------------------
+
+.. _module-pw_allocator-config-block_poison_interval:
+
+PW_ALLOCATOR_BLOCK_POISON_INTERVAL
+==================================
+.. doxygendefine:: PW_ALLOCATOR_BLOCK_POISON_INTERVAL
+
+.. _module-pw_allocator-config-hardening:
+
+PW_ALLOCATOR_HARDENING
+======================
+.. doxygendefine:: PW_ALLOCATOR_HARDENING
+
+.. _module-pw_allocator-config-suppress_deprecated_warnings:
+
+PW_ALLOCATOR_SUPPRESS_DEPRECATED_WARNINGS
+=========================================
+.. doxygendefine:: PW_ALLOCATOR_SUPPRESS_DEPRECATED_WARNINGS
+
 -------------------------
 Allocator implementations
 -------------------------
@@ -102,18 +131,32 @@ memory, and derive from this abstract base type.
 .. doxygenclass:: pw::allocator::BlockAllocator
    :members:
 
-.. _module-pw_allocator-api-first_fit_allocator:
-
-FirstFitAllocator
------------------
-.. doxygenclass:: pw::allocator::FirstFitAllocator
-   :members:
-
 .. _module-pw_allocator-api-best_fit_allocator:
 
 BestFitAllocator
 ----------------
 .. doxygenclass:: pw::allocator::BestFitAllocator
+   :members:
+
+.. _module-pw_allocator-api-bucket_block_allocator:
+
+BucketAllocator
+---------------
+.. doxygenclass:: pw::allocator::BucketAllocator
+   :members:
+
+.. _module-pw_allocator-api-dl_allocator:
+
+DlAllocator
+-------------
+.. doxygenclass:: pw::allocator::DlAllocator
+   :members:
+
+.. _module-pw_allocator-api-first_fit_allocator:
+
+FirstFitAllocator
+-----------------
+.. doxygenclass:: pw::allocator::FirstFitAllocator
    :members:
 
 .. _module-pw_allocator-api-tlsf_allocator:
@@ -128,13 +171,6 @@ TlsfAllocator
 WorstFitAllocator
 -----------------
 .. doxygenclass:: pw::allocator::WorstFitAllocator
-   :members:
-
-.. _module-pw_allocator-api-bucket_block_allocator:
-
-BucketAllocator
-===============
-.. doxygenclass:: pw::allocator::BucketAllocator
    :members:
 
 .. _module-pw_allocator-api-buddy_allocator:
@@ -220,21 +256,13 @@ TrackingAllocator
 .. doxygenclass:: pw::allocator::TrackingAllocator
    :members:
 
----------------
-Utility Classes
----------------
-In addition to providing allocator implementations themselves, this module
-includes some utility classes.
-
 .. _module-pw_allocator-api-block:
 
+-----
 Block
-=====
+-----
 A block is an allocatable region of memory, and is the fundamental type managed
-by several of the concrete allocator implementations. Blocks are defined
-using several stateless "mix-in" interface types. These provide specific
-functionality, while deferring the detailed representation of a block to a
-derived type.
+by several of the block allocator implementations.
 
 .. tip::
    Avoid converting pointers to allocations into ``Block`` instances, even if
@@ -242,42 +270,57 @@ derived type.
    abstraction in this manner will limit your flexibility to change to a
    different allocator in the future.
 
+Block mix-ins
+=============
+Blocks are defined using several stateless "mix-in" interface types. These
+provide specific functionality, while deferring the detailed representation of a
+block to a derived type.
+
 .. TODO(b/378549332): Add a diagram of mix-in relationships.
+
+.. _module-pw_allocator-api-basic_block:
 
 BasicBlock
 ----------
 .. doxygenclass:: pw::allocator::BasicBlock
    :members:
 
+.. _module-pw_allocator-api-contiguous_block:
+
 ContiguousBlock
 ---------------
 .. doxygenclass:: pw::allocator::ContiguousBlock
    :members:
+
+.. _module-pw_allocator-api-allocatable_block:
 
 AllocatableBlock
 ----------------
 .. doxygenclass:: pw::allocator::AllocatableBlock
    :members:
 
+.. _module-pw_allocator-api-alignable_block:
+
 AlignableBlock
 --------------
 .. doxygenclass:: pw::allocator::AlignableBlock
    :members:
+
+.. _module-pw_allocator-api-block_with_layout:
 
 BlockWithLayout
 ---------------
 .. doxygenclass:: pw::allocator::BlockWithLayout
    :members:
 
-ForwardIterableBlock
+.. _module-pw_allocator-api-iterable_block:
+
+IterableBlock
 --------------------
-.. doxygenclass:: pw::allocator::ForwardIterableBlock
+.. doxygenclass:: pw::allocator::IterableBlock
    :members:
 
-ReverseIterableBlock
---------------------
-.. doxygenclass:: pw::allocator::ReverseIterableBlock
-   :members:
+.. _module-pw_allocator-api-poisonable_block:
 
 PoisonableBlock
 ---------------
@@ -293,10 +336,49 @@ produced.
 .. doxygenclass:: pw::allocator::BlockResult
    :members:
 
+Block implementations
+=====================
+The following combine block mix-ins and provide both the methods they require as
+well as a concrete representation of the data those methods need.
+
+.. _module-pw_allocator-api-small_block:
+
+SmallBlock
+----------
+This implementation includes just enough mix-ins for fixed-alignment
+allocations.
+
+.. doxygenclass:: pw::allocator::SmallBlock
+   :members:
+
+.. _module-pw_allocator-api-small_alignable_block:
+
+SmallAlignableBlock
+-------------------
+This implementation includes just enough mix-ins for variable-alignment
+allocations.
+
+.. doxygenclass:: pw::allocator::SmallAlignableBlock
+   :members:
+
+.. _module-pw_allocator-api-tiny_block:
+
+TinyBlock
+---------
+This implementation is similar to :ref:`module-pw_allocator-api-small_block`,
+but packs its information into just 4 bytes of overhead per allocation. This
+constrains both its miniumum and maximum allocatable sizes, and incurs small
+code size and performance costs for packing and unpacking header information.
+
+.. doxygenclass:: pw::allocator::TinyBlock
+   :members:
+
+.. _module-pw_allocator-api-detailed_block:
+
 DetailedBlock
 -------------
-This type is not a block mix-in. It is an example of a block implementation that
-uses the mix-ins above.
+This implementation includes all block mix-ins. This makes it very flexible at
+the cost of additional code size.
 
 .. doxygenstruct:: pw::allocator::DetailedBlockParameters
    :members:
@@ -306,42 +388,59 @@ uses the mix-ins above.
 
 .. _module-pw_allocator-api-bucket:
 
-Bucket
-======
+-------
+Buckets
+-------
 Several block allocator implementations improve performance by managing buckets,
 which are data structures that track free blocks. Several bucket implementations
 are provided that trade off between performance and per-block space needed when
 free.
 
+.. _module-pw_allocator-api-bucket_base:
+
+BucketBase
+==========
+This type is not a standalone bucket, but a CRTP-style base class that provides
+the common interface for other blocks.
+
+.. doxygenclass:: pw::allocator::internal::BucketBase
+   :members:
+
 FastSortedBucket
-----------------
+================
 .. doxygenclass:: pw::allocator::FastSortedBucket
    :members:
 
 ForwardSortedBucket
--------------------
+===================
 .. doxygenclass:: pw::allocator::ForwardSortedBucket
    :members:
 
 ReverseFastSortedBucket
------------------------
+=======================
 .. doxygenclass:: pw::allocator::ReverseFastSortedBucket
    :members:
 
 ReverseSortedBucket
--------------------
+===================
 .. doxygenclass:: pw::allocator::ReverseSortedBucket
    :members:
 
 SequencedBucket
----------------
+===============
 .. doxygenclass:: pw::allocator::SequencedBucket
    :members:
 
 UnorderedBucket
----------------
+===============
 .. doxygenclass:: pw::allocator::UnorderedBucket
    :members:
+
+---------------
+Utility Classes
+---------------
+In addition to providing allocator implementations themselves, this module
+includes some utility classes.
 
 .. _module-pw_allocator-api-metrics_adapter:
 
@@ -368,20 +467,24 @@ Fragmentation
 .. doxygenstruct:: pw::allocator::Fragmentation
    :members:
 
-.. _module-pw_allocator-api-size_reporter:
-
-SizeReporter
-============
-This module includes a utility class for generating size reports. It is
-intended for allocator implementers and not for module consumers.
-
-.. doxygenclass:: pw::allocator::SizeReporter
-   :members:
 
 Buffer management
 =================
 .. doxygenclass:: pw::allocator::WithBuffer
    :members:
+
+.. _module-pw_allocator-api-size_reports:
+
+------------
+Size reports
+------------
+This module includes utilities to help generate code size reports for allocator
+implementations. These are used to generate the code size reports for the
+allocators provided by this module, and can also be used to evaluate your own
+custom allocator implementations.
+
+.. doxygenfunction:: pw::allocator::size_report::GetBuffer
+.. doxygenfunction:: pw::allocator::size_report::MeasureAllocator
 
 ------------
 Test support

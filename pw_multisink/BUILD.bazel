@@ -33,12 +33,12 @@ cc_library(
         "public/pw_multisink/config.h",
         "public/pw_multisink/multisink.h",
     ],
+    implementation_deps = ["//pw_assert:check"],
     strip_include_prefix = "public",
     deps = [
         ":config_override",
-        "//pw_assert",
+        "//pw_assert:assert",
         "//pw_bytes",
-        "//pw_containers",
         "//pw_function",
         "//pw_log",
         "//pw_result",
@@ -89,7 +89,6 @@ pw_cc_test(
         "//pw_function",
         "//pw_preprocessor",
         "//pw_status",
-        "//pw_unit_test",
     ],
 )
 
@@ -99,6 +98,7 @@ cc_library(
     srcs = [
         "multisink_threaded_test.cc",
     ],
+    implementation_deps = ["//pw_containers:vector"],
     deps = [
         ":pw_multisink",
         ":test_thread",

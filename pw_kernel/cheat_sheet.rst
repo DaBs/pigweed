@@ -18,7 +18,7 @@ Generating rust-project.json
 For a given ``$CONFIG`` in:
 
 * k_host
-* k_qemu_lm3s6965evb
+* k_qemu_mps2_an505
 * k_rp2350
 
 .. code-block:: shell
@@ -65,7 +65,7 @@ Test
 
 .. code-block:: shell
 
-   bazelisk test --config k_qemu_lm3s6965evb //pw_kernel/...
+   bazelisk test --config k_qemu_mps2_an505 //pw_kernel/...
 
 Run
 ---
@@ -74,7 +74,7 @@ Run
 
 .. code-block:: shell
 
-   bazelisk run --config k_qemu_lm3s6965evb //pw_kernel/kernel/entry:kernel
+   bazelisk run --config k_qemu_mps2_an505 //pw_kernel/entry:kernel
 
 RP2350 Target Board
 ===================
@@ -84,11 +84,11 @@ Build
 
 .. code-block:: shell
 
-   bazelisk build --config k_rp2350 //pw_kernel/kernel/entry:kernel
+   bazelisk build --config k_rp2350 //pw_kernel/entry:kernel
 
 Flash
 -----
 
 .. code-block:: shell
 
-   probe-rs download --chip rp2350 bazel-bin/pw_kernel/kernel/entry/kernel && probe-rs reset
+   probe-rs download --chip rp2350 bazel-bin/pw_kernel/entry/kernel && probe-rs reset

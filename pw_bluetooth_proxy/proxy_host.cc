@@ -14,7 +14,7 @@
 
 #include "pw_bluetooth_proxy/proxy_host.h"
 
-#include "pw_assert/check.h"  // IWYU pragma: keep
+#include "pw_assert/check.h"
 #include "pw_bluetooth/emboss_util.h"
 #include "pw_bluetooth/hci_commands.emb.h"
 #include "pw_bluetooth/hci_common.emb.h"
@@ -146,6 +146,8 @@ void ProxyHost::HandleEventFromController(H4PacketWithHci&& h4_packet) {
     }
   }
   PW_MODIFY_DIAGNOSTICS_POP();
+
+  l2cap_channel_manager_.DeliverPendingEvents();
 }
 
 void ProxyHost::HandleEventFromHost(H4PacketWithH4&& h4_packet) {
@@ -335,7 +337,7 @@ pw::Result<L2capCoc> ProxyHost::AcquireL2capCoc(
     L2capCoc::CocConfig rx_config,
     L2capCoc::CocConfig tx_config,
     Function<void(multibuf::MultiBuf&& payload)>&& receive_fn,
-    Function<void(L2capChannelEvent event)>&& event_fn) {
+    ChannelEventCallback&& event_fn) {
   Status status = acl_data_channel_.CreateAclConnection(connection_handle,
                                                         AclTransportType::kLe);
   if (status.IsResourceExhausted()) {
@@ -361,11 +363,12 @@ pw::Result<L2capCoc> ProxyHost::AcquireL2capCoc(
 pw::Status ProxyHost::SendAdditionalRxCredits(uint16_t connection_handle,
                                               uint16_t local_cid,
                                               uint16_t additional_rx_credits) {
-  L2capChannel* channel = l2cap_channel_manager_.FindChannelByLocalCid(
-      connection_handle, local_cid);
-  PW_CHECK(channel);
-  return static_cast<L2capCoc*>(channel)->SendAdditionalRxCredits(
-      additional_rx_credits);
+  std::optional<L2capChannelManager::LockedL2capChannel> channel =
+      l2cap_channel_manager_.FindChannelByLocalCid(connection_handle,
+                                                   local_cid);
+  PW_CHECK(channel.has_value());
+  return static_cast<L2capCoc&>(channel->channel())
+      .SendAdditionalRxCredits(additional_rx_credits);
 }
 
 pw::Result<BasicL2capChannel> ProxyHost::AcquireBasicL2capChannel(
@@ -376,7 +379,7 @@ pw::Result<BasicL2capChannel> ProxyHost::AcquireBasicL2capChannel(
     AclTransportType transport,
     OptionalPayloadReceiveCallback&& payload_from_controller_fn,
     OptionalPayloadReceiveCallback&& payload_from_host_fn,
-    Function<void(L2capChannelEvent event)>&& event_fn) {
+    ChannelEventCallback&& event_fn) {
   Status status =
       acl_data_channel_.CreateAclConnection(connection_handle, transport);
   if (status.IsResourceExhausted()) {
@@ -399,7 +402,7 @@ pw::Result<BasicL2capChannel> ProxyHost::AcquireBasicL2capChannel(
 pw::Result<GattNotifyChannel> ProxyHost::AcquireGattNotifyChannel(
     int16_t connection_handle,
     uint16_t attribute_handle,
-    Function<void(L2capChannelEvent event)>&& event_fn) {
+    ChannelEventCallback&& event_fn) {
   Status status = acl_data_channel_.CreateAclConnection(connection_handle,
                                                         AclTransportType::kLe);
   if (status != OkStatus() && status != Status::AlreadyExists()) {
@@ -442,7 +445,7 @@ pw::Result<RfcommChannel> ProxyHost::AcquireRfcommChannel(
     RfcommChannel::Config tx_config,
     uint8_t channel_number,
     Function<void(multibuf::MultiBuf&& payload)>&& payload_from_controller_fn,
-    Function<void(L2capChannelEvent event)>&& event_fn) {
+    ChannelEventCallback&& event_fn) {
   Status status = acl_data_channel_.CreateAclConnection(
       connection_handle, AclTransportType::kBrEdr);
   if (status != OkStatus() && status != Status::AlreadyExists()) {

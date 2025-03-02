@@ -482,6 +482,9 @@ gn_chre_googletest_nanopb_sapphire_build = PigweedGnGenNinja(
         pw_function_CONFIG=lambda ctx: '"{}"'.format(
             ctx.root / 'pw_function:enable_dynamic_allocation'
         ),
+        pw_crypto_AES_BACKEND=lambda ctx: '"{}"'.format(
+            ctx.root / 'pw_crypto:aes_boringssl'
+        ),
         pw_bluetooth_sapphire_ENABLED=True,
         pw_C_OPTIMIZATION_LEVELS=_OPTIMIZATION_LEVELS,
     ),
@@ -1177,8 +1180,9 @@ _EXCLUDE_FROM_COPYRIGHT_NOTICE: Sequence[str] = (
     # keep-sorted: end
     # Test data
     # keep-sorted: start
-    r'\bpw_build/test_data/pw_copy_and_patch_file/',
-    r'\bpw_presubmit/py/test/owners_checks/',
+    r'^pw_build/test_data/pw_copy_and_patch_file/',
+    r'^pw_build/test_data/test_runfile\.txt$',
+    r'^pw_presubmit/py/test/owners_checks/',
     # keep-sorted: end
 )
 
@@ -1573,7 +1577,6 @@ INCLUDE_CHECK_EXCEPTIONS = (
     "//pw_fuzzer:fuzztest",
     "//pw_fuzzer:fuzztest_stub",
     "//pw_interrupt_cortex_m:context",
-    "//pw_log_basic:headers",
     "//pw_log_fuchsia:pw_log_fuchsia",
     "//pw_log_null:headers",
     "//pw_log_tokenized:gcc_partially_tokenized",
@@ -1619,12 +1622,6 @@ INCLUDE_CHECK_EXCEPTIONS = (
     "//pw_thread_embos:sleep",
     "//pw_thread_embos:thread",
     "//pw_thread_embos:yield",
-    "//pw_thread_freertos:freertos_tasktcb",
-    "//pw_thread_freertos:id",
-    "//pw_thread_freertos:sleep",
-    "//pw_thread_freertos:test_thread_context",
-    "//pw_thread_freertos:thread",
-    "//pw_thread_freertos:yield",
     "//pw_thread_threadx:id",
     "//pw_thread_threadx:sleep",
     "//pw_thread_threadx:thread",
@@ -1680,6 +1677,7 @@ OTHER_CHECKS = (
     gn_platform_build_check,
     module_owners.presubmit_check(),
     npm_presubmit.npm_test,
+    npm_presubmit.vscode_test,
     pw_transfer_integration_test,
     python_checks.diff_upstream_python_constraints,
     python_checks.update_upstream_python_constraints,

@@ -58,6 +58,7 @@ cc_library(
         "public/pw_rpc/nanopb/internal/common.h",
         "public/pw_rpc/nanopb/server_reader_writer.h",
     ],
+    implementation_deps = ["//pw_assert:check"],
     strip_include_prefix = "public",
     deps = [
         "//pw_rpc",
@@ -74,7 +75,8 @@ cc_library(
     strip_include_prefix = "public",
     tags = ["noclangtidy"],
     deps = [
-        "//pw_containers",
+        "//pw_assert:assert",
+        "//pw_containers:vector",
         "//pw_rpc:internal_test_utils",
     ],
 )
@@ -250,7 +252,7 @@ pw_cc_test(
     deps = [
         ":internal_test_utils",
         ":server_api",
-        "//pw_containers",
+        "//pw_containers:algorithm",
         "//pw_rpc",
         "//pw_rpc:internal_test_utils",
         "//pw_rpc:pw_rpc_test_nanopb",

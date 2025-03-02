@@ -31,11 +31,12 @@ cc_library(
         "public/pw_blob_store/blob_store.h",
         "public/pw_blob_store/internal/metadata_format.h",
     ],
+    implementation_deps = ["//pw_assert:check"],
     strip_include_prefix = "public",
     deps = [
+        "//pw_assert:assert",
         "//pw_bytes",
         "//pw_checksum",
-        "//pw_containers",
         "//pw_kvs",
         "//pw_log",
         "//pw_preprocessor",
@@ -50,6 +51,7 @@ cc_library(
     name = "flat_file_system_entry",
     srcs = ["flat_file_system_entry.cc"],
     hdrs = ["public/pw_blob_store/flat_file_system_entry.h"],
+    implementation_deps = ["//pw_assert:check"],
     strip_include_prefix = "public",
     deps = [
         ":pw_blob_store",
@@ -75,7 +77,6 @@ pw_cc_test(
         "//pw_log",
         "//pw_random",
         "//pw_sync:borrow",
-        "//pw_unit_test",
     ],
 )
 
@@ -91,7 +92,6 @@ pw_cc_test(
         "//pw_kvs:fake_flash_test_key_value_store",
         "//pw_log",
         "//pw_random",
-        "//pw_unit_test",
     ],
 )
 
@@ -107,7 +107,6 @@ pw_cc_test(
         "//pw_kvs:fake_flash_test_key_value_store",
         "//pw_log",
         "//pw_random",
-        "//pw_unit_test",
     ],
 )
 

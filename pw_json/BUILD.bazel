@@ -32,7 +32,7 @@ cc_library(
     ],
     strip_include_prefix = "public",
     deps = [
-        "//pw_assert",
+        "//pw_assert:assert",
         "//pw_status",
         "//pw_string:to_string",
     ],
@@ -43,6 +43,7 @@ pw_cc_test(
     srcs = ["builder_test.cc"],
     deps = [
         ":builder",
+        "//pw_assert:check",
         "//pw_compilation_testing:negative_compilation_testing",
     ],
 )

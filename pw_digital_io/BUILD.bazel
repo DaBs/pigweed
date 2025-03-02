@@ -40,7 +40,7 @@ cc_library(
     ],
     strip_include_prefix = "public",
     deps = [
-        "//pw_assert",
+        "//pw_assert:check",
         "//pw_function",
         "//pw_result",
         "//pw_status",
@@ -54,7 +54,6 @@ pw_cc_test(
     deps = [
         ":pw_digital_io",
         "//pw_status",
-        "//pw_unit_test",
     ],
 )
 
@@ -120,7 +119,6 @@ pw_cc_test(
     deps = [
         ":digital_io_mock",
         "//pw_status",
-        "//pw_unit_test",
     ],
 )
 

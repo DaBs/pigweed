@@ -32,7 +32,6 @@ cc_library(
         "public/pw_hex_dump/hex_dump.h",
     ],
     strip_include_prefix = "public",
-    tags = ["noclangtidy"],
     deps = [
         "//pw_bytes",
         "//pw_span",
@@ -51,7 +50,6 @@ pw_cc_test(
         ":pw_hex_dump",
         "//pw_log",
         "//pw_span",
-        "//pw_unit_test",
     ],
 )
 
@@ -78,7 +76,6 @@ pw_cc_test(
         ":log_bytes",
         "//pw_log",
         "//pw_span",
-        "//pw_unit_test",
     ],
 )
 

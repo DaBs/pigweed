@@ -19,3 +19,18 @@ pub trait TargetInterface {
     /// Called at the very beginning of the kernel to set up the console.
     fn console_init() {}
 }
+
+#[macro_export]
+macro_rules! declare_target {
+    ($target:ty) => {
+        #[no_mangle]
+        pub fn pw_kernel_target_name() -> &'static str {
+            <$target as $crate::TargetInterface>::NAME
+        }
+
+        #[no_mangle]
+        pub fn pw_kernel_target_console_init() {
+            <$target as $crate::TargetInterface>::console_init();
+        }
+    };
+}

@@ -55,6 +55,7 @@ py_library(
         "pw_build/pip_install_python_deps.py",
         "pw_build/python_package.py",
         "pw_build/python_runner.py",
+        "pw_build/runfiles_manager.py",
         "pw_build/wrap_ninja.py",
         "pw_build/zip.py",
     ],
@@ -79,6 +80,12 @@ py_library(
     deps = [
         ":pw_build",
     ],
+)
+
+py_library(
+    name = "python_runfiles",
+    srcs = ["pw_build/python_runfiles.py"],
+    imports = ["."],
 )
 
 pw_py_binary(
@@ -212,6 +219,33 @@ pw_py_test(
     ],
     deps = [
         ":pw_build",
+    ],
+)
+
+pw_py_test(
+    name = "py_runfiles_test",
+    size = "small",
+    srcs = [
+        "py_runfiles_test.py",
+    ],
+    deps = [
+        "//pw_build:test_runfile",
+        "//pw_build:test_runfile_remapped",
+        "@pw_build_external_runfile_resource//:black",
+    ],
+)
+
+pw_py_test(
+    name = "runfiles_manager_test",
+    size = "small",
+    srcs = [
+        "runfiles_manager_test.py",
+    ],
+    deps = [
+        ":pw_build",
+        "//pw_build:test_runfile",
+        "//pw_build:test_runfile_remapped",
+        "@pw_build_external_runfile_resource//:black",
     ],
 )
 

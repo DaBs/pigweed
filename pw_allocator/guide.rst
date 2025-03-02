@@ -91,8 +91,19 @@ This module has configuration options that globally affect the behavior of
 :ref:`module documentation <module-structure-compile-time-configuration>` for
 more details.
 
-.. doxygendefine:: PW_ALLOCATOR_STRICT_VALIDATION
-.. doxygendefine:: PW_ALLOCATOR_BLOCK_POISON_INTERVAL
+Module configuration options include:
+
+- :ref:`module-pw_allocator-config-block_poison_interval` determines how
+  frequently blocks that implemented the
+  :ref:`module-pw_allocator-api-poisonable_block` mix-in should apply the poison
+  pattern on deallocation.
+- :ref:`module-pw_allocator-config-hardening` allows you to set how many
+  validation checks are enabled. Additional checks can detect more errors at the
+  cost of performance and code size.
+- :ref:`module-pw_allocator-config-suppress_deprecated_warnings` allows you to
+  silence warnings about deprecated interfaces. This is a temporary measure. It
+  is strongly advised to migrate away from deprecated interfaces as soon as
+  possible as they will eventually be removed.
 
 -----------------
 Inject allocators
@@ -245,7 +256,7 @@ overview. Consult the :ref:`module-pw_allocator-api` for additional details.
 - :ref:`module-pw_allocator-api-block_allocator`: Tracks memory using
   :ref:`module-pw_allocator-api-block`. Derived types use specific strategies
   for how to choose a block to use to satisfy a request. See also
-  :ref:`module-pw_allocator-design-block`. Derived types include:
+  :ref:`module-pw_allocator-design-blocks`. Derived types include:
 
   - :ref:`module-pw_allocator-api-first_fit_allocator`: Chooses the first
     block that's large enough to satisfy a request. This strategy is very fast,
@@ -428,17 +439,17 @@ approximately ``0.29``.
 ------------------------
 Detect memory corruption
 ------------------------
-The :ref:`module-pw_allocator-design-block` class provides a few different
-mechanisms to help detect memory corruptions when they happen. First, on every
-deallocation it will check the integrity of the block header and assert if it
-has been modified.
+The :ref:`module-pw_allocator-design-blocks` provide a few different mechanisms
+to help detect memory corruptions when they happen. On every deallocation they
+will check the integrity of the block header and assert if it has been modified.
 
 Additionally, you can enable poisoning to detect additional memory corruptions
 such as use-after-frees. The :ref:`module-pw_allocator-module-configuration` for
-``pw_allocator`` includes the ``PW_ALLOCATOR_BLOCK_POISON_INTERVAL`` option,
-which will "poison" every N-th ``Block``. Allocators "poison" blocks on
-deallocation by writing a set pattern to the usable memory, and later check on
-allocation that the pattern is intact. If it's not, some routine has modified
+``pw_allocator`` includes the ``PW_ALLOCATOR_BLOCK_POISON_INTERVAL`` option. If
+a block derives from :ref:`module-pw_allocator-api-poisonable_block`, the
+allocator will "poison" every N-th block it frees. Allocators "poison" blocks by
+writing a set pattern to the usable memory, and later check on allocation that
+the pattern is intact. If it is not, something has illegally modified
 unallocated memory.
 
 ----------------------
@@ -490,8 +501,8 @@ Measure custom allocator size
 -----------------------------
 If you create your own allocator implementation, you may wish to measure its
 code size, similar to measurements in the module's own
-:ref:`module-pw_allocator-size-reports`. You can use ``pw_bloat`` and
-:ref:`module-pw_allocator-api-size_reporter` to create size reports as described
+:ref:`module-pw_allocator-size-reports`. You can use ``pw_bloat`` and the
+:ref:`module-pw_allocator-api-size_reports` to create size reports as described
 in :ref:`bloat-howto`.
 
 For example, the C++ code for a size report binary might look like:

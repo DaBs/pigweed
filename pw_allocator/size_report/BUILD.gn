@@ -16,165 +16,304 @@ import("//build_overrides/pigweed.gni")
 
 import("$dir_pw_build/target_types.gni")
 
-pw_executable("base") {
-  sources = [ "base.cc" ]
-  defines = [ "PW_ALLOCATOR_SIZE_REPORTER_BASE" ]
-  deps = [
+config("public_include_path") {
+  include_dirs = [ "public" ]
+  visibility = [ ":*" ]
+}
+
+config("hardening_none") {
+  defines = [ "PW_ALLOCATOR_HARDENING=0" ]
+}
+
+# Size reporting support libraries.
+
+pw_source_set("size_report") {
+  public_configs = [ ":public_include_path" ]
+  public = [ "public/pw_allocator/size_report/size_report.h" ]
+  public_deps = [
+    "$dir_pw_allocator:block_allocator",
+    "$dir_pw_allocator/block:small_block",
     "$dir_pw_bloat:bloat_this_binary",
-    "..:size_reporter",
+    dir_pw_allocator,
     dir_pw_bytes,
+  ]
+  sources = [ "size_report.cc" ]
+  deps = [ "$dir_pw_bytes:alignment" ]
+}
+
+_size_report = {
+  configs = [ ":hardening_none" ]
+  deps = [
+    ":size_report",
+    "$dir_pw_bloat:bloat_this_binary",
   ]
 }
 
-pw_executable("best_fit") {
-  include_dirs = [ "../public" ]
-  sources = [ "best_fit.cc" ]
-  deps = [
-    "..:best_fit",
-    "..:size_reporter",
+# Baseline executables for size reporting.
+
+pw_executable("base") {
+  forward_variables_from(_size_report, "*")
+  sources = [ "base.cc" ]
+}
+
+# Block binaries to be measured for code size.
+
+pw_executable("detailed_block") {
+  forward_variables_from(_size_report, "*")
+  sources = [ "detailed_block.cc" ]
+  deps += [
+    "$dir_pw_allocator/block:detailed_block",
+    "$dir_pw_allocator/bucket:fast_sorted",
   ]
+}
+
+_small_block = {
+  sources = [ "small_block.cc" ]
+  deps = [
+    ":size_report",
+    "$dir_pw_allocator/block:small_block",
+    "$dir_pw_bloat:bloat_this_binary",
+  ]
+}
+
+pw_executable("small_block") {
+  forward_variables_from(_small_block, "*")
+  configs = [ ":hardening_none" ]
+}
+
+pw_executable("small_alignable_block") {
+  forward_variables_from(_size_report, "*")
+  sources = [ "small_alignable_block.cc" ]
+  deps += [ "$dir_pw_allocator/block:small_alignable_block" ]
+}
+
+pw_executable("tiny_block") {
+  forward_variables_from(_size_report, "*")
+  sources = [ "tiny_block.cc" ]
+  deps += [ "$dir_pw_allocator/block:tiny_block" ]
+}
+
+pw_executable("small_block_basic") {
+  forward_variables_from(_small_block, "*")
+  configs = [ "$dir_pw_allocator:hardening_basic" ]
+}
+
+pw_executable("small_block_robust") {
+  forward_variables_from(_small_block, "*")
+  configs = [ "$dir_pw_allocator:hardening_robust" ]
+}
+
+pw_executable("small_block_debug") {
+  forward_variables_from(_small_block, "*")
+  configs = [ "$dir_pw_allocator:hardening_debug" ]
+}
+
+# Bucket binaries to be measured for code size.
+
+_fast_sorted = {
+  forward_variables_from(_size_report, "*")
+  sources = [ "fast_sorted_bucket.cc" ]
+  deps += [
+    "$dir_pw_allocator/bucket:fast_sorted",
+    "$dir_pw_containers/size_report:intrusive_multimap",
+    "$dir_pw_containers/size_report:size_report",
+  ]
+}
+
+pw_executable("fast_sorted_base") {
+  forward_variables_from(_fast_sorted, "*")
+  defines = [ "PW_ALLOCATOR_SIZE_REPORT_BASE" ]
+}
+
+pw_executable("fast_sorted") {
+  forward_variables_from(_fast_sorted, "*")
+}
+
+_sequenced = {
+  forward_variables_from(_size_report, "*")
+  sources = [ "sequenced_bucket.cc" ]
+  deps += [
+    "$dir_pw_allocator/bucket:sequenced",
+    "$dir_pw_containers/size_report:intrusive_list",
+    "$dir_pw_containers/size_report:size_report",
+  ]
+}
+
+pw_executable("sequenced_base") {
+  forward_variables_from(_sequenced, "*")
+  defines = [ "PW_ALLOCATOR_SIZE_REPORT_BASE" ]
+}
+
+pw_executable("sequenced") {
+  forward_variables_from(_sequenced, "*")
+}
+
+_sorted = {
+  forward_variables_from(_size_report, "*")
+  sources = [ "sorted_bucket.cc" ]
+  deps += [
+    "$dir_pw_allocator/bucket:sorted",
+    "$dir_pw_containers/size_report:intrusive_forward_list",
+    "$dir_pw_containers/size_report:size_report",
+  ]
+}
+
+pw_executable("sorted_base") {
+  forward_variables_from(_sorted, "*")
+  defines = [ "PW_ALLOCATOR_SIZE_REPORT_BASE" ]
+}
+
+pw_executable("sorted") {
+  forward_variables_from(_sorted, "*")
+}
+
+_unordered = {
+  forward_variables_from(_size_report, "*")
+  sources = [ "unordered_bucket.cc" ]
+  deps += [
+    "$dir_pw_allocator/bucket:unordered",
+    "$dir_pw_containers/size_report:intrusive_forward_list",
+    "$dir_pw_containers/size_report:size_report",
+  ]
+}
+
+pw_executable("unordered_base") {
+  forward_variables_from(_unordered, "*")
+  defines = [ "PW_ALLOCATOR_SIZE_REPORT_BASE" ]
+}
+
+pw_executable("unordered") {
+  forward_variables_from(_unordered, "*")
+}
+
+# Concrete allocator binaries to be measured for code size.
+
+pw_executable("best_fit") {
+  forward_variables_from(_size_report, "*")
+  sources = [ "best_fit.cc" ]
+  deps += [ "$dir_pw_allocator:best_fit" ]
 }
 
 pw_executable("bucket_allocator") {
-  include_dirs = [ "../public" ]
+  forward_variables_from(_size_report, "*")
   sources = [ "bucket_allocator.cc" ]
-  deps = [
-    "..:bucket_allocator",
-    "..:size_reporter",
-  ]
+  deps += [ "$dir_pw_allocator:bucket_allocator" ]
 }
 
 pw_executable("buddy_allocator") {
-  include_dirs = [ "../public" ]
+  forward_variables_from(_size_report, "*")
   sources = [ "buddy_allocator.cc" ]
-  deps = [
-    "..:buddy_allocator",
-    "..:size_reporter",
+  deps += [
+    "$dir_pw_allocator:buddy_allocator",
+    dir_pw_status,
   ]
 }
 
 pw_executable("bump_allocator") {
-  include_dirs = [ "../public" ]
+  forward_variables_from(_size_report, "*")
   sources = [ "bump_allocator.cc" ]
-  deps = [
-    "..:bump_allocator",
-    "..:size_reporter",
-  ]
+  deps += [ "$dir_pw_allocator:bump_allocator" ]
 }
 
-pw_executable("fallback_allocator_base") {
-  sources = [ "fallback_allocator_base.cc" ]
-  deps = [
-    "..:fallback_allocator",
-    "..:first_fit",
-    "..:size_reporter",
-  ]
-}
-
-pw_executable("fallback_allocator") {
-  sources = [ "fallback_allocator.cc" ]
-  deps = [
-    "..:fallback_allocator",
-    "..:first_fit",
-    "..:size_reporter",
-  ]
+pw_executable("dl_allocator") {
+  forward_variables_from(_size_report, "*")
+  sources = [ "dl_allocator.cc" ]
+  deps += [ "$dir_pw_allocator:dl_allocator" ]
 }
 
 pw_executable("first_fit") {
+  forward_variables_from(_size_report, "*")
   sources = [ "first_fit.cc" ]
-  deps = [
-    "..:first_fit",
-    "..:size_reporter",
-  ]
+  deps += [ "$dir_pw_allocator:first_fit" ]
 }
 
 pw_executable("libc_allocator") {
+  forward_variables_from(_size_report, "*")
   sources = [ "libc_allocator.cc" ]
-  deps = [
-    "..:libc_allocator",
-    "..:size_reporter",
-  ]
+  deps += [ "$dir_pw_allocator:libc_allocator" ]
 }
 
 pw_executable("null_allocator") {
+  forward_variables_from(_size_report, "*")
   sources = [ "null_allocator.cc" ]
-  deps = [
-    "..:null_allocator",
-    "..:size_reporter",
+  deps += [ "$dir_pw_allocator:null_allocator" ]
+}
+
+pw_executable("tlsf_allocator") {
+  forward_variables_from(_size_report, "*")
+  sources = [ "tlsf_allocator.cc" ]
+  deps += [ "$dir_pw_allocator:tlsf_allocator" ]
+}
+
+pw_executable("worst_fit") {
+  forward_variables_from(_size_report, "*")
+  sources = [ "worst_fit.cc" ]
+  deps += [ "$dir_pw_allocator:worst_fit" ]
+}
+
+# Forwarding allocator binaries to be measured for code size.
+
+pw_executable("fallback_allocator") {
+  forward_variables_from(_size_report, "*")
+  sources = [ "fallback_allocator.cc" ]
+  deps += [
+    "$dir_pw_allocator:best_fit",
+    "$dir_pw_allocator:fallback_allocator",
+    dir_pw_bytes,
   ]
+}
+
+_pmr_allocator = {
+  forward_variables_from(_size_report, "*")
+  sources = [ "pmr_allocator.cc" ]
+  deps += [ "$dir_pw_allocator:best_fit" ]
 }
 
 pw_executable("pmr_allocator_base") {
-  sources = [ "pmr_allocator_base.cc" ]
-  deps = [
-    "..:first_fit",
-    "..:size_reporter",
-    dir_pw_assert,
-  ]
+  forward_variables_from(_pmr_allocator, "*")
+  defines = [ "PW_ALLOCATOR_SIZE_REPORT_BASE" ]
 }
 
 pw_executable("pmr_allocator") {
-  sources = [ "pmr_allocator.cc" ]
-  deps = [
-    "..:first_fit",
-    "..:pmr_allocator",
-    "..:size_reporter",
-    dir_pw_assert,
+  forward_variables_from(_pmr_allocator, "*")
+  deps += [ "$dir_pw_allocator:pmr_allocator" ]
+}
+
+_synchronized_allocator = {
+  forward_variables_from(_size_report, "*")
+  deps += [
+    "$dir_pw_allocator:best_fit",
+    "$dir_pw_allocator:synchronized_allocator",
   ]
 }
 
 pw_executable("synchronized_allocator_isl") {
+  forward_variables_from(_synchronized_allocator, "*")
   sources = [ "synchronized_allocator_isl.cc" ]
-  deps = [
-    "$dir_pw_sync:interrupt_spin_lock",
-    "..:first_fit",
-    "..:size_reporter",
-    "..:synchronized_allocator",
-  ]
+  deps += [ "$dir_pw_sync:interrupt_spin_lock" ]
 }
 
 pw_executable("synchronized_allocator_mutex") {
+  forward_variables_from(_synchronized_allocator, "*")
   sources = [ "synchronized_allocator_mutex.cc" ]
-  deps = [
-    "$dir_pw_sync:mutex",
-    "..:first_fit",
-    "..:size_reporter",
-    "..:synchronized_allocator",
-  ]
+  deps += [ "$dir_pw_sync:mutex" ]
 }
 
-pw_executable("tlsf_allocator") {
-  sources = [ "tlsf_allocator.cc" ]
-  deps = [
-    "..:size_reporter",
-    "..:tlsf_allocator",
+_tracking_allocator = {
+  forward_variables_from(_size_report, "*")
+  deps += [
+    "$dir_pw_allocator:best_fit",
+    "$dir_pw_allocator:metrics",
+    "$dir_pw_allocator:tracking_allocator",
   ]
 }
 
 pw_executable("tracking_allocator_all_metrics") {
+  forward_variables_from(_tracking_allocator, "*")
   sources = [ "tracking_allocator_all_metrics.cc" ]
-  deps = [
-    "..:first_fit",
-    "..:metrics",
-    "..:size_reporter",
-    "..:tracking_allocator",
-  ]
 }
 
 pw_executable("tracking_allocator_no_metrics") {
+  forward_variables_from(_tracking_allocator, "*")
   sources = [ "tracking_allocator_no_metrics.cc" ]
-  deps = [
-    "..:first_fit",
-    "..:metrics",
-    "..:size_reporter",
-    "..:tracking_allocator",
-  ]
-}
-
-pw_executable("worst_fit") {
-  sources = [ "worst_fit.cc" ]
-  deps = [
-    "..:size_reporter",
-    "..:worst_fit",
-  ]
 }

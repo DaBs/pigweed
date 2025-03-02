@@ -14,8 +14,8 @@
 
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("@rules_python//sphinxdocs:sphinx_docs_library.bzl", "sphinx_docs_library")
+load("//pw_bloat:pw_cc_size_binary.bzl", "pw_cc_size_binary")
 load("//pw_build:compatibility.bzl", "incompatible_with_mcu")
-load("//pw_build:pw_cc_binary.bzl", "pw_cc_binary")
 
 package(default_visibility = ["//visibility:public"])
 
@@ -27,15 +27,16 @@ cc_library(
     name = "bloat_this_binary",
     srcs = ["bloat_this_binary.cc"],
     hdrs = ["public/pw_bloat/bloat_this_binary.h"],
-    strip_include_prefix = "public",
-    deps = [
-        "//pw_assert",
-        "//pw_log",
+    implementation_deps = [
+        "//pw_assert:assert",
+        "//pw_assert:check",
     ],
+    strip_include_prefix = "public",
+    deps = ["//pw_log"],
 )
 
 # Standard minimal base binary for bloat reports.
-pw_cc_binary(
+pw_cc_size_binary(
     name = "bloat_base",
     srcs = ["base_main.cc"],
     deps = [":bloat_this_binary"],
@@ -55,4 +56,19 @@ sphinx_docs_library(
     ],
     prefix = "pw_bloat/",
     target_compatible_with = incompatible_with_mcu(),
+)
+
+alias(
+    name = "pw_size_report_platform",
+    actual = "//targets/rp2040",
+)
+
+label_flag(
+    name = "pw_size_report_bloaty_config",
+    build_setting_default = ":no_bloaty_config",
+)
+
+filegroup(
+    name = "no_bloaty_config",
+    srcs = ["empty.bloaty"],
 )

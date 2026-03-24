@@ -13,9 +13,8 @@
 # the License.
 
 load("@com_google_protobuf//bazel:proto_library.bzl", "proto_library")
-load("@rules_python//python:defs.bzl", "py_library")
-load("@rules_python//python:proto.bzl", "py_proto_library")
-load("//pw_build:python.bzl", "pw_py_binary", "pw_py_test")
+load("@com_google_protobuf//bazel:py_proto_library.bzl", "py_proto_library")
+load("//pw_build:python.bzl", "pw_py_binary", "pw_py_library", "pw_py_test")
 
 package(default_visibility = ["//visibility:public"])
 
@@ -25,7 +24,7 @@ exports_files(
     visibility = ["//pw_elf:__pkg__"],
 )
 
-py_library(
+pw_py_library(
     name = "pw_tokenizer",
     srcs = [
         "pw_tokenizer/__init__.py",
@@ -42,7 +41,29 @@ py_library(
     imports = ["."],
     deps = [
         "//pw_cli/py:pw_cli",
+        "//pw_tokenizer:tokenizer_proto_py_pb2",
+        "@com_google_protobuf//:protobuf_python",
+        "@pigweed_python_packages//pyserial",
     ],
+)
+
+pw_py_library(
+    name = "generate_argument_types_macro",
+    srcs = ["generate_argument_types_macro.py"],
+    imports = ["."],
+)
+
+pw_py_library(
+    name = "generate_hash_macro",
+    srcs = ["generate_hash_macro.py"],
+    imports = ["."],
+)
+
+pw_py_library(
+    name = "generate_hash_test_data",
+    srcs = ["generate_hash_test_data.py"],
+    imports = ["."],
+    deps = [":pw_tokenizer"],
 )
 
 pw_py_binary(
@@ -62,6 +83,59 @@ pw_py_binary(
     ],
     main = "pw_tokenizer/__main__.py",
     deps = [":pw_tokenizer"],
+)
+
+pw_py_binary(
+    name = "elf_reader",
+    srcs = ["pw_tokenizer/elf_reader.py"],
+    deps = [":pw_tokenizer"],
+)
+
+pw_py_binary(
+    name = "encode",
+    srcs = ["pw_tokenizer/encode.py"],
+    deps = [":pw_tokenizer"],
+)
+
+pw_py_binary(
+    name = "parse_message",
+    srcs = ["pw_tokenizer/parse_message.py"],
+    deps = [":pw_tokenizer"],
+)
+
+pw_py_binary(
+    name = "serial_detokenizer",
+    srcs = [
+        "pw_tokenizer/serial_detokenizer.py",
+    ],
+    main = "pw_tokenizer/serial_detokenizer.py",
+    deps = [
+        ":pw_tokenizer",
+        "@pigweed_python_packages//pyserial",
+    ],
+)
+
+pw_py_library(
+    name = "data_driven_detokenize_test_lib",
+    srcs = ["data_driven_detokenize_test.py"],
+    deps = [
+        ":pw_tokenizer",
+        "//pw_build/py:pw_build",
+    ],
+)
+
+pw_py_binary(
+    name = "generate_data_driven_detokenize_test",
+    srcs = ["data_driven_detokenize_test.py"],
+    main = "data_driven_detokenize_test.py",
+    deps = [":data_driven_detokenize_test_lib"],
+)
+
+pw_py_test(
+    name = "data_driven_detokenize_test",
+    srcs = ["data_driven_detokenize_test.py"],
+    main = "data_driven_detokenize_test.py",
+    deps = [":data_driven_detokenize_test_lib"],
 )
 
 # This test attempts to directly access files in the source tree, which is

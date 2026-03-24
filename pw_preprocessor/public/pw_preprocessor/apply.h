@@ -18,6 +18,8 @@
 #include "pw_preprocessor/arguments.h"
 #include "pw_preprocessor/internal/apply_macros.h"
 
+/// @module{pw_preprocessor}
+
 /// Repeatedly applies the given macro for each argument provided. The given
 /// macro expands to accept an index value of the current argument, the
 /// forwarded argument provided, and the current argument. The forwarded
@@ -32,12 +34,14 @@
 /// @code{.cpp}
 /// MACRO(0, ARG, a0) SEP(0, ARG) MACRO(1, ARG, a1)
 /// @endcode
-#define PW_APPLY(macro, separator, forwarded_arg, ...)               \
-  _PW_APPLY(_PW_PASTE2(_PW_APL, PW_FUNCTION_ARG_COUNT(__VA_ARGS__)), \
-            macro,                                                   \
-            separator,                                               \
-            forwarded_arg,                                           \
+#define PW_APPLY(macro, separator, forwarded_arg, ...)              \
+  _PW_APPLY(_PW_PASTE2(_PW_AP, PW_FUNCTION_ARG_COUNT(__VA_ARGS__)), \
+            macro,                                                  \
+            separator,                                              \
+            forwarded_arg,                                          \
             PW_DROP_LAST_ARG_IF_EMPTY(__VA_ARGS__))
 
+/// @}
+
 #define _PW_APPLY(function, macro, separator, forwarded_arg, ...) \
-  function(macro, separator, forwarded_arg, __VA_ARGS__)
+  function(macro, separator, forwarded_arg, 0, __VA_ARGS__)

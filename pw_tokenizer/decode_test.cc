@@ -33,13 +33,13 @@ using namespace std::literals::string_view_literals;
 const FormatString kOneArg("Hello %s");
 const FormatString kTwoArgs("The %d %s");
 
-const bool kSupportsC99Printf = []() {
+const bool kSupportsC99Printf = [] {
   char buf[16] = {};
   std::snprintf(buf, sizeof(buf), "%zu", sizeof(char));
   return buf[0] == '1' && buf[1] == '\0';
 }();
 
-const bool kSupportsFloatPrintf = []() {
+const bool kSupportsFloatPrintf = [] {
   char buf[16] = {};
   std::snprintf(buf, sizeof(buf), "%.1f", 3.5f);
   return buf[0] == '3' && buf[1] == '.' && buf[2] == '5' && buf[3] == '\0';
@@ -75,6 +75,16 @@ TEST(TokenizedStringDecode, TokenizedStringDecodingTestCases) {
   if (sizeof(void*) == 8) {  // 64-bit systems should have full snprintf.
     ASSERT_EQ(skipped, 0u);
   }
+}
+
+TEST(FormatString, Text) {
+  EXPECT_EQ(FormatString("").text(), "");
+  EXPECT_EQ(FormatString("Abcdefg").text(), "Abcdefg");
+  EXPECT_EQ(FormatString("100%").text(), "100%");
+  EXPECT_EQ(FormatString("100%%").text(), "100%%");
+  EXPECT_EQ(kOneArg.text(), "Hello %s");
+  EXPECT_EQ(kTwoArgs.text(), "The %d %s");
+  EXPECT_EQ(FormatString("%02x%10s%%").text(), "%02x%10s%%");
 }
 
 TEST(TokenizedStringDecode, FullyDecodeInput_ZeroRemainingBytes) {

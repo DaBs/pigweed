@@ -36,12 +36,11 @@ pw_source_set("sco") {
     "$dir_pw_bluetooth_sapphire/host/hci",
     "$dir_pw_bluetooth_sapphire/host/hci-spec",
     "$dir_pw_bluetooth_sapphire/host/transport",
-    "$dir_pw_third_party/fuchsia:fit",
+    "$pw_external_fuchsia:fit",
   ]
 }
 
 pw_test("sco_test") {
-  enable_if = pw_unit_test_BACKEND == "$dir_pw_unit_test:googletest"
   sources = [
     "sco_connection_manager_test.cc",
     "sco_connection_test.cc",

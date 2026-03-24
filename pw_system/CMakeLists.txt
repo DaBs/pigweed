@@ -19,7 +19,6 @@ include($ENV{PW_ROOT}/pw_protobuf_compiler/proto.cmake)
 # WARNING: Many of the dependencies in this file are missing and need to be
 # added/updated. This is provided as a starting point, but currently does not
 # work.
-
 if("${pw_cpu_exception.entry_BACKEND}" STREQUAL "")
   pw_add_library(pw_system.config INTERFACE
     HEADERS
@@ -161,6 +160,18 @@ pw_add_library(pw_system.transfer_service STATIC
     transfer_service.cc
 )
 
+pw_add_library(pw_system.benchmark_service STATIC
+  HEADERS
+    public/pw_system/benchmark_service.h
+  PUBLIC_INCLUDES
+    public
+  PUBLIC_DEPS
+    pw_rpc.benchmark
+  SOURCES
+    benchmark_service.cc
+)
+
+
 pw_add_library(pw_system.file_service STATIC
   HEADERS
     public/pw_system/file_service.h
@@ -254,6 +265,7 @@ pw_add_library(pw_system.init STATIC
   SOURCES
     init.cc
   PRIVATE_DEPS
+    pw_system.benchmark_service
     pw_system.device_service
     pw_system.file_manager
     pw_system.file_service
@@ -332,17 +344,23 @@ pw_add_library(pw_system.freertos_target_hooks STATIC
     pw_system.config
     pw_thread.thread
     pw_thread_freertos.thread
-    # TODO: b/234876414 - This should depend on FreeRTOS but our third parties
-    # currently do not have CMake support.
+
+  # TODO: b/234876414 - This should depend on FreeRTOS but our third parties
+  # currently do not have CMake support.
 )
 
-pw_add_library(pw_system.zephyr_target_hooks STATIC
-  SOURCES
-    zephyr_target_hooks.cc
-  PRIVATE_DEPS
-    pw_system.target_hooks.facade
-    pw_thread.thread
-    pw_thread_zephyr.thread
+if(CONFIG_ZEPHYR_PIGWEED_MODULE)
+  pw_add_library(pw_system.zephyr_target_hooks STATIC
+    SOURCES
+      zephyr_target_hooks.cc
+    PRIVATE_DEPS
+      pw_system.target_hooks.facade
+      pw_thread.thread
+      pw_thread_zephyr.thread
+  )
+endif()
+pw_zephyrize_libraries_ifdef(CONFIG_PIGWEED_SYSTEM_TARGET_HOOKS
+  pw_system.zephyr_target_hooks
 )
 
 add_executable(pw_system.system_example EXCLUDE_FROM_ALL
@@ -358,7 +376,7 @@ target_link_libraries(pw_system.system_example
     pw_log
     pw_thread.sleep
     pw_trace
-    pw_unit_test.rpc_service
+    pw_rpc.pwpb.echo_service
     pw_system.target_hooks
     targets.host_device_simulator.boot
 )
@@ -374,11 +392,12 @@ pw_add_library(pw_system.async STATIC
     threads.cc
   PUBLIC_DEPS
     pw_allocator.allocator
-    pw_async2.dispatcher
+    pw_async2
     pw_channel
     pw_rpc.server
   PRIVATE_DEPS
     pw_system.async_packet_io
+    pw_system.device_service
     pw_system.file_manager
     pw_system.file_service
     pw_system.log
@@ -387,10 +406,9 @@ pw_add_library(pw_system.async STATIC
     pw_system.work_queue
     pw_allocator.best_fit_block_allocator
     pw_allocator.synchronized_allocator
-    pw_async2.allocate_task
-    pw_async2.pend_func_task
+    pw_async2
+    pw_async2.basic_dispatcher
     pw_hdlc.router
-    pw_multibuf.simple_allocator
     pw_rpc.pwpb.echo_service
     pw_sync.interrupt_spin_lock
     pw_thread.thread
@@ -404,7 +422,7 @@ pw_add_library(pw_system.async_packet_io STATIC
   SOURCES
     async_packet_io.cc
   PUBLIC_DEPS
-    pw_async2.dispatcher
+    pw_async2
     pw_channel.forwarding_channel
     pw_containers.inline_var_len_entry_queue
     pw_hdlc.router
@@ -424,8 +442,7 @@ pw_add_library(pw_system.async_packet_io STATIC
     pw_log
 )
 
-if((NOT "${pw_async2.dispatcher_BACKEND}" STREQUAL "") AND
-   (NOT "${CMAKE_SYSTEM_NAME}" STREQUAL "Windows"))
+if(NOT "${CMAKE_SYSTEM_NAME}" STREQUAL "Windows")
   # TODO: b/317922402 - Run on Windows when thread detaching is supported.
   pw_add_test(pw_system.async_packet_io_test
     SOURCES
@@ -447,23 +464,9 @@ if((NOT "${pw_async2.dispatcher_BACKEND}" STREQUAL "") AND
       pw_system.async
       pw_allocator.testing
       pw_channel.loopback_channel
-      pw_multibuf.testing
+      pw_multibuf.simple_allocator
     GROUPS
       modules
       pw_system
   )
 endif()
-
-
-add_executable(pw_system.system_async_host_example EXCLUDE_FROM_ALL
-  example_user_app_init.cc
-)
-target_link_libraries(pw_system.system_async_host_example
-  PRIVATE
-    pw_system.async
-    pw_channel.epoll_channel
-    pw_multibuf.testing
-    pw_trace
-    pw_unit_test.rpc_service
-    targets.host_device_simulator.boot
-)

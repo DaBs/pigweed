@@ -18,7 +18,10 @@ load("//pw_unit_test:pw_cc_test.bzl", "pw_cc_test")
 
 package(
     default_visibility = ["//visibility:public"],
-    features = ["-layering_check"],
+    features = [
+        "-layering_check",
+        "-ctad_warnings",
+    ],
 )
 
 cc_library(
@@ -42,6 +45,7 @@ cc_library(
     ],
     hdrs = [
         "public/pw_bluetooth_sapphire/internal/host/common/advertising_data.h",
+        "public/pw_bluetooth_sapphire/internal/host/common/bidirectional_map.h",
         "public/pw_bluetooth_sapphire/internal/host/common/bounded_inspect_list_node.h",
         "public/pw_bluetooth_sapphire/internal/host/common/byte_buffer.h",
         "public/pw_bluetooth_sapphire/internal/host/common/device_address.h",
@@ -73,6 +77,7 @@ cc_library(
         "public/pw_bluetooth_sapphire/internal/host/common/weak_self.h",
         "public/pw_bluetooth_sapphire/internal/host/common/windowed_inspect_numeric_property.h",
     ],
+    features = ["-conversion_warnings"],
     implementation_deps = [
         "//pw_string",
         "//pw_string:utf_codecs",
@@ -87,6 +92,8 @@ cc_library(
         "//conditions:default": ["@platforms//:incompatible"],
     }),
     deps = [
+        "//pw_allocator",
+        "//pw_allocator:libc_allocator",
         "//pw_async:dispatcher",
         "//pw_async:task",
         "//pw_bluetooth:emboss_hci",
@@ -119,6 +126,7 @@ pw_cc_test(
     name = "common_test",
     srcs = [
         "advertising_data_test.cc",
+        "bidirectional_map_test.cc",
         "bounded_inspect_list_node_test.cc",
         "byte_buffer_test.cc",
         "device_address_test.cc",
@@ -138,8 +146,11 @@ pw_cc_test(
         "weak_self_test.cc",
         "windowed_inspect_numeric_property_test.cc",
     ],
-    # TODO: https://pwbug.dev/393957973 - Fix this test.
-    tags = ["noubsan"],
+    copts = [
+        # TODO: https://pwbug.dev/464024322 - Fix warnings.
+        "-Wno-shadow",
+    ],
+    features = ["-conversion_warnings"],
     test_main = "//pw_bluetooth_sapphire/host/testing:gtest_main",
     deps = [
         ":common",
@@ -154,5 +165,6 @@ pw_cc_test(
 pw_cc_fuzz_test(
     name = "advertising_data_fuzzer",
     srcs = ["advertising_data_fuzztest.cc"],
+    features = ["-conversion_warnings"],
     deps = [":common"],
 )

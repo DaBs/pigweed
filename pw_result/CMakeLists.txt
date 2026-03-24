@@ -22,13 +22,15 @@ pw_add_library(pw_result INTERFACE
     public
   PUBLIC_DEPS
     pw_assert
-    pw_status
+    pw_containers.optional
     pw_preprocessor
+    pw_status
 )
 
 pw_add_library(pw_result.expected INTERFACE
   HEADERS
     public/pw_result/expected.h
+    public/pw_result/internal/expected_impl.h
   PUBLIC_INCLUDES
     public
 )
@@ -49,6 +51,8 @@ pw_add_test(pw_result.expected_test
     expected_test.cc
   PRIVATE_DEPS
     pw_result.expected
+    pw_string
+    pw_status
   GROUPS
     modules
     pw_result

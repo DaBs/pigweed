@@ -12,12 +12,11 @@
 # License for the specific language governing permissions and limitations under
 # the License.
 
-load("@rules_python//python:defs.bzl", "py_library")
-load("//pw_build:python.bzl", "pw_py_test")
+load("//pw_build:python.bzl", "pw_py_binary", "pw_py_library", "pw_py_test")
 
 package(default_visibility = ["//visibility:public"])
 
-py_library(
+pw_py_library(
     name = "pw_snapshot",
     srcs = [
         "pw_snapshot/__init__.py",
@@ -30,6 +29,8 @@ py_library(
         "//pw_chrono/py:pw_chrono",
         "//pw_cpu_exception_cortex_m/py:exception_analyzer",
         "//pw_cpu_exception_risc_v/py:exception_analyzer",
+        "//pw_log/py:pw_log",
+        "//pw_metric/py:pw_metric",
         "//pw_snapshot:snapshot_proto_py_pb2",
         "//pw_symbolizer/py:pw_symbolizer",
         "//pw_thread/py:pw_thread",
@@ -37,7 +38,7 @@ py_library(
     ],
 )
 
-py_library(
+pw_py_library(
     name = "pw_snapshot_metadata",
     srcs = [
         "pw_snapshot_metadata/__init__.py",
@@ -64,12 +65,6 @@ pw_py_test(
 pw_py_test(
     name = "processor_test",
     srcs = ["processor_test.py"],
-
-    # TODO(b/336614211): Remove and re-enable tests.
-    tags = [
-        "manual",
-        "noenv-failure",
-    ],
     deps = [
         ":pw_snapshot",
         ":pw_snapshot_metadata",
@@ -81,5 +76,14 @@ pw_py_test(
         "//pw_symbolizer/py:pw_symbolizer",
         "//pw_thread/py:pw_thread",
         "//pw_tokenizer/py:pw_tokenizer",
+    ],
+)
+
+pw_py_binary(
+    name = "generate_example_snapshot",
+    srcs = ["generate_example_snapshot.py"],
+    deps = [
+        ":pw_snapshot",
+        "//pw_snapshot:snapshot_proto_py_pb2",
     ],
 )

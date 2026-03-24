@@ -1,4 +1,7 @@
 {
+  "included_files": [
+    "rust.json"
+  ],
   "packages": [
     {
       "path": "gn/gn/${platform}",
@@ -10,9 +13,21 @@
         "windows-amd64"
       ],
       "tags": [
-        "git_revision:ab638bd7cbb9ac8468bf2fbe60c74ed4706a14a7"
+        "git_revision:97b68a0bb62b7528bc3491c7949d6804223c2b82"
       ],
       "version_file": ".versions/gn.cipd_version"
+    },
+    {
+      "path": "fuchsia/third_party/make/${platform}",
+      "platforms": [
+        "linux-amd64",
+        "linux-arm64",
+        "mac-amd64",
+        "mac-arm64"
+      ],
+      "tags": [
+        "version:4.3"
+      ]
     },
     {
       "path": "fuchsia/third_party/ninja/${platform}",
@@ -24,7 +39,7 @@
         "windows-amd64"
       ],
       "tags": [
-        "git_revision:52b67c613eacdbc6806deecd07f6c86418a22750"
+        "git_revision:1ab0e2f29818ecfc2b2ded65c463e236bf214972"
       ]
     },
     {
@@ -58,7 +73,7 @@
         "windows-amd64"
       ],
       "tags": [
-        "version:3@28.2"
+        "version:3@33.4"
       ]
     },
     {
@@ -71,87 +86,9 @@
         "windows-amd64"
       ],
       "tags": [
-        "git_revision:0454dd8c48cd771478f1ae53330ba78e71bcd7cb"
+        "git_revision:9de31c4a3e77ceb1e736d4df3ae9e3f5a1dc8748"
       ],
       "version_file": ".versions/clang.cipd_version"
-    },
-    {
-      "path": "fuchsia/third_party/rust/host/${platform}",
-      "platforms": [
-        "linux-amd64",
-        "linux-arm64",
-        "mac-amd64",
-        "mac-arm64"
-      ],
-      "subdir": "rust",
-      "tags": [
-        "git_revision:612796c42077605fdd3c6f7dda05745d8f4dc4d8"
-      ]
-    },
-    {
-      "path": "fuchsia/third_party/rust/target/aarch64-unknown-linux-gnu",
-      "platforms": [
-        "linux-arm64"
-      ],
-      "subdir": "rust",
-      "tags": [
-        "git_revision:612796c42077605fdd3c6f7dda05745d8f4dc4d8"
-      ]
-    },
-    {
-      "path": "fuchsia/third_party/rust/target/x86_64-unknown-linux-gnu",
-      "platforms": [
-        "linux-amd64"
-      ],
-      "subdir": "rust",
-      "tags": [
-        "git_revision:612796c42077605fdd3c6f7dda05745d8f4dc4d8"
-      ]
-    },
-    {
-      "path": "fuchsia/third_party/rust/target/aarch64-apple-darwin",
-      "platforms": [
-        "mac-arm64"
-      ],
-      "subdir": "rust",
-      "tags": [
-        "git_revision:612796c42077605fdd3c6f7dda05745d8f4dc4d8"
-      ]
-    },
-    {
-      "path": "fuchsia/third_party/rust/target/x86_64-apple-darwin",
-      "platforms": [
-        "mac-amd64"
-      ],
-      "subdir": "rust",
-      "tags": [
-        "git_revision:612796c42077605fdd3c6f7dda05745d8f4dc4d8"
-      ]
-    },
-    {
-      "path": "fuchsia/third_party/rust/target/thumbv7m-none-eabi",
-      "platforms": [
-        "linux-amd64",
-        "linux-arm64",
-        "mac-amd64",
-        "mac-arm64"
-      ],
-      "subdir": "rust",
-      "tags": [
-        "git_revision:612796c42077605fdd3c6f7dda05745d8f4dc4d8"
-      ]
-    },
-    {
-      "path": "fuchsia/third_party/rust_bindgen/${platform}",
-      "platforms": [
-        "linux-amd64",
-        "mac-amd64",
-        "mac-arm64"
-      ],
-      "subdir": "rust_bindgen",
-      "tags": [
-        "git_revision:f518815cc14a7f8c292964bb37179a1070d7e18a"
-      ]
     },
     {
       "path": "infra/3pp/tools/openocd/${platform}",

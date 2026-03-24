@@ -454,23 +454,65 @@ class Manager:  # pylint: disable=too-many-instance-attributes
 
         await transfer.handle_chunk(chunk)
 
+    def _on_error(
+        self, transfers: _TransferDict, transfer_type: str, status: Status
+    ) -> None:
+        """Callback for an RPC error in a transfer stream."""
+
+        if status is Status.FAILED_PRECONDITION:
+            # On a stream reset, restart any transfers that are in the process
+            # of starting. Terminate all other transfers.
+            finished_transfers = []
+            restarted_transfers = []
+            for transfer in transfers.values():
+                if transfer.is_initiating():
+                    restarted_transfers.append(transfer)
+                else:
+                    finished_transfers.append(transfer)
+
+            for transfer in finished_transfers:
+                del transfers[transfer.resource_id]
+                transfer.finish(Status.INTERNAL, skip_callback=True)
+
+            if restarted_transfers:
+                _LOG.info(
+                    '%s stream reset. Restarting %d transfers.',
+                    transfer_type.capitalize(),
+                    len(restarted_transfers),
+                )
+                for transfer in restarted_transfers:
+                    _LOG.debug(
+                        'Restarting %s transfer %d',
+                        transfer_type,
+                        transfer.id,
+                    )
+                    # Re-queue the transfer to be started again.
+                    delay = 1
+                    self._loop.call_soon_threadsafe(
+                        self._loop.call_later,
+                        delay,
+                        self._new_transfer_queue.put_nowait,
+                        transfer,
+                    )
+                return
+
+        # If the status is not FAILED_PRECONDITION or no transfers were
+        # restarted, terminate all transfers and log an error.
+        for transfer in transfers.values():
+            transfer.finish(Status.INTERNAL, skip_callback=True)
+        transfers.clear()
+
+        _LOG.error(
+            '%s stream shut down: %s', transfer_type.capitalize(), status
+        )
+
     def _on_read_error(self, status: Status) -> None:
         """Callback for an RPC error in the read stream."""
-
-        for transfer in self._read_transfers.values():
-            transfer.finish(Status.INTERNAL, skip_callback=True)
-        self._read_transfers.clear()
-
-        _LOG.error('Read stream shut down: %s', status)
+        self._on_error(self._read_transfers, 'read', status)
 
     def _on_write_error(self, status: Status) -> None:
         """Callback for an RPC error in the write stream."""
-
-        for transfer in self._write_transfers.values():
-            transfer.finish(Status.INTERNAL, skip_callback=True)
-        self._write_transfers.clear()
-
-        _LOG.error('Write stream shut down: %s', status)
+        self._on_error(self._write_transfers, 'write', status)
 
     def _start_read_transfer(self, transfer: Transfer) -> None:
         """Begins a new read transfer, opening the stream if it isn't."""

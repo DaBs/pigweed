@@ -1,0 +1,222 @@
+// Copyright 2025 The Pigweed Authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License"); you may not
+// use this file except in compliance with the License. You may obtain a copy of
+// the License at
+//
+//     https://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+// WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+// License for the specific language governing permissions and limitations under
+// the License.
+
+syntax = "proto3";
+
+package pw.build.proto;
+
+import "google/protobuf/any.proto";
+
+// Describes a group of outputs of a build action.
+message OutputGroupSpec {
+  // The name by which this output group can be referenced.
+  string name = 1;
+
+  // File glob patterns that are included in this output group.
+  // These follow starlark/python file globbing semantics.
+  repeated string glob_patterns = 2;
+
+  // The prefix that should be stripped from these paths when they are
+  // packaged or exported.
+  //
+  // If any files in the glob patterns aren't beneath this prefix, an error
+  // will be raised.
+  string strip_prefix = 3;
+
+  // If a build succeeds and no files are captured by this output group then
+  // an error will be raised. Setting this field to True suppresses this error.
+  bool allow_empty = 4;
+}
+
+message OutputGroup {
+  // Files that match the given globs.
+  repeated string matching_files = 1;
+
+  // The prefix that should be stripped from these paths when they are
+  // packaged or exported.
+  string strip_prefix = 2;
+}
+
+message BuildArtifacts {
+  // The root of the output directory. All OutputGroupSpec paths are
+  // relative to this root.
+  string output_root = 1;
+
+  // Output groups related to the requested build.
+  repeated OutputGroup output_groups = 2;
+}
+
+// A distinct build configuration.
+//
+// Build configurations are expected to be hermetic, meaning that if the
+// same build configuration is reused across multiple builds it should be safe
+// to reuse the same build directory.
+message BuildConfig {
+  // Descriptive name for this build configuration.
+  // This is used as an ID and must be unique across a workflow configuration.
+  string name = 1;
+
+  // A help string that describes this configuration.
+  string description = 2;
+
+  // The name of the driver that should be used for this build configuration.
+  string build_type = 3;
+
+  // Arguments that should be passed to underlying build system.
+  repeated string args = 4;
+
+  // Environment variables unique to this build configuration.
+  map<string, string> env = 5;
+
+  // Driver-specific options.
+  // This is forwarded to the driver for the respective build_type, and is used
+  // to configure options that are more complex then simply passing additional
+  // flags.
+  google.protobuf.Any driver_options = 6;
+}
+
+// A discrete build.
+message Build {
+  // A human-readable name for this build.
+  // This is the name that users will write out to trigger this build.
+  string name = 1;
+
+  // A help string that describes this build.
+  string description = 2;
+
+  // The configuration that should be used when building the targets specified
+  // by this build.
+  oneof config {
+    // The ID/name of a shared BuildConfig.
+    string use_config = 3;
+    // A unique one-off config.
+    BuildConfig build_config = 4;
+  }
+
+  // Target patterns that should be built/tested by this configuration.
+  repeated string targets = 5;
+
+  // A shortcut subcommand that launches this build. For example:
+  //
+  //   # Given rerun_shortcut=build_foo, the following subcommand will be
+  //   # available:
+  //   $ ./pw build_foo
+  //
+  // If this is not set, the assumed way to run this build is `build [name]`.
+  string rerun_shortcut = 6;
+
+  // The ID/name of shared OutputGroupSpecs.
+  repeated string use_output = 7;
+
+  // Unique one-off specs.
+  repeated OutputGroupSpec output_spec = 8;
+}
+
+// A runnable tool.
+message Tool {
+  // The name that is used to launch this tool.
+  string name = 1;
+
+  // A descriptive help string for this tool.
+  string description = 2;
+
+  // The configuration that this tool will be built under.
+  oneof config {
+    // The ID/name of a shared BuildConfig.
+    string use_config = 3;
+    // A unique one-off config.
+    BuildConfig build_config = 4;
+  }
+
+  // Target to build and launch.
+  string target = 5;
+
+  enum Type {
+    // A tool that may produce output, mutate the world, require realtime user
+    // interaction, or have side-effects that affect hermeticity of subsequent
+    // actions.
+    // By default, all tools are assumed to be of this kind.
+    GENERAL = 0;
+
+    // A runnable tool that exists *purely* to surface information.
+    // e.g. linters, code style checks, etc.
+    // Theses tools may NOT:
+    //   - Modify files.
+    //   - Upload/download arbitrary files.
+    //   - Modify local system state.
+    //   - Interact with attached devices.
+    ANALYZER = 1;
+  }
+
+  // The type of tool.
+  Type type = 6;
+
+  // Arguments to inject that make a Tool safe to run as an ANALYZER.
+  // These are not injected when this tool is normally launched, only when
+  // the tool is launched in a way that requires behavior that doesn't affect
+  // hermeticity.
+  repeated string analyzer_friendly_args = 7;
+
+  // A shortcut subcommand that launches this tool. For example:
+  //
+  //   # Given rerun_shortcut=check_formatting, the following subcommand will be
+  //   # available:
+  //   $ ./pw check_formatting
+  //
+  // Note that this always launches the analyzer version of this tool, and is
+  // unsupported for other tool types.
+  // If this is not set, the assumed way to run this analyzer is `check [name]`.
+  string rerun_shortcut = 8;
+
+  // The ID/name of shared OutputGroupSpecs.
+  repeated string use_output = 9;
+
+  // Unique one-off specs.
+  repeated OutputGroupSpec output_spec = 10;
+}
+
+// A series of builds and analyzers that are launchable as a group to
+// accelerate workflows.
+//
+// The builds and analyzers listed in this workflow *may* be ran in order,
+// but no guarantee is provided. Builds and analyzers listed here should
+// behave predictably and deterministically when run out-of-order.
+// Having order-based dependencies in a workflow is considered an antipattern.
+message TaskGroup {
+  // The name used to launch this workflow.
+  string name = 1;
+
+  // A descriptive help string for this tool.
+  string description = 2;
+
+  // The name of builds that should be performed as part of this workflow.
+  repeated string builds = 3;
+
+  // The name of analyzers that should be run as part of this workflow.
+  //
+  // Note: Only ANALYZER tools, or tools that have analyzer_friendly_args
+  // may be listed here.
+  repeated string analyzers = 4;
+}
+
+// The launcher config.
+message WorkflowSuite {
+  // Reserved for config loader options. See https://pwrev.dev/363612.
+  reserved 1;
+  repeated BuildConfig configs = 2;
+  repeated Build builds = 3;
+  repeated Tool tools = 4;
+  repeated TaskGroup groups = 5;
+  repeated OutputGroupSpec output_specs = 6;
+}

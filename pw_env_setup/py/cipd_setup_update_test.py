@@ -157,10 +157,12 @@ class TestCipdSetupUpdate(unittest.TestCase):
             Path('default.json'),
             Path('arm.json'),
             Path('pigweed.json'),
+            Path('rust.json'),
             Path('clang.json'),
             Path('python.json'),
             Path('python311.json'),
             Path('doxygen.json'),
+            Path('flatc.json'),
             Path('go.json'),
             Path('host_tools.json'),
             Path('kythe.json'),
@@ -168,13 +170,14 @@ class TestCipdSetupUpdate(unittest.TestCase):
             Path('msrv_python.json'),
             Path('python310.json'),
             Path('rbe.json'),
-            Path('ruff.json'),
             Path('testing.json'),
             Path('web.json'),
         ]
 
-        with importlib.resources.path(
-            'pw_env_setup.cipd_setup', 'upstream.json'
+        with importlib.resources.as_file(
+            importlib.resources.files('pw_env_setup.cipd_setup').joinpath(
+                'upstream.json'
+            )
         ) as upstream_json:
             all_files = all_package_files(None, [upstream_json])
             all_files_relative = [

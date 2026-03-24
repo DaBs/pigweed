@@ -94,7 +94,7 @@ using TestBase = testing::FakeDispatcherControllerTest<testing::MockController>;
 class LegacyPairingStateTest : public TestBase {
  public:
   LegacyPairingStateTest() = default;
-  virtual ~LegacyPairingStateTest() = default;
+  ~LegacyPairingStateTest() override = default;
 
   void SetUp() override {
     TestBase::SetUp();
@@ -201,7 +201,8 @@ TEST_F(LegacyPairingStateTest, BuildEstablishedLink) {
 
   LegacyPairingState pairing_state(peer()->GetWeakPtr(),
                                    pairing_delegate.GetWeakPtr(),
-                                   /*outgoing_connection=*/false);
+                                   /*outgoing_connection=*/false,
+                                   &dispatcher());
 
   // |pairing_state|'s temporary |link_key_| is empty
   EXPECT_FALSE(pairing_state.link_key().has_value());
@@ -239,6 +240,7 @@ TEST_F(LegacyPairingStateTest, PairingStateStartsAsResponder) {
                                    pairing_delegate.GetWeakPtr(),
                                    connection()->GetWeakPtr(),
                                    /*outgoing_connection=*/false,
+                                   &dispatcher(),
                                    MakeAuthRequestCallback(),
                                    NoOpStatusCallback);
   EXPECT_FALSE(pairing_state.initiator());
@@ -250,7 +252,8 @@ TEST_F(LegacyPairingStateTest,
 
   LegacyPairingState pairing_state(peer()->GetWeakPtr(),
                                    pairing_delegate.GetWeakPtr(),
-                                   /*outgoing_connection=*/false);
+                                   /*outgoing_connection=*/false,
+                                   &dispatcher());
   EXPECT_FALSE(pairing_state.initiator());
 
   pairing_state.InitiatePairing(NoOpStatusCallback);
@@ -268,6 +271,7 @@ TEST_F(LegacyPairingStateTest, NeverInitiateLegacyPairingWhenPeerSupportsSSP) {
                                    pairing_delegate.GetWeakPtr(),
                                    connection()->GetWeakPtr(),
                                    /*outgoing_connection=*/false,
+                                   &dispatcher(),
                                    MakeAuthRequestCallback(),
                                    NoOpStatusCallback);
   EXPECT_FALSE(pairing_state.initiator());
@@ -297,6 +301,7 @@ TEST_F(LegacyPairingStateTest,
                                    pairing_delegate.GetWeakPtr(),
                                    connection()->GetWeakPtr(),
                                    /*outgoing_connection=*/false,
+                                   &dispatcher(),
                                    MakeAuthRequestCallback(),
                                    NoOpStatusCallback);
   EXPECT_FALSE(pairing_state.initiator());
@@ -321,7 +326,8 @@ TEST_F(
 
   LegacyPairingState pairing_state(peer()->GetWeakPtr(),
                                    pairing_delegate.GetWeakPtr(),
-                                   /*outgoing_connection=*/false);
+                                   /*outgoing_connection=*/false,
+                                   &dispatcher());
   EXPECT_FALSE(pairing_state.initiator());
 
   EXPECT_TRUE(peer()->MutBrEdr().SetBondData(
@@ -349,6 +355,7 @@ TEST_F(
                                    pairing_delegate.GetWeakPtr(),
                                    connection()->GetWeakPtr(),
                                    /*outgoing_connection=*/false,
+                                   &dispatcher(),
                                    MakeAuthRequestCallback(),
                                    NoOpStatusCallback);
   EXPECT_FALSE(pairing_state.initiator());
@@ -376,6 +383,7 @@ TEST_F(
                                    pairing_delegate.GetWeakPtr(),
                                    connection()->GetWeakPtr(),
                                    /*outgoing_connection=*/false,
+                                   &dispatcher(),
                                    MakeAuthRequestCallback(),
                                    NoOpStatusCallback);
   EXPECT_FALSE(pairing_state.initiator());
@@ -405,7 +413,8 @@ TEST_F(
 
   LegacyPairingState pairing_state(peer()->GetWeakPtr(),
                                    pairing_delegate.GetWeakPtr(),
-                                   /*outgoing_connection=*/false);
+                                   /*outgoing_connection=*/false,
+                                   &dispatcher());
   EXPECT_FALSE(pairing_state.initiator());
 
   std::optional<hci_spec::LinkKey> reply_key = pairing_state.OnLinkKeyRequest();
@@ -421,6 +430,7 @@ TEST_F(
                                    pairing_delegate.GetWeakPtr(),
                                    connection()->GetWeakPtr(),
                                    /*outgoing_connection=*/false,
+                                   &dispatcher(),
                                    MakeAuthRequestCallback(),
                                    NoOpStatusCallback);
   EXPECT_FALSE(pairing_state.initiator());
@@ -437,6 +447,7 @@ TEST_F(LegacyPairingStateTest,
                                    pairing_delegate.GetWeakPtr(),
                                    connection()->GetWeakPtr(),
                                    /*outgoing_connection=*/false,
+                                   &dispatcher(),
                                    MakeAuthRequestCallback(),
                                    NoOpStatusCallback);
   EXPECT_FALSE(pairing_state.initiator());
@@ -456,6 +467,7 @@ TEST_F(LegacyPairingStateTest, OnLinkKeyRequestReceivedMissingPeerAsserts) {
                                    pairing_delegate.GetWeakPtr(),
                                    connection()->GetWeakPtr(),
                                    /*outgoing_connection=*/false,
+                                   &dispatcher(),
                                    MakeAuthRequestCallback(),
                                    NoOpStatusCallback);
   EXPECT_FALSE(pairing_state.initiator());
@@ -483,6 +495,7 @@ TEST_F(LegacyPairingStateTest,
                                    pairing_delegate.GetWeakPtr(),
                                    connection()->GetWeakPtr(),
                                    /*outgoing_connection=*/false,
+                                   &dispatcher(),
                                    MakeAuthRequestCallback(),
                                    status_handler.MakeStatusCallback());
   EXPECT_FALSE(pairing_state.initiator());
@@ -507,6 +520,7 @@ TEST_F(LegacyPairingStateTest, PairingInitiatorWithNoInputGeneratesRandomPin) {
                                    pairing_delegate.GetWeakPtr(),
                                    connection()->GetWeakPtr(),
                                    /*outgoing_connection=*/false,
+                                   &dispatcher(),
                                    MakeAuthRequestCallback(),
                                    status_handler.MakeStatusCallback());
   EXPECT_FALSE(pairing_state.initiator());
@@ -550,6 +564,7 @@ TEST_F(LegacyPairingStateTest,
                                    pairing_delegate.GetWeakPtr(),
                                    connection()->GetWeakPtr(),
                                    /*outgoing_connection=*/false,
+                                   &dispatcher(),
                                    MakeAuthRequestCallback(),
                                    status_handler.MakeStatusCallback());
   EXPECT_FALSE(pairing_state.initiator());
@@ -593,6 +608,7 @@ TEST_F(LegacyPairingStateTest,
                                    pairing_delegate.GetWeakPtr(),
                                    connection()->GetWeakPtr(),
                                    /*outgoing_connection=*/false,
+                                   &dispatcher(),
                                    MakeAuthRequestCallback(),
                                    status_handler.MakeStatusCallback());
   EXPECT_FALSE(pairing_state.initiator());
@@ -635,6 +651,7 @@ TEST_F(LegacyPairingStateTest, PairingResponderWithNoInputTriesCommonPins) {
                                    pairing_delegate.GetWeakPtr(),
                                    connection()->GetWeakPtr(),
                                    /*outgoing_connection=*/false,
+                                   &dispatcher(),
                                    MakeAuthRequestCallback(),
                                    status_handler.MakeStatusCallback());
   EXPECT_FALSE(pairing_state.initiator());
@@ -673,6 +690,7 @@ TEST_F(LegacyPairingStateTest, PairingResponderWithYesNoInputTriesCommonPins) {
                                    pairing_delegate.GetWeakPtr(),
                                    connection()->GetWeakPtr(),
                                    /*outgoing_connection=*/false,
+                                   &dispatcher(),
                                    MakeAuthRequestCallback(),
                                    status_handler.MakeStatusCallback());
   EXPECT_FALSE(pairing_state.initiator());
@@ -712,6 +730,7 @@ TEST_F(LegacyPairingStateTest,
                                    pairing_delegate.GetWeakPtr(),
                                    connection()->GetWeakPtr(),
                                    /*outgoing_connection=*/false,
+                                   &dispatcher(),
                                    MakeAuthRequestCallback(),
                                    status_handler.MakeStatusCallback());
   EXPECT_FALSE(pairing_state.initiator());
@@ -751,6 +770,7 @@ TEST_F(LegacyPairingStateTest,
                                    pairing_delegate.GetWeakPtr(),
                                    connection()->GetWeakPtr(),
                                    /*outgoing_connection=*/false,
+                                   &dispatcher(),
                                    MakeAuthRequestCallback(),
                                    status_handler.MakeStatusCallback());
   EXPECT_FALSE(pairing_state.initiator());
@@ -791,6 +811,7 @@ TEST_F(
                                    pairing_delegate.GetWeakPtr(),
                                    connection()->GetWeakPtr(),
                                    /*outgoing_connection=*/false,
+                                   &dispatcher(),
                                    MakeAuthRequestCallback(),
                                    status_handler.MakeStatusCallback());
   EXPECT_FALSE(pairing_state.initiator());
@@ -817,6 +838,7 @@ TEST_F(LegacyPairingStateTest,
                                    pairing_delegate.GetWeakPtr(),
                                    connection()->GetWeakPtr(),
                                    /*outgoing_connection=*/false,
+                                   &dispatcher(),
                                    MakeAuthRequestCallback(),
                                    NoOpStatusCallback);
   EXPECT_FALSE(pairing_state.initiator());
@@ -836,7 +858,8 @@ TEST_F(LegacyPairingStateTest,
 
   LegacyPairingState pairing_state(peer()->GetWeakPtr(),
                                    pairing_delegate.GetWeakPtr(),
-                                   /*outgoing_connection=*/false);
+                                   /*outgoing_connection=*/false,
+                                   &dispatcher());
   EXPECT_FALSE(pairing_state.initiator());
 
   pairing_delegate.SetRequestPasskeyCallback([this](PeerId peer_id, auto cb) {
@@ -874,6 +897,7 @@ TEST_F(LegacyPairingStateTest,
                                    pairing_delegate.GetWeakPtr(),
                                    connection()->GetWeakPtr(),
                                    /*outgoing_connection=*/false,
+                                   &dispatcher(),
                                    MakeAuthRequestCallback(),
                                    status_handler.MakeStatusCallback());
   EXPECT_FALSE(pairing_state.initiator());
@@ -911,6 +935,7 @@ TEST_F(LegacyPairingStateTest,
                                    pairing_delegate.GetWeakPtr(),
                                    connection()->GetWeakPtr(),
                                    /*outgoing_connection=*/false,
+                                   &dispatcher(),
                                    MakeAuthRequestCallback(),
                                    status_handler.MakeStatusCallback());
   EXPECT_FALSE(pairing_state.initiator());
@@ -955,6 +980,7 @@ TEST_F(LegacyPairingStateTest, UnexpectedLinkKeyTypeRaisesError) {
                                    pairing_delegate.GetWeakPtr(),
                                    connection()->GetWeakPtr(),
                                    /*outgoing_connection=*/false,
+                                   &dispatcher(),
                                    MakeAuthRequestCallback(),
                                    status_handler.MakeStatusCallback());
   EXPECT_FALSE(pairing_state.initiator());
@@ -983,6 +1009,7 @@ TEST_F(LegacyPairingStateTest,
                                    pairing_delegate.GetWeakPtr(),
                                    connection()->GetWeakPtr(),
                                    /*outgoing_connection=*/false,
+                                   &dispatcher(),
                                    MakeAuthRequestCallback(),
                                    status_handler.MakeStatusCallback());
 
@@ -1006,6 +1033,7 @@ TEST_F(LegacyPairingStateTest,
                                    pairing_delegate.GetWeakPtr(),
                                    connection()->GetWeakPtr(),
                                    /*outgoing_connection=*/false,
+                                   &dispatcher(),
                                    MakeAuthRequestCallback(),
                                    NoOpStatusCallback);
   EXPECT_FALSE(pairing_state.initiator());
@@ -1058,6 +1086,7 @@ TEST_F(
                                    pairing_delegate.GetWeakPtr(),
                                    connection()->GetWeakPtr(),
                                    /*outgoing_connection=*/false,
+                                   &dispatcher(),
                                    MakeAuthRequestCallback(),
                                    NoOpStatusCallback);
   EXPECT_FALSE(pairing_state.initiator());
@@ -1085,6 +1114,7 @@ TEST_F(LegacyPairingStateTest,
                                    pairing_delegate.GetWeakPtr(),
                                    connection()->GetWeakPtr(),
                                    /*outgoing_connection=*/false,
+                                   &dispatcher(),
                                    MakeAuthRequestCallback(),
                                    link_status_handler.MakeStatusCallback());
 
@@ -1120,6 +1150,7 @@ TEST_F(LegacyPairingStateTest, UnresolvedPairingCallbackIsCalledOnDestruction) {
                                      pairing_delegate.GetWeakPtr(),
                                      connection()->GetWeakPtr(),
                                      /*outgoing_connection=*/false,
+                                     &dispatcher(),
                                      MakeAuthRequestCallback(),
                                      overall_status.MakeStatusCallback());
     EXPECT_FALSE(pairing_state.initiator());
@@ -1175,6 +1206,7 @@ TEST_F(LegacyPairingStateTest, StatusCallbackMayDestroyPairingState) {
                                            pairing_delegate.GetWeakPtr(),
                                            connection()->GetWeakPtr(),
                                            /*outgoing_connection=*/false,
+                                           &dispatcher(),
                                            MakeAuthRequestCallback(),
                                            status_cb);
 
@@ -1193,6 +1225,7 @@ TEST_F(LegacyPairingStateTest, PairingInitiatorCallbackMayDestroyPairingState) {
                                            pairing_delegate.GetWeakPtr(),
                                            connection()->GetWeakPtr(),
                                            /*outgoing_connection=*/false,
+                                           &dispatcher(),
                                            MakeAuthRequestCallback(),
                                            NoOpStatusCallback);
   bool cb_called = false;
@@ -1212,6 +1245,187 @@ TEST_F(LegacyPairingStateTest, PairingInitiatorCallbackMayDestroyPairingState) {
                                        kTestLegacyLinkKeyType);
 
   EXPECT_TRUE(cb_called);
+}
+
+TEST_F(LegacyPairingStateTest, TransactionCollision) {
+  FakePairingDelegate pairing_delegate(kTestLocalIoCap);
+  pairing_delegate.SetDisplayPasskeyCallback(
+      [](PeerId, uint32_t, PairingDelegate::DisplayMethod, auto cb) {
+        cb(/*confirm=*/true);
+      });
+
+  LegacyPairingState pairing_state(peer()->GetWeakPtr(),
+                                   pairing_delegate.GetWeakPtr(),
+                                   connection()->GetWeakPtr(),
+                                   /*outgoing_connection=*/false,
+                                   &dispatcher(),
+                                   MakeAuthRequestCallback(),
+                                   NoOpStatusCallback);
+  pairing_state.SetPairingDelegate(pairing_delegate.GetWeakPtr());
+
+  bool cb_called = false;
+  auto status_cb = [&cb_called](hci_spec::ConnectionHandle,
+                                hci::Result<> status) {
+    EXPECT_FALSE(status.is_error());
+    cb_called = true;
+  };
+
+  pairing_state.InitiatePairing(status_cb);
+  static_cast<void>(pairing_state.OnLinkKeyRequest());
+  pairing_state.OnPinCodeRequest(NoOpUserPinCodeCallback);
+  pairing_state.OnLinkKeyNotification(kTestLinkKeyValue,
+                                      kTestLegacyLinkKeyType);
+  pairing_state.OnAuthenticationComplete(
+      pw::bluetooth::emboss::StatusCode::SUCCESS);
+
+  auto tc_result = ToResult(
+      pw::bluetooth::emboss::StatusCode::LMP_ERROR_TRANSACTION_COLLISION);
+  hci::Result<bool> result(tc_result.take_error());
+  pairing_state.OnEncryptionChange(result);
+
+  EXPECT_FALSE(cb_called);
+  pairing_state.OnEncryptionChange(fit::ok(true));
+  EXPECT_TRUE(cb_called);
+}
+
+TEST_F(LegacyPairingStateTest, DifferentTransactionCollisionAsCentral) {
+  FakePairingDelegate pairing_delegate(kTestLocalIoCap);
+  pairing_delegate.SetDisplayPasskeyCallback(
+      [](PeerId, uint32_t, PairingDelegate::DisplayMethod, auto cb) {
+        cb(/*confirm=*/true);
+      });
+
+  LegacyPairingState pairing_state(peer()->GetWeakPtr(),
+                                   pairing_delegate.GetWeakPtr(),
+                                   connection()->GetWeakPtr(),
+                                   /*outgoing_connection=*/true,
+                                   &dispatcher(),
+                                   MakeAuthRequestCallback(),
+                                   NoOpStatusCallback);
+  pairing_state.SetPairingDelegate(pairing_delegate.GetWeakPtr());
+
+  bool cb_called = false;
+  auto status_cb = [&cb_called](hci_spec::ConnectionHandle,
+                                hci::Result<> status) {
+    EXPECT_FALSE(status.is_error());
+    cb_called = true;
+  };
+
+  pairing_state.InitiatePairing(status_cb);
+  static_cast<void>(pairing_state.OnLinkKeyRequest());
+  pairing_state.OnPinCodeRequest(NoOpUserPinCodeCallback);
+  pairing_state.OnLinkKeyNotification(kTestLinkKeyValue,
+                                      kTestLegacyLinkKeyType);
+  pairing_state.OnAuthenticationComplete(
+      pw::bluetooth::emboss::StatusCode::SUCCESS);
+  ASSERT_EQ(1, connection()->start_encryption_count());
+
+  auto tc_result = ToResult(
+      pw::bluetooth::emboss::StatusCode::DIFFERENT_TRANSACTION_COLLISION);
+  hci::Result<bool> result(tc_result.take_error());
+  pairing_state.OnEncryptionChange(result);
+  EXPECT_FALSE(cb_called);
+
+  // Ensure we don't retry as a Central
+  RunFor(LegacyPairingState::kDelayRetryEnableEncryption);
+  ASSERT_EQ(1, connection()->start_encryption_count());
+
+  pairing_state.OnEncryptionChange(fit::ok(true));
+  EXPECT_TRUE(cb_called);
+}
+
+TEST_F(LegacyPairingStateTest, DifferentTransactionCollisionAsPeripheral) {
+  FakePairingDelegate pairing_delegate(kTestLocalIoCap);
+  pairing_delegate.SetDisplayPasskeyCallback(
+      [](PeerId, uint32_t, PairingDelegate::DisplayMethod, auto cb) {
+        cb(/*confirm=*/true);
+      });
+
+  LegacyPairingState pairing_state(peer()->GetWeakPtr(),
+                                   pairing_delegate.GetWeakPtr(),
+                                   connection()->GetWeakPtr(),
+                                   /*outgoing_connection=*/false,
+                                   &dispatcher(),
+                                   MakeAuthRequestCallback(),
+                                   NoOpStatusCallback);
+  pairing_state.SetPairingDelegate(pairing_delegate.GetWeakPtr());
+
+  bool cb_called = false;
+  auto status_cb = [&cb_called](hci_spec::ConnectionHandle,
+                                hci::Result<> status) {
+    EXPECT_FALSE(status.is_error());
+    cb_called = true;
+  };
+
+  pairing_state.InitiatePairing(status_cb);
+  static_cast<void>(pairing_state.OnLinkKeyRequest());
+  pairing_state.OnPinCodeRequest(NoOpUserPinCodeCallback);
+  pairing_state.OnLinkKeyNotification(kTestLinkKeyValue,
+                                      kTestLegacyLinkKeyType);
+  pairing_state.OnAuthenticationComplete(
+      pw::bluetooth::emboss::StatusCode::SUCCESS);
+  ASSERT_EQ(1, connection()->start_encryption_count());
+
+  auto tc_result = ToResult(
+      pw::bluetooth::emboss::StatusCode::DIFFERENT_TRANSACTION_COLLISION);
+  hci::Result<bool> result(tc_result.take_error());
+  pairing_state.OnEncryptionChange(result);
+  EXPECT_FALSE(cb_called);
+
+  // Ensure we retry after kDelayRetryEnableEncryption amount of time
+  RunFor(LegacyPairingState::kDelayRetryEnableEncryption);
+  ASSERT_EQ(2, connection()->start_encryption_count());
+
+  pairing_state.OnEncryptionChange(fit::ok(true));
+  EXPECT_TRUE(cb_called);
+}
+
+TEST_F(LegacyPairingStateTest,
+       DifferentTransactionCollisionRetryNotCalledIfSucceeded) {
+  FakePairingDelegate pairing_delegate(kTestLocalIoCap);
+  pairing_delegate.SetDisplayPasskeyCallback(
+      [](PeerId, uint32_t, PairingDelegate::DisplayMethod, auto cb) {
+        cb(/*confirm=*/true);
+      });
+
+  LegacyPairingState pairing_state(peer()->GetWeakPtr(),
+                                   pairing_delegate.GetWeakPtr(),
+                                   connection()->GetWeakPtr(),
+                                   /*outgoing_connection=*/false,
+                                   &dispatcher(),
+                                   MakeAuthRequestCallback(),
+                                   NoOpStatusCallback);
+  pairing_state.SetPairingDelegate(pairing_delegate.GetWeakPtr());
+
+  bool cb_called = false;
+  auto status_cb = [&cb_called](hci_spec::ConnectionHandle,
+                                hci::Result<> status) {
+    EXPECT_FALSE(status.is_error());
+    cb_called = true;
+  };
+
+  pairing_state.InitiatePairing(status_cb);
+  static_cast<void>(pairing_state.OnLinkKeyRequest());
+  pairing_state.OnPinCodeRequest(NoOpUserPinCodeCallback);
+  pairing_state.OnLinkKeyNotification(kTestLinkKeyValue,
+                                      kTestLegacyLinkKeyType);
+  pairing_state.OnAuthenticationComplete(
+      pw::bluetooth::emboss::StatusCode::SUCCESS);
+  ASSERT_EQ(1, connection()->start_encryption_count());
+
+  auto tc_result = ToResult(
+      pw::bluetooth::emboss::StatusCode::DIFFERENT_TRANSACTION_COLLISION);
+  hci::Result<bool> result(tc_result.take_error());
+  pairing_state.OnEncryptionChange(result);
+  EXPECT_FALSE(cb_called);
+
+  pairing_state.OnEncryptionChange(fit::ok(true));
+  EXPECT_TRUE(cb_called);
+
+  // Ensure we don't retry if we succeeded in enabling encryption before the
+  // retry handler is called
+  RunFor(LegacyPairingState::kDelayRetryEnableEncryption);
+  ASSERT_EQ(1, connection()->start_encryption_count());
 }
 
 // Event injectors. Return values are necessarily ignored in order to make types
@@ -1255,6 +1469,7 @@ class HandlesLegacyEvent
         pairing_delegate_->GetWeakPtr(),
         connection()->GetWeakPtr(),
         /*outgoing_connection=*/false,
+        &dispatcher(),
         MakeAuthRequestCallback(),
         status_handler_.MakeStatusCallback());
     pairing_state().SetPairingDelegate(pairing_delegate_->GetWeakPtr());
@@ -1494,6 +1709,7 @@ TEST_F(LegacyPairingStateTest, Inspect) {
                                    pairing_delegate.GetWeakPtr(),
                                    connection()->GetWeakPtr(),
                                    /*outgoing_connection=*/false,
+                                   &dispatcher(),
                                    MakeAuthRequestCallback(),
                                    status_handler.MakeStatusCallback());
 
@@ -1509,9 +1725,14 @@ TEST_F(LegacyPairingStateTest, Inspect) {
                                   StringIs("key_type", "kCombination"))))));
 
   auto pairing_state_matcher =
-      AllOf(NodeMatches(AllOf(NameMatches("pairing_state"),
-                              PropertyList(UnorderedElementsAre(
-                                  StringIs("encryption_status", "OFF"))))),
+      AllOf(NodeMatches(AllOf(
+                NameMatches("pairing_state"),
+                PropertyList(UnorderedElementsAre(
+                    StringIs("encryption_status", "OFF"),
+                    UintIs("central_lmp_transaction_collision", 0),
+                    UintIs("peripheral_lmp_transaction_collision", 0),
+                    UintIs("central_different_transaction_collision", 0),
+                    UintIs("peripheral_different_transaction_collision", 0))))),
             ChildrenMatch(UnorderedElementsAre(security_properties_matcher)));
 
   inspect::Hierarchy hierarchy = bt::testing::ReadInspect(inspector);

@@ -20,6 +20,7 @@ you can use in your projects:
 * :ref:`module-pw_i2c_linux` for Linux userspace.
 * :ref:`module-pw_i2c_mcuxpresso` for the NXP MCUXpresso SDK.
 * :ref:`module-pw_i2c_rp2040` for the Raspberry Pi Pico SDK.
+* :ref:`module-pw_i2c_zephyr` for the Zephyr RTOS.
 
 See :ref:`module-pw_i2c-quickstart` for build system configuration examples.
 
@@ -31,7 +32,13 @@ own:
 
 .. _common_pico.cc: https://pigweed.googlesource.com/pigweed/kudzu/+/refs/heads/main/applications/app_common_impl/common_pico.cc
 
-#. Implement the :cpp:class:`pw::i2c::Initiator` interface. See
+.. note:: :ref:`module-pw_i2c_rp2040` uses the deprecated
+   :cc:`pw::i2c::Initiator` API.
+
+   See :ref:`module-pw_i2c_mcuxpresso` and :ref:`module-pw_i2c_mcuxpresso`
+   for example implementations of ``DoTransferFor(span<Message>, ...)``.
+
+#. Implement the :cc:`pw::i2c::Initiator` interface. See
    :ref:`module-pw_i2c_rp2040` for an example Raspberry Pi Pico SDK
    implementation and `common_pico.cc`_ for example usage of ``pw_i2c_rp2040``.
 
@@ -45,3 +52,4 @@ own:
    Linux <../pw_i2c_linux/docs>
    MCUXpresso <../pw_i2c_mcuxpresso/docs>
    Pico SDK <../pw_i2c_rp2040/docs>
+   Zephyr RTOS <../pw_i2c_zephyr/docs>

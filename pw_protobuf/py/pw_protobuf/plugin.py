@@ -165,7 +165,7 @@ def main() -> int:
             edition_constants.Edition.EDITION_PROTO2.value
         )
         response.maximum_edition = (  # type: ignore[attr-defined]
-            edition_constants.Edition.EDITION_2023.value
+            edition_constants.Edition.EDITION_2024.value
         )
 
     if not process_proto_request(request, response):

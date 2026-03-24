@@ -14,24 +14,79 @@
 
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
 
-# Ready-made configurations
-liberosoc_configs = [
-    ("default", "configs/config_default.h"),
-    ("debug", "configs/config_debug.h"),
-]
+cc_library(
+    name = "default_config",
+    hdrs = [
+        "configs/config_default.h",
+        "configs/config_pigweed_common.h",
+    ],
+    copts = ["-Dmss_CONFIG_FILE=\"configs/config_default.h\""],
+    strip_include_prefix = ".",
+)
 
-# Config targets.
-[
-    cc_library(
-        name = "%s_config" % config_name,
-        hdrs = [
-            config_header,
-            "configs/config_pigweed_common.h",
-        ],
-        copts = ["-Dmss_CONFIG_FILE=\"%s\"" % config_header],
-        strip_include_prefix = ".",
-    )
-    for config_name, config_header in liberosoc_configs
-]
+cc_library(
+    name = "debug_config",
+    hdrs = [
+        "configs/config_debug.h",
+        "configs/config_pigweed_common.h",
+    ],
+    copts = ["-Dmss_CONFIG_FILE=\"configs/config_debug.h\""],
+    strip_include_prefix = ".",
+)
 
-# TODO(skeys): Add build recipe for the library.
+label_flag(
+    name = "config",
+    build_setting_default = ":default_config",
+)
+
+cc_library(
+    name = "smartfusion_mss",
+    srcs = [
+        "@smartfusion_mss//:exported_firmware/CMSIS/startup_gcc/startup_m2sxxx.S",
+        "@smartfusion_mss//:exported_firmware/CMSIS/system_m2sxxx.c",
+        "@smartfusion_mss//:exported_firmware/drivers/mss_can/mss_can.c",
+        "@smartfusion_mss//:exported_firmware/drivers/mss_ethernet_mac/m88e1340_phy.c",
+        "@smartfusion_mss//:exported_firmware/drivers/mss_ethernet_mac/mss_ethernet_mac.c",
+        "@smartfusion_mss//:exported_firmware/drivers/mss_gpio/mss_gpio.c",
+        "@smartfusion_mss//:exported_firmware/drivers/mss_hpdma/mss_hpdma.c",
+        "@smartfusion_mss//:exported_firmware/drivers/mss_i2c/mss_i2c.c",
+        "@smartfusion_mss//:exported_firmware/drivers/mss_nvm/mss_nvm.c",
+        "@smartfusion_mss//:exported_firmware/drivers/mss_rtc/mss_rtc.c",
+        "@smartfusion_mss//:exported_firmware/drivers/mss_spi/mss_spi.c",
+        "@smartfusion_mss//:exported_firmware/drivers/mss_sys_services/mss_comblk.c",
+        "@smartfusion_mss//:exported_firmware/drivers/mss_sys_services/mss_sys_services.c",
+        "@smartfusion_mss//:exported_firmware/drivers/mss_uart/mss_uart.c",
+        "@smartfusion_mss//:exported_firmware/drivers/mss_usb/mss_usb_common_cif.c",
+        "@smartfusion_mss//:exported_firmware/drivers/mss_usb/mss_usb_device.c",
+        "@smartfusion_mss//:exported_firmware/drivers/mss_usb/mss_usb_device_cdc.c",
+        "@smartfusion_mss//:exported_firmware/drivers/mss_usb/mss_usb_device_cif.c",
+        "@smartfusion_mss//:exported_firmware/drivers/mss_usb/mss_usb_device_hid.c",
+        "@smartfusion_mss//:exported_firmware/drivers/mss_usb/mss_usb_device_msd.c",
+        "@smartfusion_mss//:exported_firmware/drivers/mss_usb/mss_usb_device_printer.c",
+        "@smartfusion_mss//:exported_firmware/drivers/mss_usb/mss_usb_device_rndis.c",
+        "@smartfusion_mss//:exported_firmware/drivers/mss_usb/mss_usb_device_vendor.c",
+        "@smartfusion_mss//:exported_firmware/drivers/mss_usb/mss_usb_host.c",
+        "@smartfusion_mss//:exported_firmware/drivers/mss_usb/mss_usb_host_cif.c",
+        "@smartfusion_mss//:exported_firmware/drivers/mss_usb/mss_usb_host_msc.c",
+        "@smartfusion_mss//:exported_firmware/drivers_config/sys_config/sys_config.c",
+    ],
+    copts = [
+        "-Wno-error=cast-qual",
+        "-Wno-error=redundant-decls",
+        "-w",
+        "-Iexternal/smartfusion_mss/exported_firmware/CMSIS/V4.5/Include",
+        "-Iexternal/smartfusion_mss/exported_firmware/drivers",
+        "-Iexternal/smartfusion_mss/exported_firmware/drivers_config/sys_config",
+        "-Iexternal/smartfusion_mss/exported_firmware/CMSIS",
+        "-Iexternal/smartfusion_mss/exported_firmware/hal",
+        "-Iexternal/smartfusion_mss/exported_firmware/hal/CortexM3",
+        "-Iexternal/smartfusion_mss",
+    ],
+    target_compatible_with = [
+        "//pw_build/constraints/arm:cortex-m3",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":config",
+    ],
+)

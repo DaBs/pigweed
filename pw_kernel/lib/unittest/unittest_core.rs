@@ -14,43 +14,135 @@
 
 #![no_std]
 
-use core::ptr::addr_of_mut;
-use intrusive_collections::{intrusive_adapter, LinkedList, LinkedListLink};
-
 pub use pw_bytes;
 
-intrusive_adapter!(pub TestDescAndFnAdapter<'a> = &'a TestDescAndFn: TestDescAndFn { link: LinkedListLink });
+// SAFETY: Mutation of `TEST_LIST` is only permitted to occur in `add_test`.
+static mut TEST_LIST: Option<&'static Test> = None;
 
-static mut TEST_LIST: Option<LinkedList<TestDescAndFnAdapter>> = None;
-
-// All accesses to test list go through this function.  This gives us a
-// single point of ownership of TEST_LIST and keeps us from leaking references
-// to it.
-fn access_test_list<F>(callback: F)
-where
-    F: FnOnce(&mut LinkedList<TestDescAndFnAdapter>),
-{
-    // Safety: Tests are single threaded for now.  This assumption needs to be
-    // revisited.
-    let test_list: &mut Option<LinkedList<TestDescAndFnAdapter>> =
-        unsafe { addr_of_mut!(TEST_LIST).as_mut().unwrap_unchecked() };
-    let list = test_list.get_or_insert_with(|| LinkedList::new(TestDescAndFnAdapter::new()));
-    callback(list)
+fn iter_tests() -> impl Iterator<Item = &'static Test> {
+    // SAFETY: The only mutation of `TEST_LIST` occurs in `add_test`, and
+    // callers of `add_test` promise that calls don't overlap with any other
+    // calls to methods or functions exposed by this crate.
+    let mut next = unsafe { TEST_LIST };
+    core::iter::from_fn(move || match next {
+        None => None,
+        Some(test) => {
+            next = test.next;
+            Some(test)
+        }
+    })
 }
 
-pub fn add_test(test: &'static mut TestDescAndFn) {
-    access_test_list(|test_list| test_list.push_back(test))
+/// # Safety
+///
+/// The caller must ensure that all no call to `add_test` overlaps with any
+/// other call to `add_test` or any call to any other methods or functions
+/// exposed by this crate.
+pub unsafe fn add_test(test: &'static mut Test) {
+    // SAFETY: The caller has promised that we don't overlap with any other code
+    // which accesses `TEST_LIST`. We don't permit `&mut TEST_LIST` to outlive
+    // this function, so `&mut TEST_LIST` will not co-exist with any other
+    // accesses to `TEST_LIST`.
+    #[allow(static_mut_refs)]
+    let head = unsafe { &mut TEST_LIST };
+    if let Some(head) = head {
+        test.next = Some(head);
+    }
+    *head = Some(test);
 }
 
-pub fn for_each_test<F>(mut callback: F)
-where
-    F: FnMut(&TestDescAndFn),
-{
-    access_test_list(|test_list| {
-        for test in test_list.iter() {
-            callback(test);
+#[derive(Eq, PartialEq)]
+pub enum TestsResult {
+    AllPassed,
+    SomeFailed,
+}
+
+// We use macros for `run_bare_metal_tests` and `run_all_tests` so that we don't
+// have to take a dependency on `pw_log`, and can instead rely on those macros'
+// callers taking dependencies on `pw_log`. Specifically, `declare_loggers!` is
+// evaluated in the callers' context.
+//
+// This allows us to use this crate to test crates which are transitive
+// dependencies of `pw_log`.
+
+#[macro_export]
+macro_rules! run_bare_metal_tests {
+    () => {{
+        let (log_start, log_error, log_pass) = $crate::declare_loggers!();
+        $crate::run_bare_metal_tests(log_start, log_error, log_pass)
+    }};
+}
+
+#[macro_export]
+macro_rules! run_all_tests {
+    () => {{
+        let (log_start, log_error, log_pass) = $crate::declare_loggers!();
+        $crate::run_all_tests(log_start, log_error, log_pass)
+    }};
+}
+
+#[doc(hidden)]
+#[macro_export]
+macro_rules! declare_loggers {
+    () => {
+        (
+            |test: &$crate::Test| pw_log::info!("🔄 [{}] RUNNING", test.name as &str),
+            |test: &$crate::Test, e: $crate::TestError| {
+                pw_log::error!("❌ [{}] FAILED", test.name as &str);
+                pw_log::error!("❌ ├─ {}:{}:", e.file as &str, e.line as u32);
+                pw_log::error!("❌ └─ {}", e.message as &str);
+            },
+            |test: &$crate::Test| pw_log::info!("✅ [{}] PASSED", test.name as &str),
+        )
+    };
+}
+
+#[doc(hidden)]
+pub fn run_bare_metal_tests(
+    log_start: impl Fn(&Test),
+    log_error: impl Fn(&Test, TestError),
+    log_pass: impl Fn(&Test),
+) -> TestsResult {
+    run_tests(TestSet::BareMetal, log_start, log_error, log_pass)
+}
+
+#[doc(hidden)]
+pub fn run_all_tests(
+    log_start: impl Fn(&Test),
+    log_error: impl Fn(&Test, TestError),
+    log_pass: impl Fn(&Test),
+) -> TestsResult {
+    let bare_metal_result = run_tests(TestSet::BareMetal, &log_start, &log_error, &log_pass);
+    let kernel_result = run_tests(TestSet::Kernel, log_start, log_error, log_pass);
+
+    use TestsResult::*;
+    match (bare_metal_result, kernel_result) {
+        (AllPassed, AllPassed) => AllPassed,
+        _ => SomeFailed,
+    }
+}
+
+fn run_tests(
+    set: TestSet,
+    log_start: impl Fn(&Test),
+    log_error: impl Fn(&Test, TestError),
+    log_pass: impl Fn(&Test),
+) -> TestsResult {
+    let mut result = TestsResult::AllPassed;
+    iter_tests().for_each(|test| {
+        if test.set != set {
+            return;
+        }
+
+        log_start(test);
+        if let Err(e) = (test.test_fn)() {
+            log_error(test, e);
+            result = TestsResult::SomeFailed;
+        } else {
+            log_pass(test);
         }
     });
+    result
 }
 
 pub struct TestError {
@@ -61,26 +153,31 @@ pub struct TestError {
 
 pub type Result<T> = core::result::Result<T, TestError>;
 
-pub enum TestFn {
-    StaticTestFn(fn() -> Result<()>),
+pub type TestFn = fn() -> Result<()>;
+
+/// Which set of tests is this test a member of?
+#[derive(PartialEq)]
+pub enum TestSet {
+    /// Bare metal tests run with or without a kernel.
+    BareMetal,
+    /// Kernel tests only run when a kernel is present and has been initialized.
+    Kernel,
 }
 
-pub struct TestDesc {
+pub struct Test {
     pub name: &'static str,
-}
-
-pub struct TestDescAndFn {
-    pub desc: TestDesc,
     pub test_fn: TestFn,
-    pub link: LinkedListLink,
+    pub set: TestSet,
+    pub next: Option<&'static Test>,
 }
 
-impl TestDescAndFn {
-    pub const fn new(desc: TestDesc, test_fn: TestFn) -> Self {
+impl Test {
+    pub const fn new(name: &'static str, test_fn: TestFn, set: TestSet) -> Self {
         Self {
-            desc,
+            name,
             test_fn,
-            link: LinkedListLink::new(),
+            set,
+            next: None,
         }
     }
 }
@@ -92,8 +189,8 @@ impl TestDescAndFn {
 //
 // A better pattern here must be worked out with intrusive lists of static data
 // (for statically declared threads for instance) so we'll revisit this later.
-unsafe impl Send for TestDescAndFn {}
-unsafe impl Sync for TestDescAndFn {}
+unsafe impl Send for Test {}
+unsafe impl Sync for Test {}
 
 #[macro_export]
 macro_rules! assert_eq {
@@ -134,6 +231,26 @@ macro_rules! assert_ne {
 }
 
 #[macro_export]
+macro_rules! assert_matches {
+    ($a:expr, $($pat:pat_param)|+ ) => {
+        match $a {
+            $($pat)|+ => (),
+            _ => return Err(unittest::TestError {
+                file: file!(),
+                line: line!(),
+                message: unittest::pw_bytes::concat_static_strs!(
+                    "assert_matches!(",
+                    stringify!($a),
+                    ", ",
+                    stringify!($($pat)|+ ),
+                    ") failed"
+                ),
+            })
+        }
+    };
+}
+
+#[macro_export]
 macro_rules! assert_true {
     ($a:expr) => {
         if !$a {
@@ -163,6 +280,26 @@ macro_rules! assert_false {
                     ") failed"
                 ),
             });
+        }
+    };
+}
+
+#[macro_export]
+macro_rules! unwrap {
+    ($a:expr) => {
+        match $a {
+            Ok(v) => v,
+            _ => {
+                return Err(unittest::TestError {
+                    file: file!(),
+                    line: line!(),
+                    message: unittest::pw_bytes::concat_static_strs!(
+                        "unwrap!(",
+                        stringify!($a),
+                        ") failed"
+                    ),
+                })
+            }
         }
     };
 }

@@ -16,6 +16,7 @@
 
 #include <optional>
 
+#include "pw_bluetooth_proxy/connection_handle.h"
 #include "pw_function/function.h"
 #include "pw_multibuf/multibuf.h"
 #include "pw_status/status.h"
@@ -24,6 +25,8 @@ namespace pw::bluetooth::proxy {
 
 /// Events returned from all client-facing channel objects in their `event_fn`
 /// callback.
+// TODO: https://pwbug.dev/388082771 -  Rename to just ChannelEvent and move
+// to channel_common.h
 enum class L2capChannelEvent {
   /// The channel was closed by something other than `ProxyHost` or due to
   /// `ProxyHost` shutdown. The channel is now `State::kClosed` and should be
@@ -46,6 +49,8 @@ enum class L2capChannelEvent {
   kWriteAvailable,
 };
 
+// TODO: https://pwbug.dev/400536541 - Pass connection handle and channel
+// IDs to event_fn.
 /// Event callback from channels.
 using ChannelEventCallback = pw::InlineFunction<
     void(L2capChannelEvent event),
@@ -55,25 +60,34 @@ using ChannelEventCallback = pw::InlineFunction<
     // PW_FUNCTION_INLINE_CALLABLE_SIZE use that.
     std::max(sizeof(void*) * 2, PW_FUNCTION_INLINE_CALLABLE_SIZE)>;
 
-/// Result object with status and optional MultiBuf that is only present if the
-/// status is NOT `ok()`.
+/// Result object with status, optional MultiBuf.
 // `pw::Result` can't be used because it only has a value for `ok()` status.
 // `std::expected` can't be used because it only has a value OR a status.
 struct StatusWithMultiBuf {
   pw::Status status;
-  std::optional<pw::multibuf::MultiBuf> buf = std::nullopt;
+  std::optional<multibuf::MultiBuf> buf = std::nullopt;
 };
 
 /// Alias for a client provided callback function for that can receive data from
-/// a channel and optionally own the handling that data.
+/// a channel and optionally own the handling of that data.
 ///
 /// @param[in] payload  The payload being passed to the client.
 ///
 ///
-/// @returns If the client will own handling the payload then std::nullopt
-/// should be returned. If the client will not own handling the payload then the
-/// payload MultiBuf should be returned (unaltered).
+/// @returns The client can choose to one of the following:
+/// 1. Return std::nullopt to own the handling of the payload.
+/// 2. Return the payload as-is, to be forwarded.
+/// 3. Modify and return the payload to be forwarded.
 using OptionalPayloadReceiveCallback =
     Function<std::optional<multibuf::MultiBuf>(multibuf::MultiBuf&& payload)>;
+using OptionalBufferReceiveFunction =
+    Function<std::optional<multibuf::MultiBuf>(
+        multibuf::MultiBuf&& payload,
+        ConnectionHandle connection_handle,
+        uint16_t local_channel_id,
+        uint16_t remote_channel_id)>;
+
+/// Client provided callback for data received from a channel.
+using MultiBufReceiveFunction = Function<void(multibuf::MultiBuf&& payload)>;
 
 }  // namespace pw::bluetooth::proxy

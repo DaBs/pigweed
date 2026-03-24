@@ -15,6 +15,7 @@
 
 #include <type_traits>
 
+#include "pw_containers/storage.h"
 #include "pw_random/xor_shift.h"
 #include "pw_unit_test/framework.h"
 
@@ -26,12 +27,10 @@ class PersistentTest : public ::testing::Test {
   PersistentTest() { ZeroPersistentMemory(); }
 
   // Emulate invalidation of persistent section(s).
-  void ZeroPersistentMemory() { memset(&buffer_, 0, sizeof(buffer_)); }
+  void ZeroPersistentMemory() { memset(buffer_.data(), 0, buffer_.size()); }
 
   // Allocate a chunk of aligned storage that can be independently controlled.
-  std::aligned_storage_t<sizeof(Persistent<uint32_t>),
-                         alignof(Persistent<uint32_t>)>
-      buffer_;
+  pw::containers::StorageFor<Persistent<uint32_t>> buffer_;
 };
 
 TEST_F(PersistentTest, DefaultConstructionAndDestruction) {
@@ -92,7 +91,7 @@ class MutablePersistentTest : public ::testing::Test {
   MutablePersistentTest() { ZeroPersistentMemory(); }
 
   // Emulate invalidation of persistent section(s).
-  void ZeroPersistentMemory() { memset(&buffer_, 0, sizeof(buffer_)); }
+  void ZeroPersistentMemory() { memset(buffer_.data(), 0, buffer_.size()); }
   void RandomFillMemory() {
     random::XorShiftStarRng64 rng(0x9ad75);
     rng.Get(span<std::byte>(reinterpret_cast<std::byte*>(&buffer_),
@@ -100,9 +99,7 @@ class MutablePersistentTest : public ::testing::Test {
   }
 
   // Allocate a chunk of aligned storage that can be independently controlled.
-  std::aligned_storage_t<sizeof(Persistent<Coordinate>),
-                         alignof(Persistent<Coordinate>)>
-      buffer_;
+  pw::containers::StorageFor<Persistent<Coordinate>> buffer_;
 };
 
 TEST_F(MutablePersistentTest, DefaultConstructionAndDestruction) {

@@ -28,7 +28,7 @@ class SmartfusionMss(pw_package.git_repo.GitRepo):
             *args,
             name='smartfusion_mss',
             url='https://github.com/seank/smartfusion_mss',
-            commit='bb22f26cc3a54df15bb901dc6c95662727158fed',
+            commit='052a2ed78fa2c7a1a7cdac5e4a988b03269d2b42',
             **kwargs,
         )
 

@@ -74,7 +74,6 @@ via the Pigweed console:
 .. code-block:: console
 
    $ pw-system-console -d /dev/{ttyX} -b 115200 \
-   > --proto-globs pw_rpc/echo.proto \
    > --token-databases \
    > out/stm32f429i_disc1_stm32cube.size_optimized/obj/pw_system/bin/system_example.elf
 
@@ -119,4 +118,4 @@ You are now up and running!
 
    The :ref:`module-pw_console`
    :bdg-ref-primary-line:`module-pw_console-user_guide` for more info on using
-   the the pw_console UI.
+   the pw_console UI.

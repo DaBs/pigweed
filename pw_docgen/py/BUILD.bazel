@@ -12,41 +12,24 @@
 # License for the specific language governing permissions and limitations under
 # the License.
 
-load("@pigweed//pw_build:compatibility.bzl", "incompatible_with_mcu")
-load("@rules_python//python:defs.bzl", "py_library")
+load("//pw_build:python.bzl", "pw_py_library")
 
 package(default_visibility = ["//visibility:public"])
 
-py_library(
+pw_py_library(
     name = "pw_docgen",
     srcs = [
         "pw_docgen/__init__.py",
+        "pw_docgen/docgen.py",
+        "pw_docgen/docserver.py",
+        "pw_docgen/seed.py",
         "pw_docgen/sphinx/__init__.py",
         "pw_docgen/sphinx/google_analytics.py",
-        "pw_docgen/sphinx/kconfig.py",
-        "pw_docgen/sphinx/module_metadata.py",
-        "pw_docgen/sphinx/modules_index.py",
-        "pw_docgen/sphinx/pigweed_live.py",
-        "pw_docgen/sphinx/pw_status_codes.py",
-        "pw_docgen/sphinx/seed_metadata.py",
-    ],
-    # TODO: https://pwbug.dev/371563295 - Remove these data dependencies after
-    # pigweed.dev-specific extensions have been moved out of pw_docgen.
-    data = [
-        "//:PIGWEED_MODULES",
-        "//docs:module_metadata.json",
-        "//docs:module_metadata_schema.json",
-        "//seed:seed_metadata.json",
-        "//seed:seed_metadata_schema.json",
     ],
     imports = ["."],
-    target_compatible_with = incompatible_with_mcu(),
     deps = [
-        "//pw_status/py:pw_status",
-        "@python_packages//jsonschema",
-        "@python_packages//kconfiglib",
-        "@python_packages//pytz",
-        "@python_packages//sphinx",
-        "@rules_python//python/runfiles",
+        "@pigweed_python_packages//sphinx",
+        "@pigweed_python_packages//watchdog",
+        "@pigweed_python_packages//websockets",
     ],
 )

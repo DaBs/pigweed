@@ -227,6 +227,7 @@ void PairingStateManager::CreateOrUpdatePairingState(
                                              std::move(pairing_delegate),
                                              link_,
                                              outgoing_connection_,
+                                             dispatcher_,
                                              auth_cb_.share(),
                                              status_cb_.share());
 

@@ -22,7 +22,9 @@ package {
 // custom backend.
 cc_defaults {
     name: "pw_thread",
-    cpp_std: "c++20",
+    defaults: [
+        "pw_android_cpp_version",
+    ],
     header_libs: [
         "pw_chrono",
         "pw_thread_include_dirs",
@@ -52,12 +54,12 @@ cc_defaults {
 // the pw_thread facade instead.
 cc_library_headers {
     name: "pw_thread_include_dirs",
-    cpp_std: "c++20",
+    defaults: [
+        "pw_android_common_target_support",
+    ],
     export_include_dirs: [
         "public",
     ],
-    vendor_available: true,
-    host_supported: true,
 }
 
 // Do not include these since they are for the pw_thread cc_defaults. Depend on
@@ -67,5 +69,42 @@ filegroup {
     srcs: [
         "sleep.cc",
         "yield.cc",
+    ],
+}
+
+cc_library_headers {
+    name: "pw_thread_iteration",
+    export_include_dirs: ["public"],
+}
+
+// Expose pw_thread/thread.proto
+filegroup {
+    name: "pw_thread_protos",
+    srcs: [
+        "pw_thread_protos/thread.proto",
+    ],
+}
+
+genrule {
+    name: "pw_thread_pwpb_proto_header",
+    defaults: ["pw_rpc_generate_pwpb_header_with_prefix_and_protobuf"],
+    srcs: [
+        ":pw_thread_protos",
+        ":pw_tokenizer_proto_options_proto",
+        ":libprotobuf-internal-protos",
+    ],
+    out: ["pw_thread_protos/thread.pwpb.h"],
+}
+
+genrule {
+    name: "pw_thread_pwpb_rpc_header",
+    defaults: ["pw_rpc_generate_rpc_pwpb_header_with_prefix_and_protobuf"],
+    srcs: [
+        ":pw_thread_protos",
+        ":pw_tokenizer_proto_options_proto",
+        ":libprotobuf-internal-protos",
+    ],
+    out: [
+        "pw_thread_protos/thread.rpc.pwpb.h",
     ],
 }

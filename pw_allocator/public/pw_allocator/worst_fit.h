@@ -24,6 +24,8 @@
 
 namespace pw::allocator {
 
+/// @submodule{pw_allocator,concrete_block}
+
 /// Alias for a default block type that is compatible with `FirstFitAllocator`.
 template <typename OffsetType>
 using WorstFitBlock = DetailedBlock<OffsetType, GenericFastSortedItem>;
@@ -39,6 +41,10 @@ using WorstFitBlock = DetailedBlock<OffsetType, GenericFastSortedItem>;
 /// fragments are more likely to be too small to be useful to other requests.
 template <typename BlockType = WorstFitBlock<uintptr_t>>
 class WorstFitAllocator : public BlockAllocator<BlockType> {
+ private:
+  using SmallBucket = ReverseSortedBucket<BlockType>;
+  using LargeBucket = ReverseFastSortedBucket<BlockType>;
+
  public:
   using Base = BlockAllocator<BlockType>;
 
@@ -53,6 +59,14 @@ class WorstFitAllocator : public BlockAllocator<BlockType> {
   WorstFitAllocator(ByteSpan region) { Base::Init(region); }
 
  private:
+  /// @copydoc BlockAllocator::GetMaxAllocatable
+  size_t DoGetMaxAllocatable() override {
+    const BlockType* largest = large_bucket_.empty()
+                                   ? small_bucket_.FindLargest()
+                                   : large_bucket_.FindLargest();
+    return largest == nullptr ? 0 : largest->InnerSize();
+  }
+
   /// @copydoc BlockAllocator::ChooseBlock
   BlockResult<BlockType> ChooseBlock(Layout layout) override {
     BlockType* block = large_bucket_.RemoveCompatible(layout);
@@ -76,15 +90,17 @@ class WorstFitAllocator : public BlockAllocator<BlockType> {
 
   /// @copydoc BlockAllocator::RecycleBlock
   void RecycleBlock(BlockType& block) override {
-    if (block.InnerSize() <= sizeof(SortedItem)) {
+    if (block.InnerSize() < sizeof(typename LargeBucket::ItemType)) {
       std::ignore = small_bucket_.Add(block);
     } else {
       std::ignore = large_bucket_.Add(block);
     }
   }
 
-  ReverseSortedBucket<BlockType> small_bucket_;
-  ReverseFastSortedBucket<BlockType> large_bucket_;
+  SmallBucket small_bucket_;
+  LargeBucket large_bucket_;
 };
+
+/// @}
 
 }  // namespace pw::allocator

@@ -1,0 +1,86 @@
+{
+  "packages": [
+    {
+      "path": "fuchsia/third_party/rust/host/${platform}",
+      "platforms": [
+        "linux-amd64",
+        "linux-arm64",
+        "mac-amd64",
+        "mac-arm64",
+        "windows-amd64"
+      ],
+      "tags": [
+        "git_revisions:9f0615c4301206eeba76468f78d34876c4a2997e,9de31c4a3e77ceb1e736d4df3ae9e3f5a1dc8748"
+      ]
+    },
+    {
+      "path": "fuchsia/third_party/rust/target/aarch64-unknown-linux-gnu",
+      "platforms": [
+        "linux-arm64"
+      ],
+      "tags": [
+        "git_revisions:9f0615c4301206eeba76468f78d34876c4a2997e,9de31c4a3e77ceb1e736d4df3ae9e3f5a1dc8748"
+      ]
+    },
+    {
+      "path": "fuchsia/third_party/rust/target/x86_64-unknown-linux-gnu",
+      "platforms": [
+        "linux-amd64"
+      ],
+      "tags": [
+        "git_revisions:9f0615c4301206eeba76468f78d34876c4a2997e,9de31c4a3e77ceb1e736d4df3ae9e3f5a1dc8748"
+      ]
+    },
+    {
+      "path": "fuchsia/third_party/rust/target/aarch64-apple-darwin",
+      "platforms": [
+        "mac-arm64"
+      ],
+      "tags": [
+        "git_revisions:9f0615c4301206eeba76468f78d34876c4a2997e,9de31c4a3e77ceb1e736d4df3ae9e3f5a1dc8748"
+      ]
+    },
+    {
+      "path": "fuchsia/third_party/rust/target/x86_64-pc-windows-msvc",
+      "platforms": [
+        "windows-amd64"
+      ],
+      "tags": [
+        "git_revisions:9f0615c4301206eeba76468f78d34876c4a2997e,9de31c4a3e77ceb1e736d4df3ae9e3f5a1dc8748"
+      ]
+    },
+    {
+      "path": "fuchsia/third_party/rust/target/x86_64-apple-darwin",
+      "platforms": [
+        "mac-amd64"
+      ],
+      "tags": [
+        "git_revisions:9f0615c4301206eeba76468f78d34876c4a2997e,9de31c4a3e77ceb1e736d4df3ae9e3f5a1dc8748"
+      ]
+    },
+    {
+      "path": "fuchsia/third_party/rust/target/thumbv7m-none-eabi",
+      "platforms": [
+        "linux-amd64",
+        "linux-arm64",
+        "mac-amd64",
+        "mac-arm64"
+      ],
+      "tags": [
+        "git_revisions:9f0615c4301206eeba76468f78d34876c4a2997e,9de31c4a3e77ceb1e736d4df3ae9e3f5a1dc8748"
+      ]
+    },
+    {
+      "path": "fuchsia/third_party/rust_bindgen/${platform}",
+      "platforms": [
+        "linux-amd64",
+        "mac-amd64",
+        "mac-arm64"
+      ],
+      "subdir": "rust_bindgen",
+      "tags": [
+        "git_revision:f518815cc14a7f8c292964bb37179a1070d7e18a"
+      ]
+    }
+  ]
+}

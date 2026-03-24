@@ -33,11 +33,11 @@ pw_add_library(pw_sync_freertos.binary_semaphore STATIC
   HEADERS
     public/pw_sync_freertos/binary_semaphore_inline.h
     public/pw_sync_freertos/binary_semaphore_native.h
-    public_overrides/pw_sync_backend/binary_semaphore_inline.h
-    public_overrides/pw_sync_backend/binary_semaphore_native.h
+    public_overrides/binary_semaphore/pw_sync_backend/binary_semaphore_inline.h
+    public_overrides/binary_semaphore/pw_sync_backend/binary_semaphore_native.h
   PUBLIC_INCLUDES
     public
-    public_overrides
+    public_overrides/binary_semaphore
   PUBLIC_DEPS
     pw_assert
     pw_chrono.system_clock
@@ -54,11 +54,11 @@ pw_add_library(pw_sync_freertos.counting_semaphore STATIC
   HEADERS
     public/pw_sync_freertos/counting_semaphore_inline.h
     public/pw_sync_freertos/counting_semaphore_native.h
-    public_overrides/pw_sync_backend/counting_semaphore_inline.h
-    public_overrides/pw_sync_backend/counting_semaphore_native.h
+    public_overrides/counting_semaphore/pw_sync_backend/counting_semaphore_inline.h
+    public_overrides/counting_semaphore/pw_sync_backend/counting_semaphore_native.h
   PUBLIC_INCLUDES
     public
-    public_overrides
+    public_overrides/counting_semaphore
   PUBLIC_DEPS
     pw_assert
     pw_chrono.system_clock
@@ -75,11 +75,11 @@ pw_add_library(pw_sync_freertos.mutex INTERFACE
   HEADERS
     public/pw_sync_freertos/mutex_inline.h
     public/pw_sync_freertos/mutex_native.h
-    public_overrides/pw_sync_backend/mutex_inline.h
-    public_overrides/pw_sync_backend/mutex_native.h
+    public_overrides/mutex/pw_sync_backend/mutex_inline.h
+    public_overrides/mutex/pw_sync_backend/mutex_native.h
   PUBLIC_INCLUDES
     public
-    public_overrides
+    public_overrides/mutex
   PUBLIC_DEPS
     pw_assert
     pw_interrupt.context
@@ -91,10 +91,10 @@ pw_add_library(pw_sync_freertos.mutex INTERFACE
 pw_add_library(pw_sync_freertos.timed_mutex STATIC
   HEADERS
     public/pw_sync_freertos/timed_mutex_inline.h
-    public_overrides/pw_sync_backend/timed_mutex_inline.h
+    public_overrides/timed_mutex/pw_sync_backend/timed_mutex_inline.h
   PUBLIC_INCLUDES
     public
-    public_overrides
+    public_overrides/timed_mutex
   PUBLIC_DEPS
     pw_chrono.system_clock
     pw_sync.timed_mutex.facade
@@ -158,11 +158,11 @@ pw_add_library(pw_sync_freertos.interrupt_spin_lock STATIC
   HEADERS
     public/pw_sync_freertos/interrupt_spin_lock_inline.h
     public/pw_sync_freertos/interrupt_spin_lock_native.h
-    public_overrides/pw_sync_backend/interrupt_spin_lock_inline.h
-    public_overrides/pw_sync_backend/interrupt_spin_lock_native.h
+    public_overrides/interrupt_spin_lock/pw_sync_backend/interrupt_spin_lock_inline.h
+    public_overrides/interrupt_spin_lock/pw_sync_backend/interrupt_spin_lock_native.h
   PUBLIC_INCLUDES
     public
-    public_overrides
+    public_overrides/interrupt_spin_lock
   PUBLIC_DEPS
     pw_sync.interrupt_spin_lock.facade
     pw_third_party.freertos

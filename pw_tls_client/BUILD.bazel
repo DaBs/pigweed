@@ -47,7 +47,7 @@ label_flag(
     name = "pw_tls_client_backend",
     # TODO(zyecheng): Add a "backend_multiplexer" target once BoringSSL/MbedTLS
     # is ready.
-    build_setting_default = "//pw_build:empty_cc_library",
+    build_setting_default = "@rules_cc//:empty_lib",
 )
 
 pw_facade(
@@ -67,7 +67,7 @@ label_flag(
     name = "entropy_backend",
     # TODO(zyecheng): Add a "backend_multiplexer" target once BoringSSL/MbedTLS
     # is ready.
-    build_setting_default = "//pw_build:empty_cc_library",
+    build_setting_default = "@rules_cc//:empty_lib",
 )
 
 cc_library(

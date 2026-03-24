@@ -43,7 +43,12 @@
 /// to which the function is applied, `Pred` indicates the predicate object type
 /// to be used by the function and `T` indicates the applicable element type.
 
-namespace pw::containers {
+namespace pw {
+/// @module{pw_containers}
+
+/// @defgroup pw_containers_utilities Utilities
+/// @{
+namespace containers {
 
 /// Container-based version of the <algorithm> `std::all_of()` function to
 /// test if all elements within a container satisfy a condition.
@@ -78,6 +83,13 @@ std::decay_t<Function> ForEach(C&& c, Function&& f) {
 template <typename C, typename T>
 internal_algorithm::ContainerIter<C> Find(C& c, T&& value) {
   return std::find(std::begin(c), std::end(c), std::forward<T>(value));
+}
+
+// Container-based version of the <algorithm> `std::ranges::contains()` C++23
+// function to search a container for a value.
+template <typename C, typename T>
+bool Contains(const C& c, T&& value) {
+  return Find(c, std::forward<T>(value)) != std::end(c);
 }
 
 /// Container-based version of the <algorithm> `std::find_if()` function to find
@@ -323,4 +335,94 @@ internal_algorithm::ContainerIter<Sequence> SearchN(Sequence& sequence,
                        std::forward<BinaryPredicate>(pred));
 }
 
-}  // namespace pw::containers
+}  // namespace containers
+
+#if defined(__cpp_lib_constexpr_algorithms)
+
+// Use the standard library versions if they are constexpr.
+using std::all_of;
+using std::any_of;
+using std::copy;
+using std::copy_if;
+using std::fill;
+using std::fill_n;
+using std::find_if;
+
+#else
+
+/// `constexpr` backport of `<algorithm>`'s `std::copy` for C++17.
+template <typename InputIt, typename OutputIt>
+constexpr OutputIt copy(InputIt first, InputIt last, OutputIt d_first) {
+  while (first != last) {
+    *d_first++ = *first++;
+  }
+  return d_first;
+}
+
+/// `constexpr` backport of `<algorithm>`'s `std::copy_if` for C++17.
+template <typename InputIt, typename OutputIt, typename UnaryPredicate>
+constexpr OutputIt copy_if(InputIt first,
+                           InputIt last,
+                           OutputIt d_first,
+                           UnaryPredicate pred) {
+  while (first != last) {
+    if (pred(*first)) {
+      *d_first++ = *first;
+    }
+    ++first;
+  }
+  return d_first;
+}
+
+/// `constexpr` backport of `<algorithm>`'s `std::all_of` for C++17.
+template <typename InputIt, typename Predicate>
+constexpr bool all_of(InputIt first, InputIt last, Predicate pred) {
+  for (; first != last; ++first) {
+    if (!pred(*first)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/// `constexpr` backport of `<algorithm>`'s `std::any_of` for C++17.
+template <typename InputIt, typename Predicate>
+constexpr bool any_of(InputIt first, InputIt last, Predicate pred) {
+  for (; first != last; ++first) {
+    if (pred(*first)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/// `constexpr` backport of `<algorithm>`'s `std::find_if` for C++17.
+template <typename InputIt, typename Predicate>
+constexpr InputIt find_if(InputIt first, InputIt last, Predicate pred) {
+  for (; first != last; ++first) {
+    if (pred(*first)) {
+      return first;
+    }
+  }
+  return last;
+}
+
+/// `constexpr` backport of `<algorithm>`'s `std::fill` for C++17.
+template <typename ForwardIt, typename T>
+constexpr void fill(ForwardIt begin, ForwardIt end, const T& value) {
+  for (; begin != end; ++begin) {
+    *begin = value;
+  }
+}
+
+/// `constexpr` backport of `<algorithm>`'s `std::fill_n` for C++17.
+template <typename It, typename Size, typename T>
+constexpr It fill_n(It begin, Size count, const T& value) {
+  for (Size i = 0; i < count; ++i) {
+    *begin++ = value;
+  }
+  return begin;
+}
+
+#endif
+}  // namespace pw

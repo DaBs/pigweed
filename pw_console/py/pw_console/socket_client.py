@@ -41,7 +41,9 @@ class SocketClient:
     ]
     # Can be a string, (address, port) for AF_INET or (address, port, flowinfo,
     # scope_id) AF_INET6.
-    _AddressType = str | tuple[str, int] | tuple[str, int, int, int]
+    _AddressType = (
+        str | tuple[str, int] | tuple[str, int, int, int] | tuple[int, bytes]
+    )
 
     def __init__(
         self,
@@ -150,15 +152,13 @@ class SocketClient:
         else:
             raise ValueError(invalid_config_message)
 
-        sock_family, sock_type, _, _, address = socket.getaddrinfo(
-            ip_addr, port, type=socket.SOCK_STREAM
-        )[0]
+        addr_result = socket.getaddrinfo(ip_addr, port, type=socket.SOCK_STREAM)
+        (sock_family, sock_type, _proto, _canonname, address) = addr_result[0]
         init_args = sock_family, sock_type
         return init_args, address
 
     def __del__(self):
-        if self._connected:
-            self.socket.close()
+        self.close()
 
     def write(self, data: ReadableBuffer) -> None:
         """Writes data and detects disconnects."""
@@ -189,16 +189,19 @@ class SocketClient:
 
         # Enable reusing address and port for reconnections.
         self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        if hasattr(socket, 'SO_REUSEPORT'):
-            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
         self.socket.settimeout(self._timeout)
         self.socket.connect(self._address)
         self._connected = True
 
+    def close(self) -> None:
+        """Closes socket connection."""
+        if self._connected:
+            self.socket.close()
+            self._connected = False
+
     def _handle_disconnect(self):
         """Escalates a socket disconnect to the user."""
-        self.socket.close()
-        self._connected = False
+        self.close()
         if self._on_disconnect:
             self._on_disconnect(self)
 

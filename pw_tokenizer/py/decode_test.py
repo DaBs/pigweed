@@ -1770,7 +1770,7 @@ class TestFormattedString(unittest.TestCase):
         result = decode.FormatString('%p%d%d').format(b'\x02\x80')
 
         self.assertFalse(result.ok())
-        self.assertEqual(result.score(), (False, True, -2, 3, datetime.max))
+        self.assertEqual(result.score(), (False, False, -2, 3, datetime.max))
         self.assertGreater(result.score(), result.score(datetime.now()))
         self.assertGreater(
             result.score(datetime.now()), result.score(datetime.min)

@@ -16,12 +16,13 @@
 
 #include <chrono>
 
+#include "pw_async2/dispatcher_for_test.h"
 #include "pw_unit_test/framework.h"
 
 namespace {
 
 using ::pw::async2::Context;
-using ::pw::async2::Dispatcher;
+using ::pw::async2::DispatcherForTest;
 using ::pw::async2::GetSystemTimeProvider;
 using ::pw::async2::Pending;
 using ::pw::async2::Poll;
@@ -52,7 +53,8 @@ TEST(SystemTimeProvider, InvokesTimerAfterDelay) {
   SystemClock::time_point start_time = SystemClock().now();
   SystemClock::time_point expected_completion = start_time + 50ms;
   WaitTask task(GetSystemTimeProvider().WaitUntil(expected_completion));
-  Dispatcher dispatcher;
+  DispatcherForTest dispatcher;
+  dispatcher.AllowBlocking();
   dispatcher.Post(task);
   dispatcher.RunToCompletion();
   ASSERT_TRUE(task.time_completed_.IsReady());
@@ -65,9 +67,10 @@ TEST(SystemTimeProvider, InvokesTwoTimersInOrder) {
   SystemClock::time_point expected_c2 = start_time + 10ms;
   WaitTask t1(GetSystemTimeProvider().WaitUntil(expected_c1));
   WaitTask t2(GetSystemTimeProvider().WaitUntil(expected_c2));
-  Dispatcher dispatcher;
+  DispatcherForTest dispatcher;
   dispatcher.Post(t1);
   dispatcher.Post(t2);
+  dispatcher.AllowBlocking();
   dispatcher.RunToCompletion();
   ASSERT_TRUE(t1.time_completed_.IsReady());
   EXPECT_GE(t1.time_completed_->time_since_epoch().count(),

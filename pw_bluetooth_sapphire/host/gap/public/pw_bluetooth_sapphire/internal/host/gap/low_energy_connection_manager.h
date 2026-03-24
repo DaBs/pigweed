@@ -22,6 +22,7 @@
 #include <vector>
 
 #include "lib/fit/result.h"
+#include "pw_bluetooth_sapphire/internal/host/common/bounded_inspect_list_node.h"
 #include "pw_bluetooth_sapphire/internal/host/common/error.h"
 #include "pw_bluetooth_sapphire/internal/host/common/macros.h"
 #include "pw_bluetooth_sapphire/internal/host/common/metrics.h"
@@ -31,6 +32,7 @@
 #include "pw_bluetooth_sapphire/internal/host/gap/low_energy_connection_request.h"
 #include "pw_bluetooth_sapphire/internal/host/gap/low_energy_connector.h"
 #include "pw_bluetooth_sapphire/internal/host/gap/low_energy_discovery_manager.h"
+#include "pw_bluetooth_sapphire/internal/host/gap/periodic_advertising_sync_manager.h"
 #include "pw_bluetooth_sapphire/internal/host/gatt/gatt.h"
 #include "pw_bluetooth_sapphire/internal/host/hci/low_energy_connection.h"
 #include "pw_bluetooth_sapphire/internal/host/hci/low_energy_connector.h"
@@ -67,6 +69,10 @@ enum class LowEnergyDisconnectReason : uint8_t {
   kApiRequest,
   // An internal error was encountered
   kError,
+  // All references were dropped
+  kZeroRef,
+  // Remote device disconnected
+  kPeerDisconnection,
 };
 
 // LowEnergyConnectionManager is responsible for connecting and initializing new
@@ -91,6 +97,8 @@ class LowEnergyConnectionManager final {
   // |l2cap|: Used to interact with the L2CAP layer.
   // |gatt|: Used to interact with the GATT profile layer.
   // |adapter_state|: Provides information on controller capabilities.
+  // |transfer_periodic_advertising_sync_fn|: Function to call to request a
+  //   periodic advertising sync transfer (PAST).
   LowEnergyConnectionManager(
       hci::Transport::WeakPtr hci,
       hci::LocalAddressDelegate* addr_delegate,
@@ -101,7 +109,10 @@ class LowEnergyConnectionManager final {
       LowEnergyDiscoveryManager::WeakPtr discovery_manager,
       sm::SecurityManagerFactory sm_creator,
       const AdapterState& adapter_state,
-      pw::async::Dispatcher& dispatcher);
+      pw::async::Dispatcher& dispatcher,
+      pw::bluetooth_sapphire::LeaseProvider& wake_lease_provider,
+      PeriodicAdvertisingSyncManager::TransferSyncFn&&
+          transfer_periodic_advertising_sync_fn);
   ~LowEnergyConnectionManager();
 
   // Allows a caller to claim shared ownership over a connection to the
@@ -289,7 +300,11 @@ class LowEnergyConnectionManager final {
   //
   // This is also responsible for unregistering the link from managed subsystems
   // (e.g. L2CAP).
-  void CleanUpConnection(std::unique_ptr<internal::LowEnergyConnection> conn);
+  void CleanUpConnection(std::unique_ptr<internal::LowEnergyConnection> conn,
+                         LowEnergyDisconnectReason reason);
+
+  void RecordDisconnectInspect(const internal::LowEnergyConnection& conn,
+                               LowEnergyDisconnectReason reason);
 
   // Updates |peer_cache_| with the given |link| and returns the corresponding
   // Peer.
@@ -386,9 +401,14 @@ class LowEnergyConnectionManager final {
   // procedures. Expected to outlive this instance.
   hci::LocalAddressDelegate* local_address_delegate_;  // weak
 
+  pw::bluetooth_sapphire::LeaseProvider& wake_lease_provider_;
+
   // True if the connection manager is performing a scan for a peer before
   // connecting.
   bool scanning_ = false;
+
+  PeriodicAdvertisingSyncManager::TransferSyncFn
+      transfer_periodic_advertising_sync_fn_;
 
   struct InspectProperties {
     // Count of connection failures in the past 10 minutes.
@@ -413,6 +433,9 @@ class LowEnergyConnectionManager final {
   inspect::Node inspect_pending_requests_node_;
   // container node for connection nodes.
   inspect::Node inspect_connections_node_;
+
+  BoundedInspectListNode last_disconnected_list_ =
+      BoundedInspectListNode(/*capacity=*/5);
 
   // Keep this as the last member to make sure that all weak pointers are
   // invalidated before other members get destroyed.

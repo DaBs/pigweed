@@ -15,6 +15,7 @@
 
 #include <cstdint>
 
+/// Micro-benchmarks library
 namespace pw::perf_test {
 
 /// Data reported on completion of an iteration.
@@ -25,9 +26,9 @@ struct TestIteration {
 
 /// Data reported for each `Measurement` upon completion of a performance test.
 struct TestMeasurement {
-  float mean = 0;
-  float max = 0;
-  float min = 0;
+  int64_t mean = 0;
+  int64_t max = 0;
+  int64_t min = 0;
 };
 
 /// Stores information on the upcoming collection of tests.
@@ -63,11 +64,9 @@ class EventHandler {
   /// A performance test case has completed an iteration.
   virtual void TestCaseIteration(const TestIteration& test_iteration) = 0;
 
-  /// A performance test case has produced a `Measurement`.
-  virtual void TestCaseMeasure(const TestMeasurement& test_measurement) = 0;
-
   /// A performance test case has ended.
-  virtual void TestCaseEnd(const TestCase& test_case) = 0;
+  virtual void TestCaseEnd(const TestCase& test_case,
+                           const TestMeasurement& test_measurement) = 0;
 };
 
 }  // namespace pw::perf_test

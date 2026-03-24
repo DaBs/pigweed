@@ -21,6 +21,7 @@
        "included when using the pw_unit_test light backend."
 #endif  // GTEST_TEST
 
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -36,6 +37,8 @@
 #include "pw_string/string_builder.h"
 #include "pw_unit_test/config.h"
 #include "pw_unit_test/event_handler.h"
+
+/// @submodule{pw_unit_test,declaration}
 
 /// @def GTEST_TEST
 /// Alias for `TEST`.
@@ -59,6 +62,11 @@
 /// @def TEST_F
 /// Defines a test case using a test fixture.
 ///
+/// @note `TEST_F` may allocate fixtures separately from the stack. Large
+/// variables should be stored in test fixture fields, rather than stack
+/// variables. This allows the test framework to statically ensure that enough
+/// space is available to store these variables.
+///
 /// @param[in] test_fixture The name of the test fixture class to use.
 /// @param[in] test_name The name of the test case.
 #define TEST_F(test_fixture, test_name)                                \
@@ -76,6 +84,10 @@
 /// @param[in] test_name The name of the test case to befriend.
 #define FRIEND_TEST(test_suite_name, test_name) \
   friend class test_suite_name##_##test_name##_Test
+
+/// @}
+
+/// @submodule{pw_unit_test,expectations}
 
 /// @def EXPECT_TRUE
 /// Verifies that @p expr evaluates to true.
@@ -190,6 +202,10 @@
 /// @param[in] rhs The right side of the inequality comparison.
 #define EXPECT_STRNE(lhs, rhs) _PW_TEST_EXPECT(_PW_TEST_C_STR(lhs, rhs, !=))
 
+/// @}
+
+/// @submodule{pw_unit_test,assertions}
+
 /// @def ASSERT_TRUE
 /// See `EXPECT_TRUE`.
 #define ASSERT_TRUE(expr) _PW_TEST_ASSERT(_PW_TEST_BOOL(expr, true))
@@ -247,12 +263,20 @@
 /// See `EXPECT_STRNE`.
 #define ASSERT_STRNE(lhs, rhs) _PW_TEST_ASSERT(_PW_TEST_C_STR(lhs, rhs, !=))
 
+/// @}
+
+/// @submodule{pw_unit_test,control}
+
 /// @def ADD_FAILURE
 /// Generates a non-fatal failure with a generic message.
 #define ADD_FAILURE()                                                      \
   ::pw::unit_test::internal::ReturnHelper() =                              \
       ::pw::unit_test::internal::Framework::Get().CurrentTestExpectSimple( \
-          "(line is not executed)", "(line was executed)", __LINE__, false)
+          "(line is not executed)",                                        \
+          "(line was executed)",                                           \
+          __FILE__,                                                        \
+          __LINE__,                                                        \
+          false)
 
 /// @def GTEST_FAIL
 ///
@@ -265,7 +289,7 @@
 #define GTEST_SKIP()                                                      \
   return ::pw::unit_test::internal::ReturnHelper() =                      \
              ::pw::unit_test::internal::Framework::Get().CurrentTestSkip( \
-                 __LINE__)
+                 __FILE__, __LINE__)
 
 /// @def FAIL
 /// Generates a fatal failure with a generic message.
@@ -281,7 +305,7 @@
 /// Alias of `SUCCEED`.
 #define GTEST_SUCCEED()                                                \
   ::pw::unit_test::internal::Framework::Get().CurrentTestExpectSimple( \
-      "(success)", "(success)", __LINE__, true)
+      "(success)", "(success)", __FILE__, __LINE__, true)
 
 /// @def SUCCEED
 ///
@@ -292,6 +316,11 @@
 #if !(defined(GTEST_DONT_DEFINE_SUCCEED) && GTEST_DONT_DEFINE_SUCCEED)
 #define SUCCEED() GTEST_SUCCEED()
 #endif  // !GTEST_DONT_DEFINE_SUCCEED
+
+/// @def SCOPED_TRACE
+/// SCOPED_TRACE is not supported. This macro does nothing.
+// TODO: https://pwbug.dev/441096262 - Add SCOPED_TRACE support.
+#define SCOPED_TRACE(message)
 
 /// The `pw_unit_test` framework entrypoint. Runs every registered test case
 /// and dispatches the results through the event handler.
@@ -320,8 +349,12 @@ int RUN_ALL_TESTS();
 #define ASSERT_DEATH_IF_SUPPORTED(statement, regex) \
   EXPECT_DEATH_IF_SUPPORTED(statement, regex)
 
+/// @}
+
 namespace pw {
 namespace string {
+
+/// @submodule{pw_unit_test,helpers}
 
 // This function is used to print unknown types that are used in EXPECT or
 // ASSERT statements in tests.
@@ -379,6 +412,8 @@ StatusWithSize UnknownTypeToString(const T& value, span<char> buffer) {
   sb << '>';
   return sb.status_with_size();
 }
+
+/// @}
 
 }  // namespace string
 
@@ -527,6 +562,7 @@ class Framework {
                                                   const Rhs& rhs,
                                                   const Epsilon& epsilon,
                                                   const char* expression,
+                                                  const char* file,
                                                   int line) {
     const bool success = expectation(lhs, rhs, epsilon);
     if (!success) {
@@ -538,6 +574,7 @@ class Framework {
                                   " of ",
                                   ConvertForPrint(rhs))
                                   .c_str(),
+                              file,
                               line,
                               success);
     }
@@ -551,6 +588,7 @@ class Framework {
                                        const Rhs& rhs,
                                        const char* expectation_string,
                                        const char* expression,
+                                       const char* file,
                                        int line) {
     const bool success = expectation(lhs, rhs);
     if (!success) {
@@ -562,6 +600,7 @@ class Framework {
                                                           ' ',
                                                           ConvertForPrint(rhs))
               .c_str(),
+          file,
           line,
           success);
     }
@@ -569,12 +608,14 @@ class Framework {
   }
 
   // Skips the current test and dispatches an event for it.
-  ::pw::unit_test::internal::FailureMessageAdapter CurrentTestSkip(int line);
+  ::pw::unit_test::internal::FailureMessageAdapter CurrentTestSkip(
+      const char* file, int line);
 
   // Dispatches an event indicating the result of an expectation.
   ::pw::unit_test::internal::FailureMessageAdapter CurrentTestExpectSimple(
       const char* expression,
       const char* evaluated_expression,
+      const char* file,
       int line,
       bool success);
 
@@ -646,10 +687,11 @@ class TestInfo {
            const char* const file_name,
            void (*run_func)(const TestInfo&))
       : test_case_{
-        .suite_name = test_suite_name,
-        .test_name = test_name,
-        .file_name = file_name,
-       }, run_(run_func) {
+            .suite_name = test_suite_name,
+            .test_name = test_name,
+            .file_name = file_name,
+        },
+        run_(run_func) {
     Framework::Get().RegisterTest(this);
   }
 
@@ -705,8 +747,7 @@ class Test {
   // Runs the unit test.
   void PigweedTestRun() {
     SetUp();
-    // TODO(deymo): Skip the test body if there's a fatal error in SetUp().
-    if (!Framework::Get().IsSkipped()) {
+    if (!HasFailure() && !Framework::Get().IsSkipped()) {
       PigweedTestBody();
     }
     TearDown();
@@ -816,6 +857,7 @@ inline int RUN_ALL_TESTS() {
       value,                                                         \
       "is",                                                          \
       #expr " is " #value,                                           \
+      __FILE__,                                                      \
       __LINE__)
 
 #define _PW_TEST_OP(lhs, rhs, op)                                \
@@ -827,6 +869,7 @@ inline int RUN_ALL_TESTS() {
       (rhs),                                                     \
       #op,                                                       \
       #lhs " " #op " " #rhs,                                     \
+      __FILE__,                                                  \
       __LINE__)
 
 #define _PW_TEST_NEAR(lhs, rhs, epsilon)                                      \
@@ -838,6 +881,7 @@ inline int RUN_ALL_TESTS() {
       (rhs),                                                                  \
       (epsilon),                                                              \
       #lhs " within " #epsilon " of " #rhs,                                   \
+      __FILE__,                                                               \
       __LINE__)
 
 #define _PW_TEST_C_STR(lhs, rhs, op)                             \
@@ -855,6 +899,7 @@ inline int RUN_ALL_TESTS() {
       ::pw::unit_test::internal::CStringArg{rhs},                \
       #op,                                                       \
       #lhs " " #op " " #rhs,                                     \
+      __FILE__,                                                  \
       __LINE__)
 
 // Checks that test suite names between TEST and TEST_F declarations are unique.
@@ -869,11 +914,11 @@ inline int RUN_ALL_TESTS() {
 // For some reason GCC8 is unable to ignore -Wredundant-decls here.
 #define _PW_TEST_SUITE_NAMES_MUST_BE_UNIQUE(return_type, test_suite)
 #else  // All other compilers.
-#define _PW_TEST_SUITE_NAMES_MUST_BE_UNIQUE(return_type, test_suite)           \
-  PW_MODIFY_DIAGNOSTICS_PUSH();                                                \
-  PW_MODIFY_DIAGNOSTIC(ignored, "-Wredundant-decls");                          \
-  extern "C" return_type /* use extern "C" to escape namespacing */            \
-      PwUnitTestSuiteNamesMustBeUniqueBetweenTESTandTEST_F_##test_suite(void); \
+#define _PW_TEST_SUITE_NAMES_MUST_BE_UNIQUE(return_type, test_suite)       \
+  PW_MODIFY_DIAGNOSTICS_PUSH();                                            \
+  PW_MODIFY_DIAGNOSTIC(ignored, "-Wredundant-decls");                      \
+  extern "C" return_type /* use extern "C" to escape namespacing */        \
+  PwUnitTestSuiteNamesMustBeUniqueBetweenTESTandTEST_F_##test_suite(void); \
   PW_MODIFY_DIAGNOSTICS_POP()
 #endif  // GCC8 or older.
 

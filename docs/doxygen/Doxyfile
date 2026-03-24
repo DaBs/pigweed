@@ -1,0 +1,240 @@
+################################################################################
+# Doxygen configuration: https://www.doxygen.nl/manual/config.html
+# Version of Doxygen that Pigweed uses: v1.9.6
+# Maintenance guidelines for this file:
+# * Keep the file sorted alphabetically.
+# * If the default value for a config option is fine, then omit that option
+#   from this file entirely.
+# * Above each overridden option, provide a link to that option's documentation.
+# * Leave a comment explaining the rationale for why Pigweed overrides the
+#   default option.
+################################################################################
+
+# Pigweed injects the API reference information that Doxygen generates into our
+# Sphinx site via Breathe. These aliases enable us to do some rich formatting
+# within the API references.
+#
+# Note: Use `leading-asterisk` even though `leading-slashes` is more
+# semantically accurate (all Doxygen comments in Pigweed codebase
+# start with `///`). See the discussion about undocumented Doxygen
+# behavior at the bottom of this section:
+# https://breathe.readthedocs.io/en/latest/markups.html#aliases
+#
+# https://www.doxygen.nl/manual/config.html#cfg_aliases
+ALIASES                = "rst=^^\verbatim embed:rst:leading-asterisk^^" \
+                         "endrst=\endverbatim" \
+                         "rstref{1}=\verbatim embed:rst:inline :ref:`\1` \endverbatim" \
+                         "crossref{3}=\verbatim embed:rst:inline :\1:\2:`\3` \endverbatim" \
+                         "c_macro{1}=@crossref{c,macro,\1}" \
+                         "cpp_class{1}=@crossref{cpp,class,\1}" \
+                         "cpp_func{1}=@crossref{cpp,func,\1}" \
+                         "cpp_type{1}=@crossref{cpp,type,\1}" \
+                         "cpp_enum{1}=@crossref{cpp,type,\1}" \
+                         "pw_status{1}=@crossref{c,enumerator,\1}" \
+                         "module{1}=\addtogroup \1^^@{" \
+                         "endmodule=@}" \
+                         "submodule{2}=\addtogroup \1_\2^^@{" \
+                         "endsubmodule=@}" \
+                         "OK=\ref pw::OkStatus() \"OK\"" \
+                         "CANCELLED=\ref pw::Status::Cancelled() \"CANCELLED\"" \
+                         "UNKNOWN=\ref pw::Status::Unknown() \"UNKNOWN\"" \
+                         "INVALID_ARGUMENT=\ref pw::Status::InvalidArgument() \"INVALID_ARGUMENT\"" \
+                         "DEADLINE_EXCEEDED=\ref pw::Status::DeadlineExceeded() \"DEADLINE_EXCEEDED\"" \
+                         "NOT_FOUND=\ref pw::Status::NotFound() \"NOT_FOUND\"" \
+                         "ALREADY_EXISTS=\ref pw::Status::AlreadyExists() \"ALREADY_EXISTS\"" \
+                         "PERMISSION_DENIED=\ref pw::Status::PermissionDenied() \"PERMISSION_DENIED\"" \
+                         "RESOURCE_EXHAUSTED=\ref pw::Status::ResourceExhausted() \"RESOURCE_EXHAUSTED\"" \
+                         "FAILED_PRECONDITION=\ref pw::Status::FailedPrecondition() \"FAILED_PRECONDITION\"" \
+                         "ABORTED=\ref pw::Status::Aborted() \"ABORTED\"" \
+                         "OUT_OF_RANGE=\ref pw::Status::OutOfRange() \"OUT_OF_RANGE\"" \
+                         "UNIMPLEMENTED=\ref pw::Status::Unimplemented() \"UNIMPLEMENTED\"" \
+                         "INTERNAL=\ref pw::Status::Internal() \"INTERNAL\"" \
+                         "UNAVAILABLE=\ref pw::Status::Unavailable() \"UNAVAILABLE\"" \
+                         "DATA_LOSS=\ref pw::Status::DataLoss() \"DATA_LOSS\"" \
+                         "UNAUTHENTICATED=\ref pw::Status::Unauthenticated() \"UNAUTHENTICATED\"" \
+                         "Result{1}=A \ref pw::Result \"Result\" containing \1 on success or one of the following error codes on failure:" \
+                         "maindocs=@details @htmlonly <!-- maindocs --> @endhtmlonly Main docs:" \
+                         "endmaindocs=@htmlonly <!-- endmaindocs --> @endhtmlonly" \
+
+# https://www.doxygen.nl/manual/config.html#cfg_case_sense_names
+CASE_SENSE_NAMES       = NO
+
+# This option, along with FULL_SIDEBAR and GENERATE_TREEVIEW,
+# controls the overall layout of the Doxygen HTML site.
+# https://www.doxygen.nl/manual/customize.html#minor_tweaks_treeview
+#
+# https://www.doxygen.nl/manual/config.html#cfg_disable_index
+DISABLE_INDEX          = NO
+
+# https://www.doxygen.nl/manual/config.html#cfg_enable_preprocessing
+ENABLE_PREPROCESSING   = YES
+
+# https://www.doxygen.nl/manual/config.html#cfg_extract_package
+EXTRACT_PACKAGE        = YES
+
+# https://www.doxygen.nl/manual/config.html#cfg_extract_priv_virtual
+EXTRACT_PRIV_VIRTUAL   = YES
+
+# https://www.doxygen.nl/manual/config.html#cfg_extract_static
+EXTRACT_STATIC         = YES
+
+# This option, along with DISABLE_INDEX and GENERATE_TREEVIEW,
+# controls the overall layout of the Doxygen HTML site.
+# https://www.doxygen.nl/manual/customize.html#minor_tweaks_treeview
+#
+# https://www.doxygen.nl/manual/config.html#cfg_full_sidebar
+FULL_SIDEBAR           = NO
+
+# https://www.doxygen.nl/manual/config.html#cfg_generate_buglist
+GENERATE_BUGLIST       = NO
+
+# https://www.doxygen.nl/manual/config.html#cfg_generate_latex
+GENERATE_LATEX         = NO
+
+# rules_doxygen replaces `OUTDIR` with the correct output directory path:
+# https://github.com/TendTo/rules_doxygen/blob/main/docs/doxygen_doc.md
+#
+# https://www.doxygen.nl/manual/config.html#cfg_generate_tagfile
+GENERATE_TAGFILE       = {{OUTDIR}}/html/index.tag
+
+# https://www.doxygen.nl/manual/config.html#cfg_generate_testlist
+GENERATE_TESTLIST      = NO
+
+# https://www.doxygen.nl/manual/config.html#cfg_generate_todolist
+GENERATE_TODOLIST      = NO
+
+# This option, along with DISABLE_INDEX and FULL_SIDEBAR,
+# controls the overall layout of the Doxygen HTML site.
+# https://www.doxygen.nl/manual/customize.html#minor_tweaks_treeview
+#
+# https://www.doxygen.nl/manual/config.html#cfg_generate_treeview
+GENERATE_TREEVIEW      = YES
+
+# Breathe uses Doxygen's XML output to inject the API reference
+# information into our Sphinx site.
+#
+# https://www.doxygen.nl/manual/config.html#cfg_generate_xml
+GENERATE_XML           = YES
+
+# https://www.doxygen.nl/manual/config.html#cfg_html_colorstyle
+HTML_COLORSTYLE        = TOGGLE
+
+# https://www.doxygen.nl/manual/config.html#cfg_html_dynamic_menus
+HTML_DYNAMIC_MENUS     = NO
+
+# https://www.doxygen.nl/manual/config.html#cfg_html_footer
+HTML_FOOTER            = docs/doxygen/footer.html
+
+# https://www.doxygen.nl/manual/config.html#cfg_html_header
+HTML_HEADER            = docs/doxygen/header.html
+
+# https://www.doxygen.nl/manual/config.html#cfg_html_stylesheet
+HTML_STYLESHEET        = docs/doxygen/styles.css
+
+# https://www.doxygen.nl/manual/config.html#cfg_layout_file
+LAYOUT_FILE            = docs/doxygen/layout.xml
+
+# https://www.doxygen.nl/manual/config.html#cfg_macro_expansion
+MACRO_EXPANSION        = YES
+
+# Let Doxygen figure out how many cores it can use.
+#
+# https://www.doxygen.nl/manual/config.html#cfg_num_proc_threads
+NUM_PROC_THREADS       = 0
+
+# rules_doxygen replaces `OUTDIR` with the correct output directory path:
+# https://github.com/TendTo/rules_doxygen/blob/main/docs/doxygen_doc.md
+#
+# https://www.doxygen.nl/manual/config.html#cfg_output_directory
+OUTPUT_DIRECTORY       = {{OUTDIR}}
+
+# TODO: https://pwbug.dev/402489948 - Replace PW_ALLOCATOR_HAS_ATOMICS
+# when `pw_atomic` provides portable atomics.
+#
+# https://www.doxygen.nl/manual/config.html#cfg_predefined
+PREDEFINED             = __cplusplus=202002L \
+                         __cpp_concepts=202002L \
+                         PW_LOCKABLE= \
+                         PW_PRINTF_FORMAT(...)= \
+                         PW_CONSTEXPR_CPP20= \
+                         PW_EXCLUSIVE_LOCK_FUNCTION(...)= \
+                         PW_EXCLUSIVE_TRYLOCK_FUNCTION(...)= \
+                         PW_UNLOCK_FUNCTION(...)= \
+                         PW_NO_LOCK_SAFETY_ANALYSIS= \
+                         PW_CXX_STANDARD_IS_SUPPORTED(...)=1 \
+                         PW_EXTERN_C_START= \
+                         PW_LOCKS_EXCLUDED(...)= \
+                         PW_EXCLUSIVE_LOCKS_REQUIRED(...)= \
+                         PW_GUARDED_BY(...)= \
+                         PW_MODIFY_DIAGNOSTIC_CLANG(...)= \
+                         PW_NO_SANITIZE(...)= \
+                         PW_NODISCARD_STR(...)= \
+                         PW_ALLOCATOR_HAS_ATOMICS=1 \
+                         configSUPPORT_STATIC_ALLOCATION=1 \
+                         configUSE_TIMERS=1 \
+                         configCHECK_FOR_STACK_OVERFLOW=1 \
+                         PW_EXCLUDE_FROM_DOXYGEN=1
+
+# https://www.doxygen.nl/manual/config.html#cfg_project_brief
+PROJECT_BRIEF          = "C/C++ API Reference"
+
+# We hardcode the logo in header.html. We don't attempt to set it via
+# PROJECT_LOGO because Doxygen expects the PROJECT_LOGO file to be local
+# whereas we fetch our logo over CDN.
+# https://www.doxygen.nl/manual/config.html#cfg_project_logo
+# PROJECT_LOGO           =
+
+# https://www.doxygen.nl/manual/config.html#cfg_project_name
+PROJECT_NAME           = "Pigweed"
+
+# https://www.doxygen.nl/manual/config.html#cfg_quiet
+QUIET                  = YES
+
+# Bazel and rules_doxygen put the sources into subdirectories so it's
+# important to let Doxygen search for sources recursively.
+#
+# https://www.doxygen.nl/manual/config.html#cfg_recursive
+RECURSIVE              = YES
+
+# The headers that Doxygen generates are incorrect.
+#
+# https://www.doxygen.nl/manual/config.html#cfg_show_headerfile
+SHOW_HEADERFILE        = NO
+
+# Alphabetically sort the modules index page.
+#
+# https://www.doxygen.nl/manual/config.html#cfg_sort_group_names
+SORT_GROUP_NAMES       = YES
+
+# https://google.github.io/styleguide/cppguide.html#Spaces_vs._Tabs
+#
+# https://www.doxygen.nl/manual/config.html#cfg_tab_size
+TAB_SIZE               = 2
+
+# https://www.doxygen.nl/manual/config.html#cfg_use_mdfile_as_mainpage
+USE_MDFILE_AS_MAINPAGE = docs/doxygen/index.md
+
+# TODO: https://pwbug.dev/393634135 - Turn this on.
+#
+# https://www.doxygen.nl/manual/config.html#cfg_warn_if_doc_error
+WARN_IF_DOC_ERROR      = NO
+
+# TODO: https://pwbug.dev/393634135 - Turn this on.
+#
+# https://www.doxygen.nl/manual/config.html#cfg_warn_if_incomplete_doc
+WARN_IF_INCOMPLETE_DOC = NO
+
+# TODO: https://pwbug.dev/393634135 - Turn this on.
+#
+# https://www.doxygen.nl/manual/config.html#cfg_warn_if_undocumented
+WARN_IF_UNDOCUMENTED   = NO
+
+# TODO: https://pwbug.dev/393634135 - Log warnings to stderr.
+#
+# https://www.doxygen.nl/manual/config.html#cfg_warn_logfile
+WARN_LOGFILE           = "doxygen_build_warnings.txt"
+
+# TODO: https://pwbug.dev/393634135 - Turn this on.
+#
+# https://www.doxygen.nl/manual/config.html#cfg_warnings
+WARNINGS               = NO

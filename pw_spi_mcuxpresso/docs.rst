@@ -28,10 +28,10 @@ This example shows what your SDK setup would look like if using an RT595 EVK.
 
 .. code-block:: text
 
-   import("$dir_pw_third_party/mcuxpresso/mcuxpresso.gni")
+   import("$pw_external_mcuxpresso/mcuxpresso.gni")
 
    pw_mcuxpresso_sdk("sample_project_sdk") {
-     manifest = "$dir_pw_third_party/mcuxpresso/evkmimxrt595/EVK-MIMXRT595_manifest_v3_13.xml"
+     manifest = "$pw_external_mcuxpresso/evkmimxrt595/EVK-MIMXRT595_manifest_v3_13.xml"
      include = [
        "component.serial_manager_uart.MIMXRT595S",
        "platform.drivers.flexio_spi.MIMXRT595S",
@@ -80,17 +80,17 @@ Example use of SPI responder:
    pw::dma::McuxpressoDmaChannel rx_dma = dma.GetChannel(kRxDmaChannel);
 
    pw::spi::McuxpressoResponder spi_responder(
-      {
-         // SPI mode 3 (CPOL = 1, CPHA = 1)
-         .polarity = pw::spi::ClockPolarity::kActiveLow,  // CPOL = 1
-         .phase = pw::spi::ClockPhase::kFallingEdge,      // CPHA = 1
-         .bits_per_word = 8,
-         .bit_order = pw::spi::BitOrder::kMsbFirst,
-         .base_address = SPI14_BASE,
-         .handle_cs = true,
-      },
-      tx_dma,
-      rx_dma);
+       {
+           // SPI mode 3 (CPOL = 1, CPHA = 1)
+           .polarity = pw::spi::ClockPolarity::kActiveLow,  // CPOL = 1
+           .phase = pw::spi::ClockPhase::kFallingEdge,      // CPHA = 1
+           .bits_per_word = 8,
+           .bit_order = pw::spi::BitOrder::kMsbFirst,
+           .base_address = SPI14_BASE,
+           .handle_cs = true,
+       },
+       tx_dma,
+       rx_dma);
 
    pw::Status Init() {
      // Initialize the DMA controller
@@ -108,9 +108,10 @@ Example use of SPI responder:
 
      PW_TRY(spi_responder.Initialize());
 
-     spi_responder.SetCompletionHandler([this](pw::ByteSpan rx_data, pw::Status status) {
-      // Signal we got some data
-     });
+     spi_responder.SetCompletionHandler(
+         [this](pw::ByteSpan rx_data, pw::Status status) {
+           // Signal we got some data
+         });
 
      // Start listen for read
      PW_TRY(spi_.WriteReadAsync(kTxData, rx_buf));

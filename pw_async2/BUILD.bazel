@@ -1,4 +1,4 @@
-# Copyright 2023 The Pigweed Authors
+# Copyright 2025 The Pigweed Authors
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may not
 # use this file except in compliance with the License. You may obtain a copy of
@@ -23,176 +23,427 @@ load("//pw_unit_test:pw_cc_test.bzl", "pw_cc_test")
 
 package(
     default_visibility = ["//visibility:public"],
-    features = ["-layering_check"],
 )
 
 licenses(["notice"])
 
-cc_library(
+# TODO: b/481069684 - Remove deprecated alias.
+alias(
     name = "poll",
-    hdrs = [
-        "public/pw_async2/internal/poll_internal.h",
-        "public/pw_async2/poll.h",
-        "public/pw_async2/try.h",
-    ],
-    strip_include_prefix = "public",
-    deps = [
-        "//pw_polyfill",
-        "//pw_string:to_string",
-        "//third_party/fuchsia:stdcompat",
-    ],
+    actual = ":pw_async2",
 )
 
 pw_cc_test(
     name = "poll_test",
     srcs = ["poll_test.cc"],
     deps = [
-        ":poll",
+        ":pw_async2",
         "//pw_result",
     ],
 )
 
-# NOTE: this target should only be used directly by implementors of the
-# `dispatcher` facade.
+pw_cc_test(
+    name = "await_test",
+    srcs = ["await_test.cc"],
+    deps = [
+        ":pw_async2",
+        ":testing",
+        ":value_future",
+        "//pw_result",
+    ],
+)
+
 cc_library(
-    name = "dispatcher_base",
+    name = "pw_async2",
     srcs = [
-        "dispatcher_base.cc",
+        "context.cc",
+        "dispatcher.cc",
+        "future.cc",
+        "runnable_dispatcher.cc",
+        "task.cc",
+        "waker.cc",
     ],
     hdrs = [
-        "public/pw_async2/dispatcher_base.h",
+        "public/pw_async2/await.h",
+        "public/pw_async2/context.h",
+        "public/pw_async2/dispatcher.h",
+        "public/pw_async2/func_task.h",
+        "public/pw_async2/future.h",
+        "public/pw_async2/future_task.h",
+        "public/pw_async2/internal/poll_internal.h",
+        "public/pw_async2/poll.h",
+        "public/pw_async2/runnable_dispatcher.h",
+        "public/pw_async2/task.h",
+        "public/pw_async2/try.h",
+        "public/pw_async2/waker.h",
     ],
-    implementation_deps = ["//pw_assert:check"],
+    implementation_deps = [
+        ":yield",
+        "//pw_assert:check",
+        "//pw_thread:sleep",
+    ],
     strip_include_prefix = "public",
     deps = [
-        ":poll",
+        ":config_override",
+        ":internal",
+        "//pw_allocator",
+        "//pw_assert:assert",
         "//pw_chrono:system_clock",
+        "//pw_containers:intrusive_forward_list",
+        "//pw_containers:intrusive_list",
+        "//pw_containers:intrusive_queue",
+        "//pw_containers:optional",
+        "//pw_function",
+        "//pw_log",
+        "//pw_log:args",
+        "//pw_memory",
+        "//pw_polyfill",
+        "//pw_preprocessor",
+        "//pw_string:to_string",
         "//pw_sync:interrupt_spin_lock",
         "//pw_sync:lock_annotations",
-        "//pw_sync:mutex",
+        "//pw_tokenizer",
+        "//third_party/fuchsia:stdcompat",
+    ],
+)
+
+cc_library(
+    name = "yield",
+    hdrs = ["private/pw_async2_private/yield.h"],
+    strip_include_prefix = "private",
+    visibility = ["//visibility:private"],
+    deps = [
+        ":internal",
+        "//pw_chrono:system_clock",
+        "//pw_thread:sleep",
+    ],
+)
+
+# TODO: b/481069684 - Remove deprecated alias.
+alias(
+    name = "dispatcher",
+    actual = ":pw_async2",
+)
+
+cc_library(
+    name = "internal",
+    hdrs = [
+        "public/pw_async2/internal/config.h",
+        "public/pw_async2/internal/lock.h",
+        "public/pw_async2/internal/logging.h",
+    ],
+    # LINT.IfChange
+    defines = select({
+        ":debug_wait_reason_disabled": ["PW_ASYNC2_DEBUG_WAIT_REASON=0"],
+        ":debug_wait_reason_enabled": ["PW_ASYNC2_DEBUG_WAIT_REASON=1"],
+    }),
+    # LINT.ThenChange(//pw_async2/public/pw_async2/internal/config.h)
+    strip_include_prefix = "public",
+    visibility = ["//visibility:private"],
+    deps = [
+        "//pw_polyfill",
+        "//pw_sync:interrupt_spin_lock",
         "//pw_toolchain:no_destructor",
     ],
 )
 
 cc_library(
-    name = "dispatcher",
-    hdrs = [
-        "public/pw_async2/dispatcher.h",
-    ],
+    name = "basic_dispatcher",
+    hdrs = ["public/pw_async2/basic_dispatcher.h"],
     strip_include_prefix = "public",
     deps = [
-        ":dispatcher_backend",
-        ":dispatcher_base",
+        ":pw_async2",
+        "//pw_sync:thread_notification",
+    ],
+)
+
+cc_library(
+    name = "notified_dispatcher",
+    hdrs = ["public/pw_async2/notified_dispatcher.h"],
+    strip_include_prefix = "public",
+    deps = [
+        ":pw_async2",
+        "//pw_sync:thread_notification",
     ],
 )
 
 label_flag(
-    name = "dispatcher_backend",
-    build_setting_default = ":dispatcher_backend_multiplexer",
+    name = "config_override",
+    build_setting_default = "//pw_build:default_module_config",
+)
+
+constraint_setting(
+    name = "debug_wait_reason",
+    default_constraint_value = "debug_wait_reason_enabled",
+)
+
+constraint_value(
+    name = "debug_wait_reason_disabled",
+    constraint_setting = ":debug_wait_reason",
+)
+
+constraint_value(
+    name = "debug_wait_reason_enabled",
+    constraint_setting = ":debug_wait_reason",
 )
 
 cc_library(
-    name = "dispatcher_backend_multiplexer",
-    visibility = ["//targets:__pkg__"],
-    deps = select({
-        "@platforms//os:linux": ["//pw_async2_epoll:dispatcher"],
-        "//conditions:default": ["//pw_async2_basic:dispatcher"],
+    name = "testing",
+    testonly = True,
+    srcs = ["dispatcher_for_test.cc"],
+    hdrs = ["public/pw_async2/dispatcher_for_test.h"],
+    implementation_deps = ["//pw_assert:check"],
+    strip_include_prefix = "public",
+    deps = [
+        ":dispatcher_for_test_backend",
+        ":pw_async2",
+    ],
+)
+
+cc_library(
+    name = "epoll_dispatcher",
+    srcs = ["epoll_dispatcher.cc"],
+    hdrs = ["public/pw_async2/epoll_dispatcher.h"],
+    implementation_deps = [
+        "//pw_assert:check",
+        "//pw_log",
+    ],
+    strip_include_prefix = "public",
+    target_compatible_with = ["@platforms//os:linux"],
+    deps = [
+        ":pw_async2",
+        "//pw_assert:assert",
+        "//pw_status",
+    ],
+)
+
+cc_library(
+    name = "epoll_dispatcher_for_test",
+    hdrs = [
+        "epoll_dispatcher_for_test_public_overrides/pw_async2_backend/native_dispatcher_for_test.h",
+    ],
+    strip_include_prefix = "epoll_dispatcher_for_test_public_overrides",
+    deps = [":epoll_dispatcher"],
+)
+
+label_flag(
+    name = "dispatcher_for_test_backend",
+    build_setting_default = ":dispatcher_for_test_default_backend",
+)
+
+alias(
+    name = "dispatcher_for_test_default_backend",
+    actual = select({
+        "@platforms//os:linux": ":epoll_dispatcher_for_test",
+        "//conditions:default": ":basic_dispatcher_for_test",
     }),
+)
+
+cc_library(
+    name = "basic_dispatcher_for_test",
+    hdrs = [
+        "dispatcher_for_test_public_overrides/pw_async2_backend/native_dispatcher_for_test.h",
+    ],
+    strip_include_prefix = "dispatcher_for_test_public_overrides",
+    deps = [":basic_dispatcher"],
 )
 
 pw_cc_test(
     name = "dispatcher_test",
     srcs = ["dispatcher_test.cc"],
     deps = [
-        ":dispatcher",
+        ":pw_async2",
+        ":testing",
+        ":value_future",
         "//pw_containers:vector",
+    ],
+)
+
+pw_cc_test(
+    name = "task_test",
+    srcs = ["task_test.cc"],
+    deps = [
+        ":pw_async2",
+        ":testing",
+        "//pw_sync:binary_semaphore",
+        "//pw_sync:mutex",
+        "//pw_thread:sleep",
+        "//pw_thread:test_thread_context",
+        "//pw_thread:thread",
     ],
 )
 
 pw_cc_test(
     name = "dispatcher_thread_test",
     srcs = ["dispatcher_thread_test.cc"],
-    # TODO: b/343776738 - update to run on all compatible devices
-    target_compatible_with = incompatible_with_mcu(),
     deps = [
-        ":dispatcher",
-        "//pw_function",
+        ":pw_async2",
+        ":testing",
+        "//pw_sync:thread_notification",
         "//pw_thread:sleep",
+        "//pw_thread:test_thread_context",
         "//pw_thread:thread",
     ],
 )
 
+pw_cc_test(
+    name = "dispatcher_stress_test",
+    srcs = ["dispatcher_stress_test.cc"],
+    deps = [
+        ":notified_dispatcher",
+        ":pw_async2",
+        "//pw_allocator:libc_allocator",
+        "//pw_assert:check",
+        "//pw_containers:dynamic_queue",
+        "//pw_containers:dynamic_vector",
+        "//pw_log",
+        "//pw_sync:lock_annotations",
+        "//pw_sync:mutex",
+        "//pw_sync:thread_notification",
+        "//pw_thread:test_thread_context",
+        "//pw_thread:thread",
+        "//pw_thread:yield",
+    ],
+)
+
+pw_cc_test(
+    name = "future_test",
+    srcs = ["future_test.cc"],
+    has_nc_test = True,
+    deps = [
+        ":pw_async2",
+        ":select",
+        ":testing",
+    ],
+)
+
+pw_cc_test(
+    name = "future_task_test",
+    srcs = ["future_task_test.cc"],
+    deps = [
+        ":pw_async2",
+        ":testing",
+        ":value_future",
+    ],
+)
+
 cc_library(
-    name = "pend_func_awaitable",
+    name = "future_timeout",
     hdrs = [
-        "public/pw_async2/pend_func_awaitable.h",
+        "public/pw_async2/future_timeout.h",
     ],
     strip_include_prefix = "public",
     deps = [
-        ":dispatcher",
-        ":poll",
+        ":channel",
+        ":pw_async2",
+        ":system_time_provider",
+        ":time_provider",
+        ":value_future",
+        "//pw_assert:assert",
+        "//pw_chrono:system_clock",
+        "//pw_function",
+        "//pw_preprocessor",
+        "//pw_status",
+        "//third_party/fuchsia:stdcompat",
+    ],
+)
+
+pw_cc_test(
+    name = "future_timeout_test",
+    srcs = ["future_timeout_test.cc"],
+    has_nc_test = True,
+    deps = [
+        ":channel",
+        ":future_timeout",
+        ":pw_async2",
+        ":simulated_time_provider",
+        ":testing",
+        ":value_future",
+        "//pw_chrono:system_clock",
+        "//pw_function",
+        "//pw_result",
+        "//pw_status",
+    ],
+)
+
+cc_library(
+    name = "value_future",
+    srcs = ["value_future.cc"],
+    hdrs = [
+        "public/pw_async2/value_future.h",
+    ],
+    strip_include_prefix = "public",
+    deps = [
+        ":pw_async2",
+        "//pw_assert:assert",
+        "//pw_assert:check",
+        "//pw_polyfill",
+        "//pw_sync:interrupt_spin_lock",
+    ],
+)
+
+pw_cc_test(
+    name = "value_future_test",
+    srcs = ["value_future_test.cc"],
+    deps = [
+        ":pw_async2",
+        ":testing",
+        ":value_future",
+    ],
+)
+
+pw_cc_test(
+    name = "value_future_thread_test",
+    srcs = ["value_future_thread_test.cc"],
+    deps = [
+        ":callback_task",
+        ":pw_async2",
+        ":testing",
+        ":value_future",
+        "//pw_thread:sleep",
+        "//pw_thread:test_thread_context",
+        "//pw_thread:thread",
+        "//pw_unit_test",
+    ],
+)
+
+# TODO: b/481069684 - Remove deprecated alias.
+alias(
+    name = "func_task",
+    actual = ":pw_async2",
+)
+
+pw_cc_test(
+    name = "func_task_test",
+    srcs = ["func_task_test.cc"],
+    deps = [
+        ":pw_async2",
+        ":testing",
+        "//pw_function",
+    ],
+)
+
+cc_library(
+    name = "callback_task",
+    hdrs = [
+        "public/pw_async2/callback_task.h",
+    ],
+    strip_include_prefix = "public",
+    deps = [
+        ":pw_async2",
         "//pw_function",
     ],
 )
 
 pw_cc_test(
-    name = "pend_func_awaitable_test",
-    srcs = ["pend_func_awaitable_test.cc"],
+    name = "callback_task_test",
+    srcs = ["callback_task_test.cc"],
     deps = [
-        ":coro",
-        ":coro_or_else_task",
-        ":dispatcher",
-        ":pend_func_awaitable",
-        ":poll",
-        "//pw_allocator:testing",
+        ":callback_task",
+        ":pw_async2",
+        ":testing",
+        ":value_future",
         "//pw_function",
-    ],
-)
-
-cc_library(
-    name = "pend_func_task",
-    hdrs = [
-        "public/pw_async2/pend_func_task.h",
-    ],
-    strip_include_prefix = "public",
-    deps = [
-        ":dispatcher",
-        "//pw_function",
-    ],
-)
-
-pw_cc_test(
-    name = "pend_func_task_test",
-    srcs = ["pend_func_task_test.cc"],
-    deps = [":pend_func_task"],
-)
-
-cc_library(
-    name = "pendable_as_task",
-    hdrs = [
-        "public/pw_async2/pendable_as_task.h",
-    ],
-    strip_include_prefix = "public",
-    deps = [
-        ":dispatcher",
-    ],
-)
-
-pw_cc_test(
-    name = "pendable_as_task_test",
-    srcs = ["pendable_as_task_test.cc"],
-    deps = [":pendable_as_task"],
-)
-
-cc_library(
-    name = "allocate_task",
-    hdrs = [
-        "public/pw_async2/allocate_task.h",
-    ],
-    strip_include_prefix = "public",
-    deps = [
-        ":dispatcher",
-        "//pw_allocator:allocator",
     ],
 )
 
@@ -200,31 +451,49 @@ pw_cc_test(
     name = "allocate_task_test",
     srcs = ["allocate_task_test.cc"],
     deps = [
-        ":allocate_task",
+        ":pw_async2",
+        ":testing",
+        ":value_future",
+        "//pw_allocator:testing",
+        "//pw_function",
+        "//pw_status",
+    ],
+)
+
+pw_cc_test(
+    name = "allocate_task_coro_test",
+    srcs = ["allocate_task_coro_test.cc"],
+    target_compatible_with = minimum_cxx_20(),
+    deps = [
+        ":coro",
+        ":pw_async2",
+        ":testing",
         "//pw_allocator:testing",
     ],
 )
 
 cc_library(
-    name = "once_sender",
+    name = "box",
     hdrs = [
-        "public/pw_async2/once_sender.h",
+        "public/pw_async2/box.h",
     ],
     strip_include_prefix = "public",
     deps = [
-        ":dispatcher",
-        "//pw_function",
+        ":pw_async2",
+        "//pw_allocator:allocator",
     ],
 )
 
 pw_cc_test(
-    name = "once_sender_test",
-    srcs = [
-        "once_sender_test.cc",
-    ],
+    name = "box_test",
+    srcs = ["box_test.cc"],
     deps = [
-        ":once_sender",
-        "//pw_containers:vector",
+        ":box",
+        ":pw_async2",
+        ":select",
+        ":testing",
+        ":value_future",
+        "//pw_allocator:testing",
     ],
 )
 
@@ -232,55 +501,99 @@ cc_library(
     name = "coro",
     srcs = [
         "coro.cc",
+        "coro_task.cc",
     ],
     hdrs = [
         "public/pw_async2/coro.h",
+        "public/pw_async2/coro_task.h",
+        "public/pw_async2/fallible_coro_task.h",
     ],
     implementation_deps = [
+        "//pw_assert:check",
         "//pw_log",
     ],
     strip_include_prefix = "public",
     target_compatible_with = minimum_cxx_20(),
     deps = [
-        ":dispatcher",
+        ":internal",
+        ":pw_async2",
         "//pw_allocator:allocator",
+        "//pw_assert:assert",
+        "//pw_containers:optional",
         "//pw_function",
+    ],
+)
+
+cc_library(
+    name = "notification",
+    hdrs = [
+        "public/pw_async2/notification.h",
+    ],
+    strip_include_prefix = "public",
+    deps = [
+        ":value_future",
+    ],
+)
+
+pw_cc_test(
+    name = "notification_test",
+    srcs = ["notification_test.cc"],
+    deps = [
+        ":notification",
+        ":pw_async2",
+        ":testing",
     ],
 )
 
 pw_cc_test(
     name = "coro_test",
     srcs = ["coro_test.cc"],
+    has_nc_test = True,
     deps = [
         ":coro",
-        ":dispatcher",
+        ":pw_async2",
+        ":testing",
         "//pw_allocator:null_allocator",
         "//pw_allocator:testing",
+        "//pw_containers:test_helpers",
+        "//pw_status",
     ],
 )
 
 cc_library(
     name = "coro_or_else_task",
-    hdrs = [
-        "public/pw_async2/coro_or_else_task.h",
-    ],
+    hdrs = ["public/pw_async2/coro_or_else_task.h"],
     strip_include_prefix = "public",
     deps = [
         ":coro",
-        ":dispatcher",
-        "//pw_function",
+        "//pw_status",
     ],
 )
 
 pw_cc_test(
-    name = "coro_or_else_task_test",
-    srcs = ["coro_or_else_task_test.cc"],
+    name = "coro_task_test",
+    srcs = ["coro_task_test.cc"],
     deps = [
         ":coro",
-        ":coro_or_else_task",
-        ":dispatcher",
+        ":pw_async2",
+        ":testing",
+        "//pw_allocator:testing",
+        "//pw_status",
+    ],
+)
+
+pw_cc_test(
+    name = "fallible_coro_task_test",
+    srcs = ["fallible_coro_task_test.cc"],
+    deps = [
+        ":coro",
+        ":pw_async2",
+        ":testing",
+        ":value_future",
         "//pw_allocator:null_allocator",
         "//pw_allocator:testing",
+        "//pw_containers:test_helpers",
+        "//pw_status",
     ],
 )
 
@@ -295,10 +608,11 @@ cc_library(
     implementation_deps = ["//pw_assert:check"],
     strip_include_prefix = "public",
     deps = [
-        ":dispatcher",
+        ":pw_async2",
         "//pw_chrono:virtual_clock",
         "//pw_containers:intrusive_list",
         "//pw_sync:interrupt_spin_lock",
+        "//pw_sync:lock_annotations",
         "//pw_toolchain:no_destructor",
     ],
 )
@@ -327,7 +641,10 @@ pw_cc_test(
     srcs = [
         "system_time_provider_test.cc",
     ],
-    deps = [":system_time_provider"],
+    deps = [
+        ":system_time_provider",
+        ":testing",
+    ],
 )
 
 cc_library(
@@ -349,29 +666,32 @@ pw_cc_test(
     ],
     deps = [
         ":simulated_time_provider",
+        ":testing",
         "//pw_chrono:system_clock",
     ],
 )
 
 cc_library(
-    name = "enqueue_heap_func",
+    name = "cancellable_task",
     hdrs = [
-        "public/pw_async2/enqueue_heap_func.h",
+        "public/pw_async2/cancellable_task.h",
     ],
     strip_include_prefix = "public",
     deps = [
-        ":dispatcher",
+        ":pw_async2",
     ],
 )
 
 pw_cc_test(
-    name = "enqueue_heap_func_test",
+    name = "cancellable_task_test",
     srcs = [
-        "enqueue_heap_func_test.cc",
+        "cancellable_task_test.cc",
     ],
     deps = [
-        ":dispatcher",
-        ":enqueue_heap_func",
+        ":cancellable_task",
+        ":pw_async2",
+        ":testing",
+        "//pw_function",
     ],
 )
 
@@ -382,7 +702,7 @@ cc_library(
     ],
     strip_include_prefix = "public",
     deps = [
-        ":dispatcher",
+        ":pw_async2",
     ],
 )
 
@@ -391,21 +711,143 @@ pw_cc_test(
     srcs = [
         "join_test.cc",
     ],
+    has_nc_test = True,
     deps = [
-        ":dispatcher",
         ":join",
+        ":pw_async2",
+        ":testing",
+        ":value_future",
+    ],
+)
+
+cc_library(
+    name = "select",
+    hdrs = [
+        "public/pw_async2/select.h",
+    ],
+    strip_include_prefix = "public",
+    deps = [
+        ":pw_async2",
+        "//pw_containers:optional_tuple",
+    ],
+)
+
+pw_cc_test(
+    name = "select_test",
+    srcs = [
+        "select_test.cc",
+    ],
+    deps = [
+        ":pw_async2",
+        ":select",
+        ":testing",
+        ":value_future",
+        "//pw_unit_test:constexpr",
+    ],
+)
+
+cc_library(
+    name = "channel",
+    srcs = ["channel.cc"],
+    hdrs = ["public/pw_async2/channel.h"],
+    implementation_deps = ["//pw_assert:check"],
+    strip_include_prefix = "public",
+    deps = [
+        ":callback_task",
+        ":pw_async2",
+        "//pw_allocator",
+        "//pw_containers:deque",
+        "//pw_numeric:checked_arithmetic",
+        "//pw_result",
+        "//pw_sync:interrupt_spin_lock",
+        "//pw_sync:lock_annotations",
+        "//pw_sync:timed_thread_notification",
+    ],
+)
+
+pw_cc_test(
+    name = "channel_test",
+    srcs = [
+        "channel_test.cc",
+    ],
+    deps = [
+        ":channel",
+        ":pw_async2",
+        ":testing",
+        "//pw_allocator:testing",
+        "//pw_containers:vector",
+    ],
+)
+
+pw_cc_test(
+    name = "channel_thread_test",
+    srcs = [
+        "channel_thread_test.cc",
+    ],
+    deps = [
+        ":channel",
+        ":pw_async2",
+        ":testing",
+        "//pw_containers:vector",
+        "//pw_thread:test_thread_context",
+        "//pw_thread:thread",
+    ],
+)
+
+pw_cc_test(
+    name = "channel_typed_test",
+    srcs = ["channel_typed_test.cc"],
+    target_compatible_with = select({
+        "//pw_unit_test:backend_is_googletest": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        ":channel",
+        ":pw_async2",
+        ":testing",
+        "//pw_allocator:testing",
+        "//pw_containers:vector",
+    ],
+)
+
+pw_cc_test(
+    name = "channel_coro_test",
+    srcs = [
+        "channel_coro_test.cc",
+    ],
+    deps = [
+        ":channel",
+        ":coro",
+        ":pw_async2",
+        ":testing",
+        "//pw_allocator:testing",
+        "//pw_containers:vector",
     ],
 )
 
 sphinx_docs_library(
     name = "docs",
     srcs = [
-        "backends.rst",
+        "channels.rst",
+        "code_size.rst",
+        "coroutines.rst",
+        "dispatcher.rst",
         "docs.rst",
+        "futures.rst",
         "guides.rst",
+        "informed_poll.rst",
         "public/pw_async2/coro.h",
-        "reference.rst",
+        "quickstart.rst",
+        "tasks.rst",
+        "//pw_async2/codelab:docs",
+        "//pw_async2/examples:channel.cc",
+        "//pw_async2/examples:custom_future.cc",
         "//pw_async2/examples:docs",
+        "//pw_async2/examples:task_helpers.cc",
+        "//pw_async2/size_report:channel_size_report",
+        "//pw_async2/size_report:full_size_report",
+        "//pw_async2/size_report:utilities_size_report",
+        "//pw_async2/size_report:value_future_table",
     ],
     prefix = "pw_async2/",
     target_compatible_with = incompatible_with_mcu(),
@@ -414,20 +856,37 @@ sphinx_docs_library(
 filegroup(
     name = "doxygen",
     srcs = [
-        "public/pw_async2/allocate_task.h",
+        "public/pw_async2/await.h",
+        "public/pw_async2/basic_dispatcher.h",
+        "public/pw_async2/box.h",
+        "public/pw_async2/callback_task.h",
+        "public/pw_async2/cancellable_task.h",
+        "public/pw_async2/channel.h",
+        "public/pw_async2/context.h",
         "public/pw_async2/coro.h",
         "public/pw_async2/coro_or_else_task.h",
+        "public/pw_async2/coro_task.h",
         "public/pw_async2/dispatcher.h",
-        "public/pw_async2/dispatcher_base.h",
-        "public/pw_async2/enqueue_heap_func.h",
+        "public/pw_async2/dispatcher_for_test.h",
+        "public/pw_async2/epoll_dispatcher.h",
+        "public/pw_async2/fallible_coro_task.h",
+        "public/pw_async2/func_task.h",
+        "public/pw_async2/future.h",
+        "public/pw_async2/future_task.h",
+        "public/pw_async2/future_timeout.h",
+        "public/pw_async2/internal/config.h",
         "public/pw_async2/join.h",
-        "public/pw_async2/once_sender.h",
-        "public/pw_async2/pend_func_awaitable.h",
-        "public/pw_async2/pend_func_task.h",
-        "public/pw_async2/pendable_as_task.h",
+        "public/pw_async2/notification.h",
+        "public/pw_async2/notified_dispatcher.h",
         "public/pw_async2/poll.h",
+        "public/pw_async2/runnable_dispatcher.h",
+        "public/pw_async2/select.h",
         "public/pw_async2/simulated_time_provider.h",
         "public/pw_async2/system_time_provider.h",
+        "public/pw_async2/task.h",
         "public/pw_async2/time_provider.h",
+        "public/pw_async2/try.h",
+        "public/pw_async2/value_future.h",
+        "public/pw_async2/waker.h",
     ],
 )

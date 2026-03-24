@@ -12,461 +12,1050 @@
 // License for the specific language governing permissions and limitations under
 // the License.
 
+//! Kernel Scheduler / Context Switching engine
+//!
+//! The module provides several interfaces for managing context switches. Each is
+//! different in its contract:
+//! - `block()` is used when a thread is taken out of the scheduler algorithm
+//!   and is managed by another source such as a wait queue. These threads
+//!   should be in the [`State::WaitingInterruptible`] or
+//!   [`State::WaitingNonInterruptible`] state.
+//! - `try_reschedule()` is used when there is a change to the scheduling state
+//!   (such as waking a thread). Depending on the local thread's
+//!   [`PreemptDisableGuard`] state and the scheduler state, this may trigger an
+//!   immediate context switch or it may defer it. This is useful for code which
+//!   may or may not be called in an interrupt context.
+//! - `try_deferred_reschedule()` is used to trigger a context switch if one was
+//!   deferred by `try_reschedule()`. Notably, this does not guarantee a context
+//!   switch if the [`PreemptDisableGuard`] state is not active but does
+//!   guarantee forward progress. This comes into play for architectures like
+//!   M-profile ARM which handles the context switch in an exception handler
+//!   after an interrupt has returned.
 use core::cell::UnsafeCell;
-use core::mem::offset_of;
-use core::ops::{Deref, DerefMut};
+use core::ptr::NonNull;
+use core::sync::atomic::Ordering;
 
 use foreign_box::ForeignBox;
 use list::*;
+use memory_config::MemoryConfig as _;
+use pw_atomic::{
+    AtomicAdd, AtomicCompareExchange, AtomicFalse, AtomicLoad, AtomicStore, AtomicSub, AtomicZero,
+};
 use pw_log::info;
+use pw_status::{Error, Result};
+use time::Instant;
 
-use crate::arch::{Arch, ArchInterface, ArchThreadState, ThreadState};
-use crate::sync::spinlock::{SpinLock, SpinLockGuard};
+#[cfg(feature = "user_space")]
+use crate::object::NullObjectTable;
+use crate::scheduler::timer::Timer;
+use crate::sync::event::EventSignaler;
+use crate::sync::spinlock::SpinLockGuard;
+use crate::trace::trace_context_switch;
+use crate::{Arch, Kernel};
 
-#[derive(Clone, Copy)]
-pub struct Stack {
-    start: *const u8,
-    end: *const u8,
+mod algorithm;
+mod locks;
+mod priority;
+pub mod priority_bitmask;
+pub mod thread;
+pub mod timer;
+
+use algorithm::{RescheduleReason, SchedulerAlgorithm};
+pub use locks::{SchedLockGuard, WaitQueueLock, WaitQueueLockGuard};
+pub use priority::Priority;
+use thread::*;
+
+const LOG_SCHEDULER_EVENTS: bool = false;
+const WAIT_QUEUE_DEBUG: bool = false;
+macro_rules! wait_queue_debug {
+  ($($args:expr),*) => {{
+    log_if::debug_if!(WAIT_QUEUE_DEBUG, $($args),*)
+  }}
 }
 
-#[allow(dead_code)]
-impl Stack {
-    pub const fn from_slice(slice: &[u8]) -> Self {
-        let start: *const u8 = slice.as_ptr();
-        // Safety: offset based on known size of slice.
-        let end = unsafe { start.add(slice.len() - 1) };
-        Self { start, end }
-    }
+// generic on `arch` instead of `kernel` as it appears in the `arch` interface.
+pub struct ThreadLocalState<A: Arch> {
+    pub(crate) preempt_disable_count: A::AtomicUsize,
+    pub(crate) needs_reschedule: A::AtomicBool,
+}
 
-    const fn new() -> Self {
+impl<A: Arch> ThreadLocalState<A> {
+    #[must_use]
+    pub const fn new() -> Self {
         Self {
-            start: core::ptr::null(),
-            end: core::ptr::null(),
+            preempt_disable_count: A::AtomicUsize::ZERO,
+            needs_reschedule: A::AtomicBool::FALSE,
         }
     }
+}
 
-    pub fn start(self) -> *const u8 {
-        self.start
-    }
-    pub fn end(self) -> *const u8 {
-        self.end
+pub fn start_thread<K: Kernel>(kernel: K, mut thread: ForeignBox<Thread<K>>) -> ThreadRef<K> {
+    info!(
+        "Starting thread '{}' ({:#010x})",
+        thread.name as &str,
+        thread.id() as usize
+    );
+
+    pw_assert::assert!(thread.state == State::Initial);
+
+    thread.state = State::Ready;
+    let thread_ref = thread.get_ref(kernel);
+
+    let mut sched_state = kernel.get_scheduler().lock(kernel);
+
+    // If there is a current thread, insert it into the scheduler.
+    let id = if let Some(mut current_thread) = sched_state.current_thread.take() {
+        let id = current_thread.id();
+        current_thread.state = State::Ready;
+        sched_state
+            .algorithm
+            .schedule_thread(current_thread, RescheduleReason::Preempted);
+        id
+    } else {
+        Thread::<K>::null_id()
+    };
+
+    sched_state
+        .algorithm
+        .schedule_thread(thread, RescheduleReason::Started);
+
+    // Now that we've added the new thread, trigger a reschedule event.
+    let (_sched_state, _switched) = context_switch(kernel, sched_state, id, State::Ready);
+
+    thread_ref
+}
+
+pub fn initialize<K: Kernel>(kernel: K) {
+    let mut sched_state = kernel.get_scheduler().lock(kernel);
+
+    // The kernel process needs to be initialized before any kernel threads so
+    // that they can properly be parented underneath it.
+
+    // SAFETY: Per the contract in `SchedulerState` this is the one place that
+    // `kernel_process` is converted into a foreign box and its refcount is
+    // incremented.
+    unsafe {
+        let kernel_process = sched_state.kernel_process.get();
+        (*kernel_process).manually_increment_ref_count();
+        let kernel_process = ForeignBox::new(NonNull::new_unchecked(kernel_process));
+
+        sched_state.add_process_to_list(kernel_process);
     }
 }
 
-// TODO: want to name this ThreadState, but collides with ArchThreadstate
-#[derive(Copy, Clone, PartialEq)]
-enum State {
-    New,
-    Initial,
-    Ready,
-    Running,
-    Stopped,
-    Waiting,
+pub fn add_process<K: Kernel>(kernel: K, mut process: ForeignBox<Process<K>>) -> ProcessRef<K> {
+    let mut sched_state = kernel.get_scheduler().lock(kernel);
+    let process_ref = ProcessRef::new(NonNull::from(&mut *process), kernel);
+
+    // SAFETY: We are taking ownership of the ForeignBox and interacting with the
+    // scheduler state which we have locked.
+    sched_state.add_process_to_list(process);
+    process_ref
 }
 
-// TODO: use From or Into trait (unclear how to do it with 'static str)
-fn to_string(s: State) -> &'static str {
-    match s {
-        State::New => "New",
-        State::Initial => "Initial",
-        State::Ready => "Ready",
-        State::Running => "Running",
-        State::Stopped => "Stopped",
-        State::Waiting => "Waiting",
-    }
-}
-
-pub struct Thread {
-    // List of the threads in the system
-    pub global_link: Link,
-
-    // Active state link (run queue, wait queue, etc)
-    pub active_link: Link,
-
-    state: State,
-    stack: Stack,
-
-    // Architecturally specific thread state, saved on context switch
-    pub arch_thread_state: UnsafeCell<ArchThreadState>,
-}
-
-pub struct ThreadListAdapter {}
-
-impl list::Adapter for ThreadListAdapter {
-    const LINK_OFFSET: usize = offset_of!(Thread, active_link);
-}
-
-pub struct GlobalThreadListAdapter {}
-
-impl list::Adapter for GlobalThreadListAdapter {
-    const LINK_OFFSET: usize = offset_of!(Thread, global_link);
-}
-
-impl Thread {
-    // Create an empty, uninitialzed thread
-    pub fn new() -> Self {
-        Thread {
-            global_link: Link::new(),
-            active_link: Link::new(),
-            state: State::New,
-            arch_thread_state: UnsafeCell::new(ThreadState::new()),
-            stack: Stack::new(),
-        }
-    }
-
-    // Initialize the mutable parts of the thread, must be called once per
-    // thread prior to starting it
-    #[allow(dead_code)]
-    pub fn initialize(&mut self, stack: Stack, entry_point: fn(usize), arg: usize) -> &mut Thread {
-        assert!(self.state == State::New);
-        self.stack = stack;
-
-        // Call the arch to arrange for the thread to start directly
-        unsafe {
-            (*self.arch_thread_state.get()).initialize_frame(stack, entry_point, arg);
-        }
-        self.state = State::Initial;
-
-        // Add our list to the global thread list
-        SCHEDULER_STATE.lock().add_thread_to_list(self);
-
-        self
-    }
-
-    #[allow(dead_code)]
-    pub fn start(mut thread: ForeignBox<Self>) {
-        info!("starting thread {:#x}", thread.id());
-
-        assert!(thread.state == State::Initial);
-        thread.state = State::Ready;
-
-        let mut ss = SCHEDULER_STATE.lock();
-
-        // If there is a current thread, put it back on the top of the run queue.
-        let id = if let Some(mut current_thread) = ss.current_thread.take() {
-            let id = current_thread.id();
-            current_thread.state = State::Ready;
-            ss.insert_in_run_queue_head(current_thread);
-            id
-        } else {
-            Self::null_id()
-        };
-
-        ss.insert_in_run_queue_tail(thread);
-
-        // Add this thread to the scheduler and trigger a reschedule event
-        reschedule(ss, id);
-    }
-
-    // Dump to the console useful information about this thread
-    #[allow(dead_code)]
-    pub fn dump(&self) {
-        info!("thread {:#x} state {}", self.id(), to_string(self.state));
-    }
-
-    // A simple id for debugging purposes, currently the pointer to the thread structure itself
-    pub fn id(&self) -> usize {
-        core::ptr::from_ref(self) as usize
-    }
-
-    // An id that can not be assigned to any thread in the system.
-    pub fn null_id() -> usize {
-        core::ptr::null::<Self>() as usize
-    }
-}
-
-pub fn bootstrap_scheduler(mut thread: ForeignBox<Thread>) -> ! {
-    let mut ss = SCHEDULER_STATE.lock();
+pub fn bootstrap_scheduler<K: Kernel>(
+    kernel: K,
+    preempt_guard: PreemptDisableGuard<K>,
+    mut thread: ForeignBox<Thread<K>>,
+) -> ! {
+    let mut sched_state = kernel.get_scheduler().lock(kernel);
 
     // TODO: assert that this is called exactly once at bootup to switch
     // to this particular thread.
-    assert!(thread.state == State::Initial);
+    pw_assert::assert!(thread.state == State::Initial);
     thread.state = State::Ready;
 
-    ss.run_queue.push_back(thread);
+    sched_state
+        .algorithm
+        .schedule_thread(thread, RescheduleReason::Started);
 
-    info!("context switching to first thread");
+    info!("Context switching to first thread");
 
     // Special case where we're switching from a non-thread to something real
-    let mut temp_arch_thread_state = ArchThreadState::new();
-    ss.current_arch_thread_state = &raw mut temp_arch_thread_state;
+    let mut temp_arch_thread_state = K::ThreadState::NEW;
+    sched_state.current_arch_thread_state = &raw mut temp_arch_thread_state;
 
-    reschedule(ss, Thread::null_id());
-    panic!("should not reach here");
+    drop(preempt_guard);
+
+    let _ = block(
+        kernel,
+        sched_state,
+        Thread::<K>::null_id(),
+        State::Terminated,
+    );
+    pw_assert::panic!("Bootstrap scheduler returned unexpectedly");
+}
+
+pub struct PreemptDisableGuard<K: Kernel>(K);
+
+impl<K: Kernel> PreemptDisableGuard<K> {
+    pub fn new(kernel: K) -> Self {
+        let prev_count = kernel
+            .thread_local_state()
+            .preempt_disable_count
+            .fetch_add(1, core::sync::atomic::Ordering::SeqCst);
+
+        // atomics have wrapping semantics so overflow is explicitly checked.
+        if prev_count == usize::MAX {
+            pw_assert::debug_panic!("PreemptDisableGuard: preempt_disable_count overflow")
+        }
+
+        Self(kernel)
+    }
+}
+
+impl<K: Kernel> Drop for PreemptDisableGuard<K> {
+    fn drop(&mut self) {
+        let prev_count = self
+            .0
+            .thread_local_state()
+            .preempt_disable_count
+            .fetch_sub(1, core::sync::atomic::Ordering::SeqCst);
+
+        if prev_count == 0 {
+            pw_assert::debug_panic!("PreemptDisableGuard: preempt_disable_count underflow")
+        }
+    }
 }
 
 // Global scheduler state (single processor for now)
 #[allow(dead_code)]
-pub struct SchedulerState {
-    current_thread: Option<ForeignBox<Thread>>,
-    current_arch_thread_state: *mut ArchThreadState,
-    thread_list: UnsafeList<Thread, GlobalThreadListAdapter>,
-    // For now just have a single round robin list, expand to multiple queues.
-    run_queue: ForeignList<Thread, ThreadListAdapter>,
+pub struct SchedulerState<K: Kernel> {
+    // The scheduler owns the kernel process from which all kernel threads
+    // are parented.
+    //
+    // SAFETY: `kernel_process` must be converted to a `ForeignBox` exactly
+    // once while the scheduler is initialized.  This initialization must also
+    // increment the processes refcount.
+    kernel_process: UnsafeCell<Process<K>>,
+
+    current_thread: Option<ForeignBox<Thread<K>>>,
+    current_arch_thread_state: *mut K::ThreadState,
+    process_list: ForeignList<Process<K>, ProcessListAdapter<K>>,
+
+    /// The algorithm used for choosing the next thread to run.
+    algorithm: SchedulerAlgorithm<K>,
+
+    termination_queue: ForeignList<Thread<K>, ThreadListAdapter<K>>,
 }
 
-pub static SCHEDULER_STATE: SpinLock<SchedulerState> = SpinLock::new(SchedulerState::new());
+unsafe impl<K: Kernel> Sync for SchedulerState<K> {}
+unsafe impl<K: Kernel> Send for SchedulerState<K> {}
 
-unsafe impl Sync for SchedulerState {}
-unsafe impl Send for SchedulerState {}
-impl SchedulerState {
+impl<K: Kernel> SchedulerState<K> {
     #[allow(dead_code)]
-    const fn new() -> Self {
+    #[allow(clippy::new_without_default)]
+    pub const fn new() -> Self {
+        #[cfg(feature = "user_space")]
+        static KERNEL_OBJECT_TABLE: NullObjectTable = NullObjectTable::new();
         Self {
+            kernel_process: UnsafeCell::new(Process::new(
+                "kernel",
+                <K::ThreadState as ThreadState>::MemoryConfig::KERNEL_THREAD_MEMORY_CONFIG,
+                // SAFETY: In the event of multiple scheduler objects, they will
+                // refer to the same, immutable, instance of a zero sized type.
+                #[cfg(feature = "user_space")]
+                unsafe {
+                    ForeignBox::new(NonNull::from_ref(&KERNEL_OBJECT_TABLE))
+                },
+            )),
             current_thread: None,
             current_arch_thread_state: core::ptr::null_mut(),
-            thread_list: UnsafeList::new(),
-            run_queue: ForeignList::new(),
+            process_list: ForeignList::new(),
+            algorithm: SchedulerAlgorithm::new(),
+            termination_queue: ForeignList::new(),
         }
     }
 
+    /// Returns a pointer to the current threads architecture thread state
+    /// struct.
+    ///
+    /// Only meant to be called from within an architecture implementation.
+    ///
+    /// # Safety
+    ///
+    /// Must be called with the scheduler lock held.  Pointer is only valid
+    /// while the current threads remains the current thread.
     #[allow(dead_code)]
-    pub(super) unsafe fn get_current_arch_thread_state(&mut self) -> *mut ArchThreadState {
+    #[doc(hidden)]
+    pub unsafe fn get_current_arch_thread_state(&mut self) -> *mut K::ThreadState {
         self.current_arch_thread_state
     }
 
-    fn move_current_thread_to_back(&mut self) -> usize {
-        let Some(mut current_thread) = self.current_thread.take() else {
-            panic!("no current thread");
-        };
+    fn reschedule_current_thread(&mut self, reason: RescheduleReason) -> (usize, State) {
+        let mut current_thread = self.take_current_thread();
         let current_thread_id = current_thread.id();
         current_thread.state = State::Ready;
-        self.insert_in_run_queue_tail(current_thread);
-        current_thread_id
+        self.algorithm.schedule_thread(current_thread, reason);
+        (current_thread_id, State::Ready)
     }
 
-    fn move_current_thread_to_front(&mut self) -> usize {
-        let Some(mut current_thread) = self.current_thread.take() else {
-            panic!("no current thread");
-        };
-        let current_thread_id = current_thread.id();
-        current_thread.state = State::Ready;
-        self.insert_in_run_queue_head(current_thread);
-        current_thread_id
-    }
-
-    fn set_current_thread(&mut self, thread: ForeignBox<Thread>) {
+    fn set_current_thread(&mut self, thread: ForeignBox<Thread<K>>) {
         self.current_arch_thread_state = thread.arch_thread_state.get();
         self.current_thread = Some(thread);
     }
 
+    pub fn current_thread_id(&self) -> usize {
+        match &self.current_thread {
+            Some(thread) => thread.id(),
+            None => Thread::<K>::null_id(),
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn current_thread_name(&self) -> &'static str {
+        match &self.current_thread {
+            Some(thread) => thread.name,
+            None => "none",
+        }
+    }
+
+    pub fn take_current_thread(&mut self) -> ForeignBox<Thread<K>> {
+        let Some(thread) = self.current_thread.take() else {
+            pw_assert::panic!("No current thread");
+        };
+        thread
+    }
+
+    #[allow(dead_code)]
+    pub fn current_thread(&self) -> &Thread<K> {
+        let Some(thread) = &self.current_thread else {
+            pw_assert::panic!("No current thread");
+        };
+        thread
+    }
+
+    #[allow(dead_code)]
+    pub fn current_thread_mut(&mut self) -> &mut Thread<K> {
+        let Some(thread) = &mut self.current_thread else {
+            pw_assert::panic!("No current thread");
+        };
+        thread
+    }
+
+    /// # Safety
+    ///
+    /// This method has the same safety preconditions as
+    /// [`UnsafeList::push_front_unchecked`].
     #[allow(dead_code)]
     #[inline(never)]
-    pub fn add_thread_to_list(&mut self, thread: &mut Thread) {
-        unsafe {
-            self.thread_list.push_front_unchecked(thread);
-        }
+    pub fn add_process_to_list(&mut self, process: ForeignBox<Process<K>>) {
+        self.process_list.push_front(process);
+    }
+
+    fn get_kernel_process_ref(&self, kernel: K) -> ProcessRef<K> {
+        let Some(process) = NonNull::new(self.kernel_process.get()) else {
+            pw_assert::panic!("Kernel process is null");
+        };
+        ProcessRef::new(process, kernel)
     }
 
     #[allow(dead_code)]
     pub fn dump_all_threads(&self) {
-        info!("list of all threads:");
-        unsafe {
-            let _ = self.thread_list.for_each(|thread| -> Result<(), ()> {
-                //                info!("ptr {:#x}", thread.id());
-                thread.dump();
+        info!("List of all threads:");
+        let _ = self
+            .process_list
+            .for_each(|process| -> core::result::Result<(), ()> {
+                process.dump();
                 Ok(())
             });
-        }
-    }
-
-    #[allow(dead_code)]
-    fn insert_in_run_queue_head(&mut self, thread: ForeignBox<Thread>) {
-        assert!(thread.state == State::Ready);
-        // info!("pushing thread {:#x} on run queue head", thread.id());
-
-        self.run_queue.push_front(thread);
-    }
-
-    #[allow(dead_code)]
-    fn insert_in_run_queue_tail(&mut self, thread: ForeignBox<Thread>) {
-        assert!(thread.state == State::Ready);
-        // info!("pushing thread {:#x} on run queue tail", thread.id());
-
-        self.run_queue.push_back(thread);
     }
 }
 
-#[allow(dead_code)]
-fn reschedule(
-    mut ss: SpinLockGuard<SchedulerState>,
+pub enum JoinResult<K: Kernel> {
+    Joined(ForeignBox<Thread<K>>),
+    Err { error: Error, thread: ThreadRef<K> },
+}
+
+enum TryJoinResult<K: Kernel> {
+    Wait(ThreadRef<K>),
+    Joined(ForeignBox<Thread<K>>),
+    Err { error: Error, thread: ThreadRef<K> },
+}
+
+pub enum ProcessJoinResult<K: Kernel> {
+    Joined(ForeignBox<Process<K>>),
+    Err {
+        error: Error,
+        process: ProcessRef<K>,
+    },
+}
+
+pub enum ProcessTryJoinResult<K: Kernel> {
+    Wait(ProcessRef<K>),
+    Joined(ForeignBox<Process<K>>),
+    Err {
+        error: Error,
+        process: ProcessRef<K>,
+    },
+}
+
+// All thread lifecycle management is encapsulated in this `impl` block which
+// ensures the scheduler lock is held while the state is manipulated.
+impl<K: Kernel> SpinLockGuard<'_, K, SchedulerState<K>> {
+    /// Reschedule if preemption is enabled
+    #[must_use]
+    fn try_reschedule(mut self, kernel: K, reason: RescheduleReason) -> Self {
+        if kernel
+            .thread_local_state()
+            .preempt_disable_count
+            .load(Ordering::SeqCst)
+            == 1
+        {
+            let (current_thread_id, current_thread_state) = self.reschedule_current_thread(reason);
+            let (guard, _switched) =
+                context_switch(kernel, self, current_thread_id, current_thread_state);
+            guard
+        } else {
+            kernel
+                .thread_local_state()
+                .needs_reschedule
+                .store(true, Ordering::SeqCst);
+            self
+        }
+    }
+
+    fn thread_initialize(
+        &self,
+        _kernel: K,
+        thread: &mut Thread<K>,
+        mut process_ref: ProcessRef<K>,
+        kernel_stack: Stack,
+    ) {
+        thread.stack = kernel_stack;
+        thread.state = State::Initial;
+
+        // SAFETY: *process is only accessed with the scheduler lock held.
+        unsafe {
+            let process = process_ref.process.as_mut();
+            // Assert that the parent process is added to the scheduler.
+            pw_assert::assert!(
+                process.link.is_linked(),
+                "Tried to add a Thread to an unregistered Process"
+            );
+            // Add thread to processes thread list.
+            process.add_to_thread_list(thread);
+        }
+
+        thread.process = Some(process_ref);
+    }
+
+    pub fn thread_initialize_kernel<A: ThreadArg>(
+        &mut self,
+        kernel: K,
+        thread: &mut Thread<K>,
+        kernel_stack: Stack,
+        entry_point: fn(K, A),
+        arg: A,
+    ) {
+        pw_assert::assert!(thread.state == State::New);
+        let process_ref = self.get_kernel_process_ref(kernel);
+        let args = (entry_point as usize, kernel.into_usize(), arg.into_usize());
+
+        kernel_stack.initialize();
+
+        unsafe {
+            (*thread.arch_thread_state.get()).initialize_kernel_frame(
+                kernel_stack,
+                &raw const process_ref.process.as_ref().memory_config,
+                Thread::<K>::trampoline::<A>,
+                args,
+            );
+        }
+
+        self.thread_initialize(kernel, thread, process_ref, kernel_stack)
+    }
+
+    fn thread_initialize_kernel_for_process<A: ThreadArg>(
+        &mut self,
+        kernel: K,
+        thread: &mut Thread<K>,
+        process_ref: ProcessRef<K>,
+        kernel_stack: Stack,
+        entry_point: fn(K, A),
+        arg: A,
+    ) {
+        pw_assert::assert!(thread.state == State::New);
+        let args = (entry_point as usize, kernel.into_usize(), arg.into_usize());
+
+        kernel_stack.initialize();
+
+        // SAFETY: The scheduler guarantees that a process' `memory_config`
+        // remains valid while it has any child threads ensuring that the
+        // `memory_config` is valid for the lifetime of the thread.
+        unsafe {
+            let config = &raw const process_ref.process.as_ref().memory_config;
+            (*thread.arch_thread_state.get()).initialize_kernel_frame(
+                kernel_stack,
+                config,
+                Thread::<K>::trampoline::<A>,
+                args,
+            );
+        }
+
+        self.thread_initialize(kernel, thread, process_ref, kernel_stack)
+    }
+
+    pub fn thread_reinitialize_kernel<A: ThreadArg>(
+        &mut self,
+        kernel: K,
+        thread: &mut Thread<K>,
+        entry_point: fn(K, A),
+        arg: A,
+    ) {
+        pw_assert::assert!(thread.state == State::Joined);
+        let process_ref = self.get_kernel_process_ref(kernel);
+        let args = (entry_point as usize, kernel.into_usize(), arg.into_usize());
+
+        thread.stack.initialize();
+
+        // SAFETY: The scheduler guarantees that a process' `memory_config`
+        // remains valid while it has any child threads ensuring that the
+        // `memory_config` is valid for the lifetime of the thread.
+        unsafe {
+            (*thread.arch_thread_state.get()).initialize_kernel_frame(
+                thread.stack,
+                &raw const process_ref.as_ref().memory_config,
+                Thread::<K>::trampoline::<A>,
+                args,
+            );
+        }
+
+        self.thread_initialize(kernel, thread, process_ref, thread.stack)
+    }
+
+    #[cfg(feature = "user_space")]
+    /// # Safety
+    /// It is up to the caller to ensure that *process is valid.
+    /// Initialize the mutable parts of the non privileged thread, must be
+    /// called once per thread prior to starting it
+    #[allow(clippy::too_many_arguments)]
+    pub unsafe fn thread_initialize_non_priv(
+        &mut self,
+        kernel: K,
+        thread: &mut Thread<K>,
+        kernel_stack: Stack,
+        initial_sp: usize,
+        process: *mut Process<K>,
+        initial_pc: usize,
+        args: (usize, usize, usize),
+    ) -> Result<()> {
+        pw_assert::assert!(thread.state == State::New);
+        let Some(process_ptr) = NonNull::new(process) else {
+            return Err(Error::InvalidArgument);
+        };
+
+        kernel_stack.initialize();
+
+        // SAFETY: The scheduler guarantees that a process' `memory_config`
+        // remains valid while it has any child threads ensuring that the
+        // `memory_config` is valid for the lifetime of the thread.
+        #[cfg(feature = "user_space")]
+        unsafe {
+            (*thread.arch_thread_state.get()).initialize_user_frame(
+                kernel_stack,
+                &raw const (*process).memory_config,
+                // be passed in from user space.
+                initial_sp,
+                initial_pc,
+                args,
+            )?;
+        }
+
+        let process_ref = ProcessRef::new(process_ptr, kernel);
+        self.thread_initialize(kernel, thread, process_ref, kernel_stack);
+        Ok(())
+    }
+
+    fn thread_get_state(&self, thread: &ThreadRef<K>) -> thread::State {
+        // SAFETY: we have exclusive access to thread by virtue of the scheduler lock being held.
+        unsafe { thread.thread.as_ref().state }
+    }
+
+    fn thread_terminate(&mut self, thread_ref: &mut ThreadRef<K>) -> Result<()> {
+        // SAFETY: we have exclusive access to thread by virtue of the scheduler lock being held.
+        let thread = unsafe { thread_ref.thread.as_mut() };
+        self.thread_terminate_internal(thread)
+    }
+
+    fn thread_terminate_internal(&mut self, thread: &mut Thread<K>) -> Result<()> {
+        match &mut thread.owner {
+            ThreadOwner::None => Err(Error::InvalidArgument),
+            ThreadOwner::Scheduler => {
+                // Mark thread as terminating so that it can clean itself up.
+                thread.terminating = true;
+
+                // Should we signal the scheduling algorithm to give it the
+                // chance to move the thread to the front of the queue?
+
+                Ok(())
+            }
+            ThreadOwner::WaitQueue { queue, wait_type } => {
+                // First, mark the thread as being in the terminated state.
+                // SAFETY: Threads access is guarded by the scheduler lock.
+                thread.terminating = true;
+
+                // Second, wake the thread if it is in an interruptible wait.
+                if *wait_type == WaitType::Interruptible {
+                    // SAFETY: All thread and wait queue accesses are guarded by
+                    // the scheduler lock and the thread is guaranteed to be in
+                    // the queue by the fact that the queue is the ThreadOwner.
+                    let ret = unsafe {
+                        queue
+                            .as_mut()
+                            .queue
+                            .remove_element(NonNull::from_ref(thread))
+                    };
+                    let Some(thread_box) = ret else {
+                        // The a thread's owner is `ThreadOwner::WaitQueue` it will always
+                        // be in the `WaitQueue`'s queue.  A failure to remove here would
+                        // be the result of a bug or corruption.
+                        pw_assert::panic!("Could not remove thread from its owning WaitQueue");
+                    };
+                    thread.state = State::Ready;
+                    self.algorithm
+                        .schedule_thread(thread_box, RescheduleReason::Woken);
+                }
+                Ok(())
+            }
+        }
+    }
+
+    fn thread_signal_join(mut self, thread: &mut ThreadRef<K>) -> Self {
+        if let Some(signaler) = unsafe { thread.thread.as_mut() }.join_event.take() {
+            self = signaler.signal_locked(self);
+        }
+
+        self
+    }
+
+    fn thread_try_join(
+        mut self,
+        mut thread_ref: ThreadRef<K>,
+        signaler: EventSignaler<K>,
+    ) -> (Self, TryJoinResult<K>) {
+        // SAFETY: Exclusive access to thread is guaranteed by scheduler lock
+        let thread = unsafe { thread_ref.thread.as_mut() };
+
+        // If the thread is terminated and `thread_ref` is the singular reference to it,
+        // the thread is terminated
+        if thread.state == State::Terminated && thread.ref_count.load(Ordering::SeqCst) == 1 {
+            // SAFETY: Threads only enter the Terminated state through `exit_thread` which adds them
+            // to the termination_queue.  Join is the only method by which they are removed from the
+            // queue and the state is set to the Joined state when that happens.  Therefore, if the
+            // thread is in the Terminated state, it *must* be in the termination_queue.
+            thread.state = State::Joined;
+
+            self = self.thread_remove_from_parent_process(thread);
+
+            // Reset thread state.
+            thread.terminating = false;
+            *thread.arch_thread_state.get_mut() = K::ThreadState::NEW;
+
+            // SAFETY: Thread is guaranteed to be in the termination queue by
+            // the fact that it is in the terminated state.
+            let thread = unsafe {
+                self.termination_queue
+                    .remove_element(thread_ref.thread)
+                    .unwrap_unchecked()
+            };
+            return (self, TryJoinResult::Joined(thread));
+        }
+
+        // Only one call to join is allowed to wait thread termination
+        if thread.join_event.is_some() {
+            return (
+                self,
+                TryJoinResult::Err {
+                    error: Error::AlreadyExists,
+                    thread: thread_ref,
+                },
+            );
+        }
+
+        // Register the signaler and return None indicating the thread is not yet
+        // joinable.
+        thread.join_event = Some(signaler);
+        (self, TryJoinResult::Wait(thread_ref))
+    }
+
+    fn thread_cancel_try_join(&mut self, thread_ref: &mut ThreadRef<K>) {
+        // SAFETY: Exclusive access to thread is guaranteed by scheduler lock
+        let thread = unsafe { thread_ref.thread.as_mut() };
+        pw_assert::assert!(thread.join_event.is_some());
+        thread.join_event = None;
+    }
+
+    fn thread_exit(mut self, kernel: K) {
+        let mut current_thread = self.take_current_thread();
+        let current_thread_id = current_thread.id();
+
+        pw_assert::assert!(matches!(current_thread.owner, ThreadOwner::Scheduler));
+
+        info!(
+            "Exiting thread '{}' ({:#010x})",
+            current_thread.name as &str,
+            current_thread.id() as usize
+        );
+
+        // Since the current thread has already been removed from the scheduler,
+        // a PreemptDisableGuard is taken to prevent the event wait from doing a
+        // reschedule.
+        let guard = PreemptDisableGuard::new(kernel);
+        if let Some(signaler) = current_thread.as_mut().join_event.take() {
+            self = signaler.signal_locked(self);
+        }
+        drop(guard);
+
+        current_thread.state = State::Terminated;
+        current_thread.terminating = true;
+
+        self.termination_queue.push_back(current_thread);
+
+        let _ = context_switch(kernel, self, current_thread_id, State::Terminated);
+
+        pw_assert::panic!("thread_exit returned unexpectedly");
+    }
+
+    fn thread_is_terminating(&self, thread: &ThreadRef<K>) -> bool {
+        // SAFETY: Exclusive access to thread is guaranteed by scheduler lock
+        unsafe { thread.thread.as_ref().terminating }
+    }
+
+    fn thread_remove_from_parent_process(mut self, thread: &mut Thread<K>) -> Self {
+        let Some(mut process_ref) = thread.process.take() else {
+            pw_assert::panic!("Thread does not have a process");
+        };
+
+        // SAFETY: Thread is guaranteed to be in the process because the process
+        // was just taken from the thread.
+        self = unsafe { self.process_remove_from_thread_list(&mut process_ref, thread) };
+
+        // ProcessRef's drop takes the scheduler lock.  Since that is already
+        // held, `drop_locked()` needs to be used instead to avoid recursively
+        // locking the scheduler lock.
+        process_ref.drop_locked(self)
+    }
+}
+
+impl<K: Kernel> SpinLockGuard<'_, K, SchedulerState<K>> {
+    pub fn process_terminate(mut self, _kernel: K, process_ref: &ProcessRef<K>) -> Result<()> {
+        let proc = unsafe { process_ref.process.as_ref() };
+        match proc.state {
+            ProcessState::Terminating | ProcessState::Terminated => return Ok(()),
+            _ => {}
+        }
+
+        // Set state to terminating
+        unsafe {
+            let mut ptr = process_ref.process;
+            ptr.as_mut().state = ProcessState::Terminating;
+        }
+
+        // Terminate all threads
+        unsafe {
+            let mut proc_ptr = process_ref.process;
+            proc_ptr.as_mut().thread_list.filter(|thread| {
+                info!("Terminating thread '{}'", thread.name as &str);
+                let _ = self.thread_terminate_internal(thread);
+                true // Keep in list
+            });
+        }
+
+        Ok(())
+    }
+
+    #[must_use]
+    pub fn process_signal_join(mut self, process: &mut ProcessRef<K>) -> Self {
+        // SAFETY: inner process is protected by the scheduler lock and the
+        // mutable reference does not live beyond the unsafe taking the signaler
+        let signaler = unsafe { process.process.as_mut().join_event.take() };
+        if let Some(signaler) = signaler {
+            self = signaler.signal_locked(self);
+        }
+
+        self
+    }
+
+    pub fn process_try_join(
+        &mut self,
+        mut process_ref: ProcessRef<K>,
+        signaler: EventSignaler<K>,
+    ) -> ProcessTryJoinResult<K> {
+        let process = unsafe { process_ref.process.as_ref() };
+
+        // If the process is terminated and `process_ref` is the singular reference to it,
+        // the process is terminated
+        if process.state == ProcessState::Terminated
+            && process.ref_count.load(Ordering::SeqCst) == 1
+        {
+            // SAFETY: The process is guaranteed to be in the process list
+            // because it was passed in by ProcessRef and the scheduler is
+            // the only creator of those.
+            return ProcessTryJoinResult::Joined(unsafe {
+                self.process_list
+                    .remove_element(process_ref.process)
+                    .unwrap_unchecked()
+            });
+        }
+
+        // Only one call to join is allowed to wait process termination.  If
+        // another caller is waiting, return an error.
+        if process.join_event.is_some() {
+            return ProcessTryJoinResult::Err {
+                error: Error::AlreadyExists,
+                process: process_ref,
+            };
+        }
+
+        // Register the signaler and return None indicating the process is not yet
+        // joinable.
+        //
+        // SAFETY: Process mutability guarded by scheduler lock.
+        unsafe { process_ref.process.as_mut().join_event = Some(signaler) };
+        ProcessTryJoinResult::Wait(process_ref)
+    }
+
+    pub fn process_cancel_try_join(&mut self, process_ref: &mut ProcessRef<K>) {
+        let process = unsafe { process_ref.process.as_mut() };
+        pw_assert::assert!(process.join_event.is_some());
+        process.join_event = None;
+    }
+
+    /// # Safety
+    ///
+    /// Caller must ensure that the thread is already in the processes thread list.
+    unsafe fn process_remove_from_thread_list(
+        mut self,
+        process_ref: &mut ProcessRef<K>,
+        thread: &mut Thread<K>,
+    ) -> Self {
+        // SAFETY: Scheduler lock is held so it is safe to manipulate the process
+        // list and the caller guarantees that the thread is in said list so it
+        // is safe to remove it.
+
+        // SAFETY: The scheduler lock ensure mutual excludsion and the mutable
+        // reference does not live out side this function.
+        let process = unsafe { process_ref.process.as_mut() };
+
+        // SAFETY: Caller guarantees that the thread is in the process' thread list
+        // and the list is protected by the scheduler lock.
+        let empty = unsafe {
+            process
+                .thread_list
+                .unlink_element_unchecked(NonNull::from(thread));
+
+            process.thread_list.is_empty()
+        };
+
+        if process.state == ProcessState::Terminating && empty {
+            process.state = ProcessState::Terminated;
+            self = self.process_signal_join(process_ref);
+        }
+        self
+    }
+}
+
+#[must_use]
+fn block<K: Kernel>(
+    kernel: K,
+    sched_state: SpinLockGuard<K, SchedulerState<K>>,
     current_thread_id: usize,
-) -> SpinLockGuard<SchedulerState> {
+    current_thread_state: State,
+) -> SpinLockGuard<K, SchedulerState<K>> {
+    let (sched_state, switched) =
+        context_switch(kernel, sched_state, current_thread_id, current_thread_state);
+    pw_assert::assert!(switched, "Blocking requires a context switch");
+    sched_state
+}
+
+#[must_use]
+fn context_switch<K: Kernel>(
+    kernel: K,
+    mut sched_state: SpinLockGuard<K, SchedulerState<K>>,
+    current_thread_id: usize,
+    current_thread_state: State,
+) -> (SpinLockGuard<K, SchedulerState<K>>, bool) {
     // Caller to reschedule is responsible for removing current thread and
     // put it in the correct run/wait queue.
+    pw_assert::assert!(sched_state.current_thread.is_none());
 
-    assert!(ss.current_thread.is_none());
-
-    // info!("reschedule");
+    // Validate that the only mechanism disabling preemption is the scheduler
+    // lock which is passed in to this function.
+    pw_assert::assert!(
+        kernel
+            .thread_local_state()
+            .preempt_disable_count
+            .load(Ordering::SeqCst)
+            <= 1,
+        "Preemption count greater than 1"
+    );
 
     // Pop a new thread off the head of the run queue.
     // At the moment cannot handle an empty queue, so will panic in that case.
     // TODO: Implement either an idle thread or a special idle routine for that case.
-    let Some(mut new_thread) = ss.run_queue.pop_head() else {
-        panic!("run_queue empty");
+    let Some(mut new_thread) = sched_state.algorithm.get_next_thread() else {
+        pw_assert::panic!("Run queue empty: no runnable threads (idle thread missing or blocked?)");
     };
 
-    assert!(new_thread.state == State::Ready);
+    pw_assert::assert!(
+        new_thread.state == State::Ready,
+        "<{}>({:#010x}) not ready",
+        new_thread.name as &str,
+        new_thread.id() as usize,
+    );
     new_thread.state = State::Running;
 
     if current_thread_id == new_thread.id() {
-        ss.current_thread = Some(new_thread);
-        // info!("decided to continue running thread {:#x}", new_thread.id());
-        return ss;
+        sched_state.current_thread = Some(new_thread);
+        return (sched_state, false);
     }
 
-    // info!("switching to thread {:#x}", new_thread.id());
-    unsafe {
-        let old_thread_state = ss.current_arch_thread_state;
-        let new_thread_state = new_thread.arch_thread_state.get();
-        ss.set_current_thread(new_thread);
-        <Arch as ArchInterface>::ThreadState::context_switch(ss, old_thread_state, new_thread_state)
+    trace_context_switch(
+        kernel,
+        current_thread_id,
+        new_thread.id(),
+        current_thread_state,
+    );
+
+    let old_thread_state = sched_state.current_arch_thread_state;
+    let new_thread_state = new_thread.arch_thread_state.get();
+    sched_state.set_current_thread(new_thread);
+    unsafe { kernel.context_switch(sched_state, old_thread_state, new_thread_state) }
+}
+
+/// If try_reschedule() was called while preemption was disabled, try to
+/// reschedule again after the preempt guard is dropped.
+pub fn try_deferred_reschedule<K: Kernel>(kernel: K) {
+    if Ok(true)
+        == kernel
+            .thread_local_state()
+            .needs_reschedule
+            .compare_exchange(true, false, Ordering::SeqCst, Ordering::SeqCst)
+    {
+        let _ = kernel
+            .get_scheduler()
+            .lock(kernel)
+            .try_reschedule(kernel, RescheduleReason::Preempted);
     }
 }
 
 #[allow(dead_code)]
-pub fn yield_timeslice() {
-    // info!("yielding thread {:#x}", current_thread.id());
-    let mut ss = SCHEDULER_STATE.lock();
-
-    // Yielding always moves the current task to the back of the run queue
-    let current_thread_id = ss.move_current_thread_to_back();
-
-    reschedule(ss, current_thread_id);
-}
-
-#[allow(dead_code)]
-pub fn preempt() {
-    // info!("preempt thread {:#x}", current_thread.id());
-    let mut ss = SCHEDULER_STATE.lock();
-
-    // For now, always move the current thread to the back of the run queue.
-    // When the scheduler gets more complex, it should evaluate if it has used
-    // up it's time allocation.
-    let current_thread_id = ss.move_current_thread_to_back();
-
-    reschedule(ss, current_thread_id);
+pub fn yield_timeslice<K: Kernel>(kernel: K) {
+    let sched_state = kernel.get_scheduler().lock(kernel);
+    log_if::info_if!(
+        LOG_SCHEDULER_EVENTS,
+        "Yielding thread '{}' ({:#010x})",
+        sched_state.current_thread_name() as &str,
+        sched_state.current_thread_id() as usize
+    );
+    let _ = sched_state.try_reschedule(kernel, RescheduleReason::Ticked);
 }
 
 // Tick that is called from a timer handler. The scheduler will evaluate if the current thread
 // should be preempted or not
 #[allow(dead_code)]
-pub fn tick(_time_ms: u32) {
-    // info!("tick {} ms", _time_ms);
+pub fn tick<K: Kernel>(kernel: K, now: Instant<K::Clock>) {
+    log_if::info_if!(
+        LOG_SCHEDULER_EVENTS,
+        "Scheduler tick at {}",
+        now.ticks() as u64
+    );
+    pw_assert::assert!(
+        kernel
+            .thread_local_state()
+            .preempt_disable_count
+            .load(Ordering::SeqCst)
+            == 0,
+        "scheduler::tick() called with preemption disabled"
+    );
 
-    // TODO: dynamically deal with time slice for this thread and put it
-    // at the head or tail depending.
-    TICK_WAIT_QUEUE.lock().wake_one();
+    let guard = PreemptDisableGuard::new(kernel);
 
-    preempt();
-}
-
-// Exit the current thread.
-// For now, simply remove ourselves from the run queue. No cleanup of thread resources
-// is performed.
-#[allow(dead_code)]
-pub fn exit_thread() -> ! {
-    let mut ss = SCHEDULER_STATE.lock();
-
-    let Some(mut current_thread) = ss.current_thread.take() else {
-        panic!("no current thread");
-    };
-    let current_thread_id = current_thread.id();
-
-    info!("thread {:#x} exiting", current_thread.id());
-    current_thread.state = State::Stopped;
-
-    reschedule(ss, current_thread_id);
-
-    // Should not get here
-    #[allow(clippy::empty_loop)]
-    loop {}
-}
-
-pub struct SchedLockGuard<'lock, T> {
-    guard: SpinLockGuard<'lock, SchedulerState>,
-    inner: &'lock mut T,
-}
-
-impl<'lock, T> SchedLockGuard<'lock, T> {
-    #[allow(dead_code)]
-    pub fn sched(&self) -> &SpinLockGuard<'lock, SchedulerState> {
-        &self.guard
+    // In lieu of a proper timer interface, the scheduler needs to be robust
+    // to timer ticks arriving before it is initialized.
+    if kernel.get_scheduler().lock(kernel).current_thread.is_none() {
+        return;
     }
 
-    #[allow(dead_code)]
-    pub fn sched_mut(&mut self) -> &mut SpinLockGuard<'lock, SchedulerState> {
-        &mut self.guard
-    }
+    timer::process_queue(kernel, now);
+    drop(guard);
 
-    #[allow(dead_code)]
-    pub fn into_sched(self) -> SpinLockGuard<'lock, SchedulerState> {
-        self.guard
-    }
+    let _ = kernel
+        .get_scheduler()
+        .lock(kernel)
+        .try_reschedule(kernel, RescheduleReason::Ticked);
 }
 
-impl<T> Deref for SchedLockGuard<'_, T> {
-    type Target = T;
-
-    fn deref(&self) -> &T {
-        self.inner
-    }
-}
-
-impl<T> DerefMut for SchedLockGuard<'_, T> {
-    fn deref_mut(&mut self) -> &mut T {
-        self.inner
-    }
-}
-
-/// An owning lock that shares the global scheduler lock.
+/// Exit the currently running thread.
 ///
-/// A [`SchedLockGuard`] can be turned into a `SpinLockGuard<'lock, SchedulerState>`
-/// so that it can be passed to `reschedule()`
+/// The thread will enter `State::Terminated`, wait for all outstanding
+/// references to be dropped, then wait to be joined.
+#[allow(dead_code)]
+/// Break the global scheduler lock.
+///
+/// This method is used to forcibly release the scheduler lock without dropping the
+/// guard. This is unsafe because it breaks the lock invariants and can
+/// lead to data corruption if not used carefully.
 ///
 /// # Safety
-/// Taking two different `SchedLock`s at the same time will deadlock as they
-/// share the same underlying lock.
-pub struct SchedLock<T> {
-    inner: UnsafeCell<T>,
-}
-unsafe impl<T> Sync for SchedLock<T> {}
-unsafe impl<T> Send for SchedLock<T> {}
-
-impl<T> SchedLock<T> {
-    pub const fn new(initial_value: T) -> Self {
-        Self {
-            inner: UnsafeCell::new(initial_value),
-        }
-    }
-
-    #[allow(unused)]
-    pub fn try_lock(&self) -> Option<SchedLockGuard<'_, T>> {
-        // Safety: The lock guarantees
-        SCHEDULER_STATE.try_lock().map(|guard| SchedLockGuard {
-            inner: unsafe { &mut *self.inner.get() },
-            guard,
-        })
-    }
-
-    pub fn lock(&self) -> SchedLockGuard<'_, T> {
-        let guard = SCHEDULER_STATE.lock();
-        SchedLockGuard {
-            inner: unsafe { &mut *self.inner.get() },
-            guard,
-        }
+/// This method should only be called on thread start.
+/// The caller must ensure that breaking the lock will not cause data corruption.
+pub unsafe fn break_scheduler_lock<K: Kernel>(kernel: K) {
+    unsafe {
+        kernel.get_scheduler().break_lock();
     }
 }
 
-pub struct WaitQueue {
-    queue: ForeignList<Thread, ThreadListAdapter>,
+pub fn exit_thread<K: Kernel>(kernel: K) -> ! {
+    kernel.get_scheduler().lock(kernel).thread_exit(kernel);
+
+    // This thread should never get scheduled again at this point.  This assert
+    // firing indicates a scheduler or context switch bug.
+    pw_assert::panic!("thread_exit returned unexpectedly");
 }
 
-unsafe impl Sync for WaitQueue {}
-unsafe impl Send for WaitQueue {}
+/// Handle a terminal exception in the current thread.
+///
+/// This should only be called from an architecture specific exception handler.
+/// `in_kernel` should be true if the exception occurred while executing in
+/// kernel mode.
+///
+/// If the exception occurred in user mode, the process will be terminated.
+/// If the exception occurred in kernel mode, the kernel will panic.
+pub fn handle_terminal_exception<K: Kernel>(kernel: K, in_kernel: bool) {
+    if in_kernel {
+        pw_assert::panic!("Terminal exception in kernel mode");
+    } else {
+        kernel.get_scheduler().lock(kernel).thread_exit(kernel);
+    }
+}
 
-impl WaitQueue {
-    #[allow(dead_code)]
+pub fn sleep_until<K: Kernel>(kernel: K, deadline: Instant<K::Clock>) -> Result<()> {
+    let wait_queue = WaitQueueLock::new(kernel, ());
+
+    let (_, ret) = wait_queue
+        .lock()
+        .wait_until(WaitType::Interruptible, deadline);
+    match ret {
+        // DeadlineExceeded is the expected result so return OK in that case.
+        Err(Error::DeadlineExceeded) => Ok(()),
+
+        // In all other cases, pass on the return value.
+        _ => ret,
+    }
+}
+
+pub struct WaitQueue<K: Kernel> {
+    queue: ForeignList<Thread<K>, ThreadListAdapter<K>>,
+}
+
+unsafe impl<K: Kernel> Sync for WaitQueue<K> {}
+unsafe impl<K: Kernel> Send for WaitQueue<K> {}
+
+impl<K: Kernel> WaitQueue<K> {
+    #[allow(dead_code, clippy::new_without_default)]
+    #[must_use]
     pub const fn new() -> Self {
         Self {
             queue: ForeignList::new(),
@@ -474,34 +1063,257 @@ impl WaitQueue {
     }
 }
 
-impl SchedLockGuard<'_, WaitQueue> {
-    #[allow(dead_code)]
-    pub fn add_thread(mut self, thread: ForeignBox<Thread>) {
-        self.queue.push_back(thread);
-    }
+#[derive(Clone, Copy, Eq, PartialEq)]
+#[repr(u8)]
+pub enum WaitType {
+    // These variant values must mirror the values in thread `State` so conversions
+    // from WaitType to State can be optimized out.
+    Interruptible = 6,
+    NonInterruptible = 7,
+}
 
-    pub fn wake_one(mut self) {
-        if let Some(mut thread) = self.queue.pop_head() {
-            // Move the current thread to the head of its work queue as to not
-            // steal it's time allocation.
-            let current_thread_id = self.sched_mut().move_current_thread_to_front();
+const _: () = assert!(WaitType::Interruptible as u8 == State::WaitingInterruptible as u8);
+const _: () = assert!(WaitType::NonInterruptible as u8 == State::WaitingNonInterruptible as u8);
 
-            thread.state = State::Ready;
-            self.sched_mut().run_queue.push_back(thread);
-            reschedule(self.into_sched(), current_thread_id);
+impl From<WaitType> for State {
+    fn from(value: WaitType) -> Self {
+        // Note: Since the values align (see above) this is optimized out.
+        match value {
+            WaitType::Interruptible => State::WaitingInterruptible,
+            WaitType::NonInterruptible => State::WaitingNonInterruptible,
         }
-    }
-
-    #[allow(dead_code)]
-    pub fn wait(mut self) {
-        let Some(mut thread) = self.sched_mut().current_thread.take() else {
-            panic!("no active thread");
-        };
-        let current_thread_id = thread.id();
-        thread.state = State::Waiting;
-        self.queue.push_back(thread);
-        reschedule(self.into_sched(), current_thread_id);
     }
 }
 
-pub static TICK_WAIT_QUEUE: SchedLock<WaitQueue> = SchedLock::new(WaitQueue::new());
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub enum WakeResult {
+    Woken,
+    QueueEmpty,
+}
+
+impl<K: Kernel> SchedLockGuard<'_, K, WaitQueue<K>> {
+    fn add_to_queue_and_reschedule(
+        mut self,
+        mut thread: ForeignBox<Thread<K>>,
+        wait_type: WaitType,
+    ) -> Self {
+        let current_thread_id = thread.id();
+        let current_thread_name = thread.name;
+        let new_state = wait_type.into();
+        thread.state = new_state;
+        thread.owner = ThreadOwner::WaitQueue {
+            queue: NonNull::from_ref(&self),
+            wait_type,
+        };
+        self.queue.push_back(thread);
+        wait_queue_debug!(
+            "WaitQueue: thread '{}' ({:#010x}) rescheduling",
+            current_thread_name as &str,
+            current_thread_id as usize
+        );
+        self.block(current_thread_id, new_state)
+    }
+
+    // Safety:
+    // Caller guarantees that thread is non-null, valid, and process_timeout
+    // has exclusive access to `waiting_thread`.
+    unsafe fn process_timeout(&mut self, waiting_thread: *mut Thread<K>) -> Option<Error> {
+        if !(unsafe { (*waiting_thread).state }.is_waiting()) {
+            // Thread has already been woken.
+            return None;
+        }
+
+        let Some(mut thread) = (unsafe {
+            self.queue
+                .remove_element(NonNull::new_unchecked(waiting_thread))
+        }) else {
+            pw_assert::panic!("Thread no longer in wait queue");
+        };
+
+        wait_queue_debug!(
+            "WaitQueue: timeout for thread '{}' ({:#010x})",
+            thread.name as &str,
+            thread.id() as usize
+        );
+        thread.state = State::Ready;
+        self.sched_mut()
+            .algorithm
+            .schedule_thread(thread, RescheduleReason::Woken);
+        Some(Error::DeadlineExceeded)
+    }
+
+    #[allow(clippy::must_use_candidate)]
+    pub fn wake_one(mut self) -> (Self, WakeResult) {
+        let Some(mut thread) = self.queue.pop_head() else {
+            return (self, WakeResult::QueueEmpty);
+        };
+        wait_queue_debug!(
+            "WaitQueue: waking thread '{}' ({:#010x})",
+            thread.name as &str,
+            thread.id() as usize
+        );
+        thread.state = State::Ready;
+        self.sched_mut()
+            .algorithm
+            .schedule_thread(thread, RescheduleReason::Woken);
+
+        (
+            self.try_reschedule(RescheduleReason::Preempted),
+            WakeResult::Woken,
+        )
+    }
+
+    #[allow(clippy::return_self_not_must_use, clippy::must_use_candidate)]
+    pub fn wake_all(mut self) -> Self {
+        loop {
+            let result;
+            (self, result) = self.wake_one();
+            if result == WakeResult::QueueEmpty {
+                return self;
+            }
+        }
+    }
+
+    #[allow(clippy::return_self_not_must_use, clippy::must_use_candidate)]
+    pub fn wait(mut self, wait_type: WaitType) -> (Self, Result<()>) {
+        // If the current thread is terminating and this is an interruptible wait,
+        // return early with an error.
+        if self.sched().current_thread().terminating && wait_type == WaitType::Interruptible {
+            return (self, Err(Error::Cancelled));
+        }
+
+        let thread = self.sched_mut().take_current_thread();
+        wait_queue_debug!(
+            "WaitQueue: thread '{}' ({:#010x}) waiting",
+            thread.name as &str,
+            thread.id() as usize
+        );
+        self = self.add_to_queue_and_reschedule(thread, wait_type);
+        wait_queue_debug!(
+            "WaitQueue: thread '{}' ({:#010x}) resumed",
+            self.sched().current_thread_name() as &str,
+            self.sched().current_thread_id() as usize
+        );
+
+        // Return `Error::Cancelled` if the wait was interrupted because this
+        // thread was terminated while it was waiting.
+        if self.sched().current_thread().terminating && wait_type == WaitType::Interruptible {
+            (self, Err(Error::Cancelled))
+        } else {
+            (self, Ok(()))
+        }
+    }
+
+    pub fn wait_until(
+        mut self,
+        wait_type: WaitType,
+        deadline: Instant<K::Clock>,
+    ) -> (Self, Result<()>) {
+        // If the current thread is terminating and this is an interruptible wait,
+        // return early with an error.
+        if self.sched().current_thread().terminating && wait_type == WaitType::Interruptible {
+            return (self, Err(Error::Cancelled));
+        }
+
+        let mut thread = self.sched_mut().take_current_thread();
+        wait_queue_debug!(
+            "WaitQueue: thread '{}' ({:#010x}) wait_until",
+            thread.name as &str,
+            thread.id() as usize
+        );
+
+        // Smuggle references to the thread and wait queue into the callback.
+        // Safety:
+        // * The thread will always be active for the lifetime of the wait as
+        //   it can not be joined while in a WaitQueue.
+        // * The wait queue will outlive the callback because it will either
+        //   fire while the thread is in the wait queue or will be the timer
+        //   will be canceled before this function returns.
+        // * All access to thread_ptr and wait_queue_ptr in the callback are
+        //   done while the wait queue lock is held.
+        let thread_ptr = unsafe { thread.as_mut_ptr() };
+        let smuggled_wait_queue = unsafe { self.smuggle() };
+
+        // Safety:
+        // * Only accessed while the wait_queue_lock is held;
+        let result: UnsafeCell<Result<()>> = UnsafeCell::new(Ok(()));
+        let result_ptr = result.get();
+
+        // Timeout callback will remove the thread from the wait queue and put
+        // it back on the run queue.
+        let mut callback_closure = move |_kernel, callback: ForeignBox<Timer<K>>, _now| {
+            // Safety: wait queue lock is valid for the lifetime of the callback.
+            let mut wait_queue = unsafe { smuggled_wait_queue.lock() };
+
+            // Safety: the wait queue lock protects access to the thread.
+            wait_queue_debug!(
+                "WaitQueue: timeout callback for thread '{}' ({:#010x}) (state: {})",
+                unsafe { (*thread_ptr).name } as &str,
+                (unsafe { (*thread_ptr).id() }) as usize,
+                unsafe { thread::to_string((*thread_ptr).state) } as &str
+            );
+
+            // Safety: We know that thread_ptr is valid for the life of `wait_until`
+            // and this callback will either be called or canceled before `wait_until`
+            // returns.
+            if let Some(error) = unsafe { wait_queue.process_timeout(thread_ptr) } {
+                // Safety: Acquisition of the wait queue lock at the beginning of
+                // the callback ensures mutual exclusion with accesses from the
+                // body of `wait_until`.
+                unsafe { result_ptr.write_volatile(Err(error)) };
+            }
+
+            let _ = callback.consume();
+            None // Don't re-arm
+        };
+
+        let mut callback = Timer::new(deadline, unsafe {
+            ForeignBox::new_from_ptr(&raw mut callback_closure)
+        });
+        let callback_ptr = &raw mut callback;
+        timer::schedule_timer(self.kernel, unsafe {
+            ForeignBox::new_from_ptr(callback_ptr)
+        });
+
+        // Safety: It is important hold on to the WaitQueue lock that is returned
+        // from reschedule as the pointers needed by the timer canceling code
+        // below rely on it for correctness.
+        self = self.add_to_queue_and_reschedule(thread, wait_type);
+
+        wait_queue_debug!(
+            "WaitQueue: thread '{}' ({:#010x}) resumed",
+            self.sched().current_thread_name() as &str,
+            self.sched().current_thread_id() as usize
+        );
+
+        // Cancel timeout callback if has not already fired.
+        //
+        // Safety: callback_ptr is valid until callback goes out of scope.
+        unsafe {
+            timer::cancel_and_consume_timer(self.kernel, NonNull::new_unchecked(callback_ptr))
+        };
+
+        wait_queue_debug!(
+            "WaitQueue: thread '{}' ({:#010x}) exiting wait_until",
+            self.sched().current_thread_name() as &str,
+            self.sched().current_thread_id() as usize
+        );
+
+        // Safety:
+        //
+        // At this point the thread will be in the run queue by virtue of
+        // `reschedule()` return and the timer callback will have fired or be
+        // canceled.  This leaves no dangling references to our "smuggled"
+        // pointers.
+        //
+        // It is also now safe to read the result UnsafeCell
+
+        // Return `Error::Cancelled` if the wait was interrupted because this
+        // thread was terminated while it was waiting.
+        if self.sched().current_thread().terminating && wait_type == WaitType::Interruptible {
+            (self, Err(Error::Cancelled))
+        } else {
+            (self, unsafe { result.get().read_volatile() })
+        }
+    }
+}

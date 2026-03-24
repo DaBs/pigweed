@@ -40,6 +40,8 @@
 
 namespace pw {
 
+/// @module{pw_json}
+
 /// @defgroup pw_json_builder_api
 /// @{
 
@@ -142,16 +144,9 @@ class JsonValue {
   /// `StartObject` was called on the `JsonBuilder`. Setting the `JsonValue` to
   /// a JSON object or array is also an error.
   ///
-  /// @returns @rst
-  ///
-  /// .. pw-status-codes::
-  ///
-  ///    OK: The value serialized successfully.
-  ///
-  ///    RESOURCE_EXHAUSTED: There is insufficient buffer space to
-  ///    serialize.
-  ///
-  /// @endrst
+  /// @returns
+  /// * @OK: The value serialized successfully.
+  /// * @RESOURCE_EXHAUSTED: There is insufficient buffer space to serialize.
   template <typename T>
   constexpr Status Set(const T& value);
 
@@ -243,15 +238,9 @@ class JsonObject {
   /// It is an error to call `Add()` if the underlying `JsonBuilder` is no
   /// longer an object.
   ///
-  /// @returns @rst
-  ///
-  /// .. pw-status-codes::
-  ///
-  ///    OK: The value was appended successfully.
-  ///
-  ///    RESOURCE_EXHAUSTED: Insufficient buffer space to serialize.
-  ///
-  /// @endrst
+  /// @returns
+  /// * @OK: The value was appended successfully.
+  /// * @RESOURCE_EXHAUSTED: Insufficient buffer space to serialize.
   template <typename T>
   constexpr JsonObject& Add(std::string_view key, const T& value);
 
@@ -310,7 +299,7 @@ class JsonBuilder : private JsonValue, private JsonArray, private JsonObject {
   /// The maximum size of the JSON string, excluding the null terminator.
   constexpr size_t max_size() const { return max_size_; }
 
-  /// True if @cpp_func{status} is @pw_status{OK}; no errors have occurred.
+  /// True if @cpp_func{status} is `pw::OkStatus()`; no errors have occurred.
   [[nodiscard]] constexpr bool ok() const { return status().ok(); }
 
   /// Returns the `JsonBuilder`'s status, which reflects the first error that
@@ -318,19 +307,13 @@ class JsonBuilder : private JsonValue, private JsonArray, private JsonObject {
   /// status remains until it is reset with `clear`, `clear_status`, or
   /// `SetValue`.
   ///
-  /// @returns @rst
-  ///
-  /// .. pw-status-codes::
-  ///
-  ///    OK: All previous updates have succeeded.
-  ///
-  ///    RESOURCE_EXHAUSTED: An update did not fit in the buffer.
-  ///
-  /// @endrst
+  /// @returns
+  /// * @OK: All previous updates have succeeded.
+  /// * @RESOURCE_EXHAUSTED: An update did not fit in the buffer.
   constexpr Status status() const { return static_cast<Status::Code>(status_); }
 
   /// Returns the status from the most recent change to the JSON. This is set
-  /// with each JSON update and may be @pw_status{OK} while `status()` is not.
+  /// with each JSON update and may be `pw::OkStatus()` while `status()` is not.
   constexpr Status last_status() const {
     return static_cast<Status::Code>(last_status_);
   }

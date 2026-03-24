@@ -22,6 +22,8 @@
 
 namespace pw::allocator::test {
 
+/// @submodule{pw_allocator,impl_test}
+
 /// Test fixture for testing Buckets.
 ///
 /// This class contains code both to set up a bucket and a number of free
@@ -117,6 +119,36 @@ class BucketTest : public ::testing::Test {
     }
   }
 
+  void FindsLargestWhenEmpty() {
+    EXPECT_TRUE(bucket_.empty());
+    EXPECT_EQ(bucket_.FindLargest(), nullptr);
+  }
+
+  void FindsLargestWithBlocks() {
+    // Add blocks out of order.
+    BlockType& block2 = CreateBlockAndAddToBucket(kLayout2);
+    BlockType& block4 = CreateBlockAndAddToBucket(kLayout4);
+    BlockType& block1 = CreateBlockAndAddToBucket(kLayout1);
+    BlockType& block3 = CreateBlockAndAddToBucket(kLayout3);
+
+    // Find the largest block.
+    EXPECT_EQ(bucket_.FindLargest(), &block4);
+
+    // Remove the largest block and repeat.
+    ASSERT_TRUE(bucket_.Remove(block4));
+    EXPECT_EQ(bucket_.FindLargest(), &block3);
+
+    ASSERT_TRUE(bucket_.Remove(block3));
+    EXPECT_EQ(bucket_.FindLargest(), &block2);
+
+    ASSERT_TRUE(bucket_.Remove(block2));
+    EXPECT_EQ(bucket_.FindLargest(), &block1);
+
+    ASSERT_TRUE(bucket_.Remove(block1));
+    EXPECT_TRUE(bucket_.empty());
+    EXPECT_EQ(bucket_.FindLargest(), nullptr);
+  }
+
   void FailsToRemoveBlockWhenNotFound() {
     BlockType& block1 = CreateBlockAndAddToBucket(kLayout1);
     BlockType& block2 = CreateBlockAndAddToBucket(kLayout2);
@@ -163,5 +195,7 @@ class BucketTest : public ::testing::Test {
   std::array<BlockType*, kMaxBlocks> blocks_;
   BlockType* available_ = nullptr;
 };
+
+/// @}
 
 }  // namespace pw::allocator::test

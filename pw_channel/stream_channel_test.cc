@@ -17,7 +17,8 @@
 #include <algorithm>
 #include <array>
 
-#include "pw_async2/pend_func_task.h"
+#include "pw_async2/dispatcher_for_test.h"
+#include "pw_async2/func_task.h"
 #include "pw_bytes/suffix.h"
 #include "pw_multibuf/simple_allocator_for_test.h"
 #include "pw_status/status.h"
@@ -30,7 +31,7 @@
 namespace {
 
 using ::pw::async2::Context;
-using ::pw::async2::PendFuncTask;
+using ::pw::async2::FuncTask;
 using ::pw::async2::Pending;
 using ::pw::async2::Poll;
 using ::pw::async2::Ready;
@@ -79,7 +80,7 @@ TEST(StreamChannel, ReadsAndWritesData) {
       test_data->channel_output_writer,
       test_data->write_thread_cx.options());
 
-  PendFuncTask read_task([&](Context& cx) -> Poll<> {
+  FuncTask read_task([&](Context& cx) -> Poll<> {
     auto read = stream_channel->PendRead(cx);
     if (read.IsPending()) {
       return Pending();
@@ -92,7 +93,7 @@ TEST(StreamChannel, ReadsAndWritesData) {
   });
 
   MultiBuf to_send = test_data->allocator.BufWith({4_b, 5_b, 6_b});
-  PendFuncTask write_task([&](Context& cx) -> Poll<> {
+  FuncTask write_task([&](Context& cx) -> Poll<> {
     if (stream_channel->PendReadyToWrite(cx).IsPending()) {
       return Pending();
     }
@@ -100,11 +101,12 @@ TEST(StreamChannel, ReadsAndWritesData) {
     return Ready();
   });
 
-  pw::async2::Dispatcher dispatcher;
+  pw::async2::DispatcherForTest dispatcher;
+  dispatcher.AllowBlocking();
   dispatcher.Post(write_task);
   dispatcher.Post(read_task);
 
-  EXPECT_EQ(Pending(), dispatcher.RunUntilStalled());
+  EXPECT_TRUE(dispatcher.RunUntilStalled());
   std::array<const std::byte, 3> data_to_send({1_b, 2_b, 3_b});
   ASSERT_EQ(pw::OkStatus(),
             test_data->channel_input_writer.Write(data_to_send));

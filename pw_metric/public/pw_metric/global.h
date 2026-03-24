@@ -13,7 +13,8 @@
 // the License.
 #pragma once
 
-#include "pw_containers/intrusive_list.h"
+#include "pw_memory/no_destructor.h"
+#include "pw_metric/list.h"
 #include "pw_metric/metric.h"
 #include "pw_tokenizer/tokenize.h"
 
@@ -21,25 +22,30 @@ namespace pw::metric {
 
 // TODO(keir): Add protection to IntrusiveList to detect the unitialized case,
 // which can happen with the global static constructors in the -O0 case.
-extern IntrusiveList<Group> global_groups;
-extern IntrusiveList<Metric> global_metrics;
+extern GroupList global_groups;
+extern MetricList global_metrics;
 
 // Define a metric that is registered in pw::metric::global_metrics.
 //
 // This is useful for cases where uncoordinated instrumentation with metrics is
 // needed; for example, when instrumenting legacy code where plumbing a metric
 // group around by dependency injection is infeasible.
-#define PW_METRIC_GLOBAL(variable_name, metric_name, init)                    \
-  static constexpr uint32_t variable_name##_token =                           \
-      PW_TOKENIZE_STRING_DOMAIN("metrics", metric_name);                      \
-  ::pw::metric::TypedMetric<_PW_METRIC_FLOAT_OR_UINT32(init)> variable_name = \
-      {variable_name##_token, init, ::pw::metric::global_metrics}
+#define PW_METRIC_GLOBAL(variable_name, metric_name, init)                   \
+  static constexpr uint32_t variable_name##_token =                          \
+      PW_TOKENIZE_STRING_DOMAIN("metrics", metric_name);                     \
+  ::pw::NoDestructor<                                                        \
+      ::pw::metric::TypedMetric<_PW_METRIC_FLOAT_OR_UINT32(init)>>           \
+      variable_name##_storage{                                               \
+          variable_name##_token, init, ::pw::metric::global_metrics};        \
+  ::pw::metric::TypedMetric<_PW_METRIC_FLOAT_OR_UINT32(init)>& variable_name \
+      [[maybe_unused]] = *variable_name##_storage
 
 // Define a group that is registered in pw::metric::global_groups.
-#define PW_METRIC_GROUP_GLOBAL(variable_name, group_name)     \
-  static constexpr uint32_t variable_name##_token =           \
-      PW_TOKENIZE_STRING_DOMAIN("metrics", group_name);       \
-  ::pw::metric::Group variable_name = {variable_name##_token, \
-                                       ::pw::metric::global_groups}
+#define PW_METRIC_GROUP_GLOBAL(variable_name, group_name)          \
+  static constexpr uint32_t variable_name##_token =                \
+      PW_TOKENIZE_STRING_DOMAIN("metrics", group_name);            \
+  ::pw::NoDestructor<::pw::metric::Group> variable_name##_storage{ \
+      variable_name##_token, ::pw::metric::global_groups};         \
+  ::pw::metric::Group& variable_name [[maybe_unused]] = *variable_name##_storage
 
 }  // namespace pw::metric

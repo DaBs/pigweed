@@ -13,8 +13,8 @@
 # the License.
 
 load("@com_google_protobuf//bazel:proto_library.bzl", "proto_library")
+load("@com_google_protobuf//bazel:py_proto_library.bzl", "py_proto_library")
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
-load("@rules_python//python:proto.bzl", "py_proto_library")
 load("@rules_python//sphinxdocs:sphinx_docs_library.bzl", "sphinx_docs_library")
 load("//pw_build:compatibility.bzl", "incompatible_with_mcu")
 load("//pw_protobuf_compiler:pw_proto_library.bzl", "pwpb_proto_library")
@@ -35,6 +35,7 @@ cc_library(
     hdrs = [
         "public/pw_snapshot/uuid.h",
     ],
+    features = ["-conversion_warnings"],
     strip_include_prefix = "public",
     deps = [
         ":metadata_proto_pwpb",
@@ -74,6 +75,7 @@ proto_library(
         "//pw_cpu_exception_cortex_m:cpu_state_protos",
         "//pw_cpu_exception_risc_v:cpu_state_protos",
         "//pw_log:log_proto",
+        "//pw_metric:metric_proto",
         "//pw_thread:thread_proto",
     ],
 )
@@ -98,6 +100,7 @@ pw_cc_test(
     srcs = [
         "cpp_compile_test.cc",
     ],
+    features = ["-conversion_warnings"],
     deps = [":snapshot_proto_pwpb"],
 )
 
@@ -106,6 +109,7 @@ pw_cc_test(
     srcs = [
         "uuid_test.cc",
     ],
+    features = ["-conversion_warnings"],
     deps = [
         ":metadata_proto_pwpb",
         ":uuid",

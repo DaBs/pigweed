@@ -67,6 +67,19 @@ inline constexpr uint8_t kLEMultiAdvtEnableSubopcode = 0x05;
 inline constexpr EventCode kLEMultiAdvtStateChangeSubeventCode = 0x55;
 
 // ============================================================================
+// Batch Scanning
+
+// The kLEBatchScanning opcode is shared across all batch scanning HCI
+// commands. To differentiate between the multiple commands, a subopcode field
+// is included in the command payload.
+inline constexpr OpCode kLEBatchScan = VendorOpCode(0x156);
+inline constexpr uint8_t kLEBatchScanEnableSubopcode = 0x01;
+inline constexpr uint8_t kLEBatchScanSetStorageParametersSubopcode = 0x02;
+inline constexpr uint8_t kLEBatchScanSetScanParametersSubopcode = 0x03;
+inline constexpr uint8_t kLEBatchScanReadResultParametersSubopcode = 0x04;
+inline constexpr EventCode kStorageThresholdBreachSubeventCode = 0x54;
+
+// ============================================================================
 // Advertising Packet Content Filtering
 
 // The kLEApcf opcode is shared across all advertising packet content filtering

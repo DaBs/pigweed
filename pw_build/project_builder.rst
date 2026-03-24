@@ -45,10 +45,9 @@ Example Build Scripts
 =====================
 Examples of Project Builder based ``pw build`` commands:
 
-- `Upstream Pigweed repo pigweed_upstream_build.py <https://cs.opensource.google/pigweed/pigweed/+/main:pw_build/py/pw_build/pigweed_upstream_build.py>`_
+- :cs:`Upstream Pigweed repo __main__.py <main:pw_build/py/pigweed_upstream_build/__main__.py>`
 - `Examples repo build_project.py <https://cs.opensource.google/pigweed/examples/+/main:tools/sample_project_tools/build_project.py>`_
 - `Kudzu repo build_project.py <https://pigweed.googlesource.com/pigweed/kudzu/+/refs/heads/main/tools/kudzu_tools/build_project.py>`_
-
 
 .. _module-pw_build-project_builder-reference:
 
@@ -60,14 +59,14 @@ At a high level:
 - A single :py:class:`BuildRecipe <pw_build.build_recipe.BuildRecipe>`
   contains many :py:class:`BuildCommands <pw_build.build_recipe.BuildCommand>`
   which are run sequentially.
-- Multiple :py:class:`BuildRecipes <pw_build.build_recipe.BuildRecipe>` can be
-  created and passed into the
-  :py:class:`ProjectBuilder <pw_build.project_builder.ProjectBuilder>` class which
-  provides logging and terminal output options.
-- A :py:class:`ProjectBuilder <pw_build.project_builder.ProjectBuilder>` instance is
-  then passed to the :py:func:`run_builds <pw_build.project_builder.run_builds>`
-  function which allows specifying the number of parallel workers (the number of
-  recipes which are executed in parallel).
+- All :py:class:`BuildRecipe <pw_build.build_recipe.BuildRecipe>` names must be
+  unique and can have dependencies on other recipes.
+- Multiple :py:class:`BuildRecipes <pw_build.build_recipe.BuildRecipe>` are
+  passed into the :py:class:`ProjectBuilder <pw_build.project_builder.ProjectBuilder>`
+  class which provides options for logging and terminal output.
+- Calling the :py:func:`run_builds <pw_build.project_builder.ProjectBuilder.run_builds>`
+  function starts executing commands. This function allows specifying the number
+  of parallel workers (the number of recipes which are executed in parallel).
 
 .. mermaid::
 
@@ -84,11 +83,11 @@ At a high level:
            buildCommandB1-->buildCommandB2
        end
 
-       ProjectBuilder["<strong>ProjectBuilder</strong>(build_recipes=...)"]
+       ProjectBuilder["builder = <strong>ProjectBuilder</strong>(build_recipes=...)"]
        BuildRecipeA-->ProjectBuilder
        BuildRecipeB-->ProjectBuilder
 
-       run_builds["<strong>run_builds</strong>(project_builder=..., workers=1)"]
+       run_builds["builder.<strong>run_builds</strong>(workers=1)"]
        ProjectBuilder-->run_builds
 
 BuildCommand
@@ -111,8 +110,6 @@ ProjectBuilder
 ==============
 .. autoclass:: pw_build.project_builder.ProjectBuilder
 
-.. autofunction:: pw_build.project_builder.run_builds
-
 
 .. _module-pw_build-project_builder-cli:
 
@@ -120,11 +117,10 @@ ProjectBuilder
 Upstream ``pw build`` Command-Line Interface Usage
 --------------------------------------------------
 .. argparse::
-   :module: pw_build.pigweed_upstream_build
+   :module: pigweed_upstream_build.__main__
    :func: _build_argument_parser
    :prog: pw build
 
    This is the command line interface provided by the ``pw build`` command
-   (`pigweed_upstream_build.py
-   <https://cs.opensource.google/pigweed/pigweed/+/main:pw_build/py/pw_build/pigweed_upstream_build.py>`_)
-   in upstream Pigweed.
+   in upstream Pigweed:
+   :cs:`__main__.py <main:pw_build/py/pigweed_upstream_build/__main__.py>`

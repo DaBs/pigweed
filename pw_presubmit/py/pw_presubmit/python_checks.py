@@ -28,6 +28,7 @@ from tempfile import TemporaryDirectory
 import venv
 
 from pw_cli.diff import colorize_diff_line
+from pw_cli.file_filter import FileFilter
 from pw_env_setup import python_packages
 
 from pw_presubmit.presubmit import (
@@ -59,10 +60,11 @@ _PYTHON_IS_3_9_OR_HIGHER = sys.version_info >= (
 )
 
 
-@filter_paths(endswith=_PYTHON_EXTENSIONS)
-def gn_python_check(ctx: PresubmitContext):
-    build.gn_gen(ctx)
-    build.ninja(ctx, 'python.tests', 'python.lint')
+gn_python_check = build.GnGenNinja(
+    name='gn_python_check',
+    path_filter=FileFilter(endswith=_PYTHON_EXTENSIONS),
+    ninja_targets=('python.tests', 'python.lint'),
+)
 
 
 def _transform_lcov_file_paths(lcov_file: Path, repo_root: Path) -> str:
@@ -395,10 +397,12 @@ def upload_pigweed_pypi_distribution(
 
     dist_path = dist_output_path / 'dist'
     upload_files = sorted(dist_path.glob('*'))
-    expected_files = [
-        dist_path / f'pigweed-{version_number}.tar.gz',
-        dist_path / f'pigweed-{version_number}-py3-none-any.whl',
-    ]
+    expected_files = sorted(
+        [
+            dist_path / f'pigweed-{version_number}.tar.gz',
+            dist_path / f'pigweed-{version_number}-py3-none-any.whl',
+        ]
+    )
     if upload_files != expected_files:
         raise PresubmitFailure(
             'Unexpected dist files found for upload. Skipping upload.\n'

@@ -12,6 +12,8 @@
 // License for the specific language governing permissions and limitations under
 // the License.
 
+#include <algorithm>
+
 #include "pw_bytes/array.h"
 #include "pw_protobuf/encoder.h"
 #include "pw_protobuf/wire_format.h"
@@ -65,6 +67,11 @@ constexpr std::byte ToByte() {
   return static_cast<std::byte>(val);
 }
 
+template <typename T, typename Container>
+constexpr bool Contains(Container haystack, const T& needle) {
+  return std::find(haystack.begin(), haystack.end(), needle) != haystack.end();
+}
+
 TEST(Codegen, Codegen) {
   // The encoded size constants don't account for variable length values, so
   // add some additional space for the expected sizes of values we intend to
@@ -87,6 +94,10 @@ TEST(Codegen, Codegen) {
   ASSERT_EQ(OkStatus(), pigweed.WriteZiggy(-111));
   ASSERT_EQ(OkStatus(), pigweed.WriteErrorMessage("not a typewriter"));
   ASSERT_EQ(OkStatus(), pigweed.WriteBin(Pigweed::Protobuf::Binary::ZERO));
+  ASSERT_EQ(OkStatus(), pigweed.WriteData(2, [](stream::Writer& data_writer) {
+    PW_TRY(data_writer.Write(std::byte('a')));
+    return data_writer.Write(std::byte{'z'});
+  }));
 
   {
     Pigweed::Pigweed::StreamEncoder pigweed_pigweed =
@@ -104,12 +115,11 @@ TEST(Codegen, Codegen) {
     ASSERT_EQ(OkStatus(),
               proto.WritePigweedProtobufBin(Pigweed::Protobuf::Binary::ZERO));
 
-    {
-      Pigweed::Protobuf::Compiler::StreamEncoder meta = proto.GetMetaEncoder();
-      ASSERT_EQ(OkStatus(), meta.WriteFileName("/etc/passwd"));
-      ASSERT_EQ(OkStatus(),
-                meta.WriteStatus(Pigweed::Protobuf::Compiler::Status::FUBAR));
-    }
+    PW_TEST_ASSERT_OK(proto.WriteMetaMessage([](auto& meta) {
+      PW_TRY(meta.WriteFileName("/etc/passwd"));
+      PW_TRY(meta.WriteStatus(Pigweed::Protobuf::Compiler::Status::FUBAR));
+      return OkStatus();
+    }));
 
     {
       Pigweed::StreamEncoder nested_pigweed = proto.GetPigweedEncoder();
@@ -128,12 +138,16 @@ TEST(Codegen, Codegen) {
           ASSERT_EQ(OkStatus(), attributes.WriteValue("5.3.1"));
         }
 
-        {
-          KeyValuePair::StreamEncoder attributes =
-              device_info.GetAttributesEncoder();
-          ASSERT_EQ(OkStatus(), attributes.WriteKey("chip"));
-          ASSERT_EQ(OkStatus(), attributes.WriteValue("left-soc"));
-        }
+        // Exercise flexible capture
+        std::string_view key = "chip";
+        std::string_view value = "left-soc";
+
+        PW_TEST_ASSERT_OK(
+            device_info.WriteAttributesMessage([&](auto& attributes) {
+              PW_TRY(attributes.WriteKey(key));
+              PW_TRY(attributes.WriteValue(value));
+              return OkStatus();
+            }));
 
         ASSERT_EQ(OkStatus(),
                   device_info.WriteStatus(DeviceInfo::DeviceStatus::PANIC));
@@ -157,6 +171,8 @@ TEST(Codegen, Codegen) {
     't', 'y', 'p', 'e', 'w', 'r', 'i', 't', 'e', 'r',
     // pigweed.bin
     0x40, 0x01,
+    // pigweed.data
+    0x5a, 0x02, 'a', 'z',
     // pigweed.pigweed
     0x3a, 0x02,
     // pigweed.pigweed.status
@@ -610,8 +626,14 @@ TEST(Codegen, EnumToString) {
   EXPECT_STREQ(test::pwpb::BoolToString(test::pwpb::Bool::kFalse), "FALSE");
   EXPECT_STREQ(test::pwpb::BoolToString(test::pwpb::Bool::kFileNotFound),
                "FILE_NOT_FOUND");
-  EXPECT_STREQ(test::pwpb::BoolToString(static_cast<test::pwpb::Bool>(12893)),
-               "");
+}
+
+TEST(Codegen, EnumToStringInvalid) {
+  constexpr auto kInvalid = static_cast<test::pwpb::Bool>(12893);
+
+  EXPECT_STREQ(test::pwpb::BoolToString(kInvalid), "");
+  EXPECT_STREQ(test::pwpb::BoolToString(kInvalid, "okay"), "okay");
+  EXPECT_EQ(test::pwpb::BoolToString(kInvalid, nullptr), nullptr);
 }
 
 TEST(Codegen, NestedEnumToString) {
@@ -621,9 +643,54 @@ TEST(Codegen, NestedEnumToString) {
   EXPECT_STREQ(test::pwpb::Pigweed::Pigweed::BinaryToString(
                    test::pwpb::Pigweed::Pigweed::Binary::kOne),
                "ONE");
-  EXPECT_STREQ(test::pwpb::Pigweed::Pigweed::BinaryToString(
-                   static_cast<test::pwpb::Pigweed::Pigweed::Binary>(12893)),
-               "");
+}
+
+TEST(Codegen, NestedEnumToStringInvalid) {
+  constexpr auto kInvalid =
+      static_cast<test::pwpb::Pigweed::Pigweed::Binary>(12893);
+
+  EXPECT_STREQ(test::pwpb::Pigweed::Pigweed::BinaryToString(kInvalid), "");
+  EXPECT_STREQ(test::pwpb::Pigweed::Pigweed::BinaryToString(kInvalid, "okay"),
+               "okay");
+  EXPECT_STREQ(test::pwpb::Pigweed::Pigweed::BinaryToString(kInvalid, nullptr),
+               nullptr);
+}
+
+TEST(Codegen, EnumValuesArray) {
+  EXPECT_EQ(test::pwpb::kBoolValues.size(), 3u);
+
+  EXPECT_TRUE(Contains(test::pwpb::kBoolValues, test::pwpb::Bool::kTrue));
+  EXPECT_TRUE(Contains(test::pwpb::kBoolValues, test::pwpb::Bool::kFalse));
+  EXPECT_TRUE(
+      Contains(test::pwpb::kBoolValues, test::pwpb::Bool::kFileNotFound));
+
+  for (const test::pwpb::Bool value : test::pwpb::kBoolValues) {
+    EXPECT_TRUE(test::pwpb::IsValidBool(value));
+  }
+}
+
+// Demonstrate how the k*Values array can be used in a constexpr context to,
+// e.g., produce a constexpr array of enum name strings.
+
+template <auto ToString, typename EnumType, size_t kNumValues>
+constexpr std::array<std::string_view, kNumValues> EnumToNames(
+    const std::array<EnumType, kNumValues>& values) {
+  std::array<std::string_view, kNumValues> result{};
+  for (size_t i = 0; i < kNumValues; ++i) {
+    result[i] = ToString(values[i], "");
+  }
+  return result;
+}
+
+constexpr auto kBoolNames =
+    EnumToNames<test::pwpb::BoolToString>(test::pwpb::kBoolValues);
+
+TEST(Codegen, EnumNamesArray) {
+  EXPECT_EQ(kBoolNames.size(), 3u);
+
+  EXPECT_TRUE(Contains(kBoolNames, "TRUE"));
+  EXPECT_TRUE(Contains(kBoolNames, "FALSE"));
+  EXPECT_TRUE(Contains(kBoolNames, "FILE_NOT_FOUND"));
 }
 
 }  // namespace

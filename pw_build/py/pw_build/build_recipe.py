@@ -21,12 +21,11 @@ import functools
 import logging
 from pathlib import Path
 import shlex
+import shutil
 from typing import Callable, Mapping, TYPE_CHECKING
 
 from prompt_toolkit.formatted_text import ANSI, StyleAndTextTuples
 from prompt_toolkit.formatted_text.base import OneStyleAndTextTuple
-
-from pw_presubmit.build import write_gn_args_file
 
 if TYPE_CHECKING:
     from pw_build.project_builder import ProjectBuilder
@@ -417,7 +416,7 @@ class BuildRecipeStatus:
 
 
 @dataclass
-class BuildRecipe:
+class BuildRecipe:  # pylint: disable=too-many-instance-attributes
     """Dataclass to store a list of BuildCommands.
 
     Example usage:
@@ -445,9 +444,14 @@ class BuildRecipe:
         build_dir: Output directory for this BuildRecipe. On init this out dir
             is set for all included steps.
         steps: List of BuildCommands to run.
-        title: Custom title. The build_dir is used if this is ommited.
+        title: Custom title. The build_dir is used if this is omitted. Each
+            build recipe name must be unique.
         auto_create_build_dir: Auto create the build directory and all necessary
             parent directories before running any build commands.
+        clean_globs: Glob strings used to match files that should be deleted
+            when removing build outputs.
+        dependencies: list of build recipe names that this BuildRecipe depends
+            on
     """
 
     build_dir: Path
@@ -455,6 +459,8 @@ class BuildRecipe:
     title: str | None = None
     enabled: bool = True
     auto_create_build_dir: bool = True
+    clean_globs: list[str] = field(default_factory=list)
+    dependencies: list[str] = field(default_factory=list)
 
     def __hash__(self):
         return hash((self.build_dir, self.title, len(self.steps)))
@@ -610,6 +616,83 @@ def should_gn_gen_with_args(
         return should_gn_gen(out)
 
     return _write_args_and_check
+
+
+def write_gn_args_file(destination_file: Path, **kwargs) -> str:
+    """Write gn args to a file.
+
+    Currently supports bool, int, and str values. In the case of str values,
+    quotation marks will be added automatically, unless the string already
+    contains one or more double quotation marks, or starts with a { or [
+    character, in which case it will be passed through as-is.
+
+    Returns:
+      The contents of the written file.
+    """
+    contents = '\n'.join(gn_args_list(**kwargs))
+    # Add a trailing linebreak
+    contents += '\n'
+    destination_file.parent.mkdir(exist_ok=True, parents=True)
+
+    if (
+        destination_file.is_file()
+        and destination_file.read_text(encoding='utf-8') == contents
+    ):
+        # File is identical, don't re-write.
+        return contents
+
+    destination_file.write_text(contents, encoding='utf-8')
+    return contents
+
+
+def _gn_value(value) -> str:
+    if isinstance(value, bool):
+        return str(value).lower()
+
+    if (
+        isinstance(value, str)
+        and '"' not in value
+        and not value.startswith("{")
+        and not value.startswith("[")
+    ):
+        return f'"{value}"'
+
+    if isinstance(value, (list, tuple)):
+        return f'[{", ".join(_gn_value(a) for a in value)}]'
+
+    # Fall-back case handles integers as well as strings that already
+    # contain double quotation marks, or look like scopes or lists.
+    return str(value)
+
+
+def gn_args_list(**kwargs) -> list[str]:
+    """Return a list of formatted strings to use as gn args.
+
+    Currently supports bool, int, and str values. In the case of str values,
+    quotation marks will be added automatically, unless the string already
+    contains one or more double quotation marks, or starts with a { or [
+    character, in which case it will be passed through as-is.
+    """
+    transformed_args = []
+    for arg, val in kwargs.items():
+        transformed_args.append(f'{arg}={_gn_value(val)}')
+
+    # Use ccache if available for faster repeat presubmit runs.
+    if shutil.which('ccache') and 'pw_command_launcher' not in kwargs:
+        transformed_args.append('pw_command_launcher="ccache"')
+
+    return transformed_args
+
+
+def gn_args(**kwargs) -> str:
+    """Builds a string to use for the --args argument to gn gen.
+
+    Currently supports bool, int, and str values. In the case of str values,
+    quotation marks will be added automatically, unless the string already
+    contains one or more double quotation marks, or starts with a { or [
+    character, in which case it will be passed through as-is.
+    """
+    return '--args=' + ' '.join(gn_args_list(**kwargs))
 
 
 def _should_regenerate_cmake(

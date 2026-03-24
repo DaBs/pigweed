@@ -54,13 +54,13 @@ namespace gap {
 //     with a random address type. A new local random address will be generated
 //     at a regular interval (see kPrivateAddressTimeout in gap.h).
 //
-//     According to Vol 2, Part E, 7.8.4 the "HCI LE Set Random Address"
-//     command is disallowed when scanning or legacy advertising are enabled.
-//     Before any one of these procedures gets started, the EnsureLocalAddress()
-//     method should be called to update the random address if it is allowed by
-//     the controller (and the address needs a refresh). This function
-//     asynchronously returns the device address that should be used by the
-//     procedure.
+//     According to the Core Spec v5.3, Vol 4, Part E, 7.8.4 the "HCI LE Set
+//     Random Address" command is disallowed when scanning or legacy advertising
+//     are enabled. Before any one of these procedures gets started, the
+//     EnsureLocalAddress() method should be called to update the random address
+//     if it is allowed by the controller (and the address needs a refresh).
+//     This function asynchronously returns the device address that should be
+//     used by the procedure.
 //
 // The state requested by EnablePrivacy() (enabled or disabled) may not take
 // effect immediately if a scan, advertising, or connection procedure is in
@@ -86,7 +86,7 @@ class LowEnergyAddressManager final : public hci::LocalAddressDelegate {
   // Enable or disable the privacy feature. When enabled, the controller will be
   // configured to use a new random address if it is currently allowed to do so.
   // If setting the random address is not allowed the update will be deferred
-  // until the the next successful attempt triggered by a call to
+  // until the next successful attempt triggered by a call to
   // TryRefreshRandomAddress().
   //
   // If an IRK has been assigned and |enabled| is true, then the generated

@@ -16,5 +16,8 @@ include_guard(GLOBAL)
 
 include($ENV{PW_ROOT}/pw_build/pigweed.cmake)
 
-# Backend for the pw_async2 dispatcher module.
-pw_add_backend_variable(pw_async2.dispatcher_BACKEND)
+# Backend for the pw_async2 DispastcherForTest facade.
+pw_add_backend_variable(pw_async2.dispatcher_for_test_BACKEND
+  DEFAULT_BACKEND
+    pw_async2.basic_dispatcher_for_test
+)

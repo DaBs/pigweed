@@ -126,7 +126,7 @@ being foundational infrastructure.
      # build arguments set by the user will be overridden by these settings.
      build_args = {
        pw_third_party_freertos_CONFIG = "$dir_pigweed/targets/stm32f429i_disc1_stm32cube:stm32f4xx_freertos_config"
-       pw_third_party_freertos_PORT = "$dir_pw_third_party/freertos:arm_cm4f"
+       pw_third_party_freertos_PORT = "$pw_external_freertos:arm_cm4f"
        pw_sys_io_BACKEND = dir_pw_sys_io_stm32cube
        dir_pw_third_party_stm32cube = dir_pw_third_party_stm32cube_f4
        pw_third_party_stm32cube_PRODUCT = "STM32F429xx"
@@ -156,7 +156,7 @@ being foundational infrastructure.
        pw_log_BACKEND = dir_pw_log_basic #dir_pw_log_tokenized
        pw_log_tokenized_HANDLER_BACKEND = "//pw_system:log"
        pw_third_party_freertos_CONFIG = "$dir_pigweed/targets/emcraft_sf2_som:sf2_freertos_config"
-       pw_third_party_freertos_PORT = "$dir_pw_third_party/freertos:arm_cm3"
+       pw_third_party_freertos_PORT = "$pw_external_freertos:arm_cm3"
        pw_sys_io_BACKEND = dir_pw_sys_io_emcraft_sf2
        dir_pw_third_party_smartfusion_mss = dir_pw_third_party_smartfusion_mss_exported
        pw_third_party_stm32cube_CONFIG =
@@ -263,8 +263,22 @@ dispatcher, which may be used to run async tasks, including with C++20
 coroutines.
 
 To use ``pw_system:async``, add a dependency on ``@pigweed//pw_system:async`` in
-Bazel. Then, from your main function, invoke :cpp:func:`pw::SystemStart` with a
-:cpp:type:`pw::channel::ByteReaderWriter` to use for IO.
+Bazel. After performing any initialization, call
+:cc:`pw::system::StartAndClobberTheStack` with a
+:cc:`pw::channel::ByteReaderWriter` to use for IO to start the RTOS scheduler.
+
+.. important::
+
+  Some RTOSes (and with FreeRTOS, with some but not all architecture ports) the
+  call to start the scheduler takes over the callers stack, and will trash any
+  values stored on it. As this could lead to hard to diagnose runtime behavior,
+  we recommend guarding against accidentally storing any registration structures
+  on the stack by performing any initialization in a function called from main
+  that then returns back to main for the
+  :cc:`pw::system::StartAndClobberTheStack` call.
+
+  This is shown in the example below, or you can open up
+  :cs:`pw_system/system_async_test.cc`.
 
 .. literalinclude:: system_async_test.cc
    :language: cpp
@@ -289,8 +303,12 @@ to it from the console, run the following:
 
    $ bazelisk run //pw_system/py:pw_system_console -- -s 127.0.0.1:33000
 
+---------
+Debugging
+---------
+
 Debugging pw_system_console with VSCode
----------------------------------------
+=======================================
 When running a python script through bazel, python is run inside a bazel sandbox,
 which can make re-creating this environment difficult when running the script
 outside of bazel to attach a debugger.
@@ -334,10 +352,17 @@ Next, run the console through bazel, adding the argument(s) ``--debugger-listen`
 Once the console has been started, simply select ``Run -> Start Debugging`` and the VS code debugger
 will automatically attach to the running python console.
 
+---------
+Benchmark
+---------
 
+pw_system.benchmark_runner
+==========================
+.. automodule:: pw_system.benchmark_runner
+  :members:
+    Runner
+
+-------------
 API reference
-=============
-.. doxygenfunction:: pw::SystemStart(channel::ByteReaderWriter&)
-.. doxygenfunction:: pw::System
-.. doxygenclass:: pw::system::AsyncCore
-   :members:
+-------------
+Moved: :cc:`pw_system`

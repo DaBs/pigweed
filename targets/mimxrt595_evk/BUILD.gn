@@ -16,10 +16,9 @@ import("//build_overrides/pigweed.gni")
 
 import("$dir_pw_build/linker_script.gni")
 import("$dir_pw_build/target_types.gni")
-import("$dir_pw_docgen/docs.gni")
 import("$dir_pw_malloc/backend.gni")
-import("$dir_pw_third_party/mcuxpresso/mcuxpresso.gni")
 import("$dir_pw_toolchain/generate_toolchain.gni")
+import("$pw_external_mcuxpresso/mcuxpresso.gni")
 import("target_toolchains.gni")
 
 generate_toolchains("target_toolchains") {
@@ -55,16 +54,6 @@ config("disable_warnings") {
   visibility = [ ":*" ]
 }
 
-config("freestanding") {
-  cflags = [
-    "-ffreestanding",
-    "-fno-builtin",
-  ]
-  asmflags = cflags
-  ldflags = cflags
-  visibility = [ ":*" ]
-}
-
 config("sdk_defines") {
   defines = [
     "BOOT_HEADER_ENABLE=1",
@@ -92,7 +81,7 @@ if (current_toolchain != default_toolchain) {
         "$dir_pw_boot_cortex_m",
         "$dir_pw_preprocessor",
         "$dir_pw_sys_io_mcuxpresso",
-        "$dir_pw_toolchain:infinite_loop",
+        "$dir_pw_toolchain:busy_wait_forever",
         pw_third_party_mcuxpresso_SDK,
       ]
       if (pw_malloc_BACKEND != "") {
@@ -131,13 +120,8 @@ if (pw_third_party_mcuxpresso_SDK == "//targets/mimxrt595_evk:mcuxpresso_sdk") {
 
   pw_source_set("mcuxpresso_sdk_config") {
     public_configs = [
-      ":freestanding",
       ":sdk_defines",
       ":disable_warnings",
     ]
   }
-}
-
-pw_doc_group("target_docs") {
-  sources = [ "target_docs.rst" ]
 }

@@ -24,6 +24,8 @@
 
 namespace pw::uart {
 
+/// @module{pw_uart}
+
 /// Represents an abstract UART interface.
 ///
 /// The `UartNonBlocking` interface provides a basic set of methods for
@@ -54,16 +56,10 @@ class UartNonBlocking : public UartBase {
   ///                                  If `status`=OK, the buffer is identical
   ///                                  to rx_buffer
   ///
-  /// @returns @rst
-  ///
-  /// .. pw-status-codes::
-  ///
-  ///    OK: The operation was successfully started.
-  ///    UNAVAILABLE: Another Read() transaction is currently in progress.
-  ///
-  /// May return other implementation-specific status codes.
-  ///
-  /// @endrst
+  /// @returns
+  /// * @OK: The operation was successfully started.
+  /// * @UNAVAILABLE: Another `Read()` transaction is currently in progress.
+  /// * May return other implementation-specific status codes.
   Status ReadExactly(
       ByteSpan rx_buffer,
       Function<void(Status status, ConstByteSpan buffer)>&& callback) {
@@ -91,16 +87,10 @@ class UartNonBlocking : public UartBase {
   ///                   @param buffer  buffer.size() returns the number of
   ///                                  bytes successfully read into the buffer.
   ///
-  /// @returns @rst
-  ///
-  /// .. pw-status-codes::
-  ///
-  ///    OK: The operation was successfully started.
-  ///    UNAVAILABLE: Another Read() transaction is currently in progress.
-  ///
-  /// May return other implementation-specific status codes.
-  ///
-  /// @endrst
+  /// @returns
+  /// * @OK: The operation was successfully started.
+  /// * @UNAVAILABLE: Another `Read()` transaction is currently in progress.
+  /// * May return other implementation-specific status codes.
   Status ReadAtLeast(
       ByteSpan rx_buffer,
       size_t min_bytes,
@@ -113,14 +103,10 @@ class UartNonBlocking : public UartBase {
   /// This function will cancel a read in progress. The read's callback will
   /// be invoked with status=CANCELLED.
   ///
-  /// @returns @rst
-  ///
-  ///    true: The operation was successfully canceled a transaction in progress
-  ///          and the callback will be invoked with status=CANCELLED.
-  ///    false: There were no transactions in progress and nothing was
-  ///           cancelled. No callback will be invoked.
-  ///
-  /// @endrst
+  /// @retval true The operation was successfully canceled a transaction in
+  ///     progress and the callback will be invoked with `status=CANCELLED`.
+  /// @retval false There were no transactions in progress and nothing was
+  ///     cancelled. No callback will be invoked.
   bool CancelRead() { return DoCancelRead(); }
 
   /// Writes data from a provided buffer to the UART.
@@ -141,16 +127,10 @@ class UartNonBlocking : public UartBase {
   ///                                  May return other implementation-specific
   ///                                  status codes.
   ///
-  /// @returns @rst
-  ///
-  /// .. pw-status-codes::
-  ///
-  ///    OK: The operation was successfully started.
-  ///    UNAVAILABLE: Another Write() transaction is currently in progress.
-  ///
-  /// May return other implementation-specific status codes.
-  ///
-  /// @endrst
+  /// @returns
+  /// * @OK: The operation was successfully started.
+  /// * @UNAVAILABLE: Another Write() transaction is currently in progress.
+  /// * May return other implementation-specific status codes.
   Status Write(ConstByteSpan tx_buffer,
                Function<void(StatusWithSize status)>&& callback) {
     return DoWrite(tx_buffer, std::move(callback));
@@ -161,14 +141,10 @@ class UartNonBlocking : public UartBase {
   /// This function will cancel a write in progress. The write's callback will
   /// be called with status=CANCELLED.
   ///
-  /// @returns @rst
-  ///
-  ///    true: The operation was successfully canceled a transaction in progress
-  ///          and the callback will be invoked with status=CANCELLED.
-  ///    false: There were no transactions in progress and nothing was
-  ///           cancelled. No callback will be invoked.
-  ///
-  /// @endrst
+  /// @retval true The operation was successfully canceled a transaction in
+  ///     progress and the callback will be invoked with status=CANCELLED.
+  /// @retval false There were no transactions in progress and nothing was
+  ///    cancelled. No callback will be invoked.
   bool CancelWrite() { return DoCancelWrite(); }
 
   /// Ensures all queued data in the UART has been transmitted and the hardware
@@ -186,17 +162,11 @@ class UartNonBlocking : public UartBase {
   ///                                  May return other implementation-specific
   ///                                  status codes.
   ///
-  /// @returns @rst
-  ///
-  /// .. pw-status-codes::
-  ///
-  ///    OK: The operation was successfully started.
-  ///    UNAVAILABLE: Another Write() or FlushOutput() operation is currently
-  ///    in progress.
-  ///
-  /// May return other implementation-specific status codes.
-  ///
-  /// @endrst
+  /// @returns
+  /// * @OK: The operation was successfully started.
+  /// * @UNAVAILABLE: Another `Write()` or `FlushOutput()` operation is
+  ///   currently in progress.
+  /// * May return other implementation-specific status codes.
   Status FlushOutput(Function<void(Status status)>&& callback) {
     return DoFlushOutput(std::move(callback));
   }
@@ -206,14 +176,11 @@ class UartNonBlocking : public UartBase {
   /// This function will cancel an output flush in progress. The FlushOutput
   /// callback will be called with status=CANCELLED.
   ///
-  /// @returns @rst
-  ///
-  ///    true: The operation was successfully canceled a transaction in progress
-  ///          and the callback will be invoked with status=CANCELLED.
-  ///    false: There were no transactions in progress and nothing was
-  ///           cancelled. No callback will be invoked.
-  ///
-  /// @endrst
+  /// @returns
+  /// * `true`: An in-progress transaction was cancelled and the callback will
+  ///   be invoked with status set to @CANCELLED.
+  /// * `false`: There were no transactions in progress and nothing was
+  ///   cancelled. No callback will be invoked.
   bool CancelFlushOutput() { return DoCancelFlushOutput(); }
 
  private:
@@ -242,16 +209,10 @@ class UartNonBlocking : public UartBase {
   ///                                  status codes.
   ///                   @param buffer  buffer.size() returns the number of
   ///                                  bytes successfully read into the buffer.
-  /// @returns @rst
-  ///
-  /// .. pw-status-codes::
-  ///
-  ///    OK: The operation was successful started.
-  ///    UNAVAILABLE: Another Read() transaction is currently in progress.
-  ///
-  /// May return other implementation-specific status codes.
-  ///
-  /// @endrst
+  /// @returns
+  /// * @OK: The operation was successfully started.
+  /// * @UNAVAILABLE: Another `Read()` transaction is currently in progress.
+  /// * May return other implementation-specific status codes.
   virtual Status DoRead(
       ByteSpan rx_buffer,
       size_t min_bytes,
@@ -262,16 +223,12 @@ class UartNonBlocking : public UartBase {
   /// This virtual function will cancel a read in progress. The read's callback
   /// will be called with status=CANCELLED.
   ///
-  /// @returns @rst
-  ///
-  ///    true: The operation was successfully canceled a transaction in progress
-  ///          and the callback will be invoked with status=CANCELLED.
-  ///    false: There were no transactions in progress and nothing was
-  ///           cancelled. No callback will be invoked.
-  ///
-  /// May return other implementation-specific status codes.
-  ///
-  /// @endrst
+  /// @returns
+  /// * `true`: An in-progress transaction was cancelled and the callback will
+  ///   be invoked with status set to @CANCELLED.
+  /// * `false`: There were no transactions in progress and nothing was
+  ///   cancelled. No callback will be invoked.
+  /// * May return other implementation-specific status codes.
   virtual bool DoCancelRead() = 0;
 
   /// Writes data from a provided buffer to the UART.
@@ -295,16 +252,10 @@ class UartNonBlocking : public UartBase {
   ///                                  via CancelWrite().
   ///                                  May return other implementation-specific
   ///                                  status codes.
-  /// @returns @rst
-  ///
-  /// .. pw-status-codes::
-  ///
-  ///    OK: The operation was successful started.
-  ///    UNAVAILABLE: Another Write() transaction is currently in progress.
-  ///
-  /// May return other implementation-specific status codes.
-  ///
-  /// @endrst
+  /// @returns
+  /// * @OK: The operation was successfulyl started.
+  /// * @UNAVAILABLE: Another `Write()` transaction is currently in progress.
+  /// * May return other implementation-specific status codes.
   virtual Status DoWrite(ConstByteSpan tx_buffer,
                          Function<void(StatusWithSize status)>&& callback) = 0;
 
@@ -313,16 +264,12 @@ class UartNonBlocking : public UartBase {
   /// This virtual function will cancel a write in progress. The write's
   /// callback will be invoked with status=CANCELLED.
   ///
-  /// @returns @rst
-  ///
-  ///    true: The operation was successfully canceled a transaction in progress
-  ///          and the callback will be invoked with status=CANCELLED.
-  ///    false: There were no transactions in progress and nothing was
-  ///           cancelled. No callback will be invoked.
-  ///
-  /// May return other implementation-specific status codes.
-  ///
-  /// @endrst
+  /// @returns
+  /// * `true`: An in-progress transaction was cancelled and the callback will
+  ///   be invoked with status set to @CANCELLED.
+  /// * `false`: There were no transactions in progress and nothing was
+  ///   cancelled. No callback will be invoked.
+  /// * May return other implementation-specific status codes.
   virtual bool DoCancelWrite() = 0;
 
   /// Ensures all queued data in the UART has been transmitted and the hardware
@@ -340,17 +287,11 @@ class UartNonBlocking : public UartBase {
   ///                                  May return other implementation-specific
   ///                                  status codes.
   ///
-  /// @returns @rst
-  ///
-  /// .. pw-status-codes::
-  ///
-  ///    OK: The operation was successfully started.
-  ///    UNAVAILABLE: Another Write() or FlushOutput() operation is currently
-  ///    in progress.
-  ///
-  /// May return other implementation-specific status codes.
-  ///
-  /// @endrst
+  /// @returns
+  /// * @OK: The operation was successfully started.
+  /// * @UNAVAILABLE: Another `Write()` or `FlushOutput()` operation is
+  ///   currently in progress.
+  /// * May return other implementation-specific status codes.
   virtual Status DoFlushOutput(Function<void(Status status)>&& /*callback*/) {
     return Status::Unimplemented();
   }
@@ -360,14 +301,11 @@ class UartNonBlocking : public UartBase {
   /// This function will cancel an output flush in progress. The DoFlushOutput
   /// callback will be called with status=CANCELLED.
   ///
-  /// @returns @rst
-  ///
-  ///    true: The operation was successfully canceled a transaction in progress
-  ///          and the callback will be invoked with status=CANCELLED.
-  ///    false: There were no transactions in progress and nothing was
-  ///           cancelled. No callback will be invoked.
-  ///
-  /// @endrst
+  /// @returns
+  /// * `true`: An in-progress transaction was cancelled and the callback will
+  ///   be invoked with status set to @CANCELLED.
+  /// * `false`: There were no transactions in progress and nothing was
+  ///   cancelled. No callback will be invoked.
   virtual bool DoCancelFlushOutput() { return false; }
 };
 

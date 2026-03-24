@@ -9,21 +9,20 @@ Utilities
 In addition to containers, this module includes some types and functions for
 working with containers and the data within them.
 
-----------------------------
-pw::containers::FilteredView
-----------------------------
-.. doxygenclass:: pw::containers::FilteredView
+-------------
+API reference
+-------------
+Moved: :cc:`pw_containers_utilities`
 
 -------------------------------
 pw::containers::WrappedIterator
 -------------------------------
-``pw::containers::WrappedIterator`` is a class that makes it easy to wrap an
-existing iterator type. It reduces boilerplate by providing ``operator++``,
-``operator--``, ``operator==``, ``operator!=``, and the standard iterator
-aliases (``difference_type``, ``value_type``, etc.). It does not provide the
-dereference operator; that must be supplied by a derived class.
+:cc:`pw::containers::WrappedIterator` is a class that makes it easy to
+wrap an existing iterator type. It reduces boilerplate by providing
+``operator++``, ``operator--``, ``operator==``, ``operator!=``, and the
+standard iterator aliases (``difference_type``, ``value_type``, etc.). It does
+not provide the dereference operator; that must be supplied by a derived class.
 
-=======
 Example
 =======
 To use it, create a class that derives from ``WrappedIterator`` and define
@@ -38,7 +37,6 @@ values in an array by 2.
    :start-after: [pw_containers-wrapped_iterator]
    :end-before: [pw_containers-wrapped_iterator]
 
-============================
 Basic functional programming
 ============================
 ``WrappedIterator`` may be used in concert with ``FilteredView`` to create a
@@ -56,42 +54,50 @@ in Java 8. ``WrappedIterator`` and ``FilteredView`` require no memory
 allocation, which is helpful when memory is too constrained to process the items
 into a new container.
 
-------------------------
-pw::containers::to_array
-------------------------
-``pw::containers::to_array`` is a C++14-compatible implementation of C++20's
+-----------------
+pw::OptionalTuple
+-----------------
+:cc:`pw::OptionalTuple` is an efficient tuple implementation with optional
+elements, similar to ``std::tuple<std::optional<Types>...>``. Field presence is
+tracked by a single :cc:`pw::BitSet`, instead of a flag in each type.
+
+Example
+=======
+.. literalinclude:: examples/optional_tuple.cc
+   :language: cpp
+   :linenos:
+   :start-at: #include
+   :end-at: }  // namespace example
+
+-----------------------
+pw::containers::Storage
+-----------------------
+:cs:`pw_containers/public/pw_containers/storage.h` provides
+:cc:`pw::containers::Storage`, an aligned storage utility. :cc:`Storage
+<pw::containers::Storage>` is an easier-to-use replacement for
+``std::aligned_storage`` that avoids aliasing. The
+:cc:`pw::containers::StorageFor` alias makes it simple to declare storage for 1
+or more objects of a particular type.
+
+In certain inheritance scenarios, the storage must be a base class instead of a
+member. Classes can inherit from :cc:`StorageBase <pw::containers::StorageBase>`
+:cc:`StorageBaseFor <pw::containers::StorageBaseFor>` to have aligned storage as
+a base class. For example:
+
+.. literalinclude:: storage_test.cc
+   :language: cpp
+   :start-after: pw_containers-storage-base-example
+   :end-before: pw_containers-storage-base-example
+
+---------------
+C++20 polyfills
+---------------
+:cs:`pw_containers/public/pw_containers/to_array.h` provides
+:cc:`pw::containers::to_array`, a C++17-compatible implementation of C++20's
 `std::to_array <https://en.cppreference.com/w/cpp/container/array/to_array>`_.
 In C++20, it is an alias for ``std::to_array``. It converts a C array to a
 ``std::array``.
 
--------------------------
-pw_containers/algorithm.h
--------------------------
-.. doxygenfile:: pw_containers/algorithm.h
-   :sections: detaileddescription
-
-.. doxygenfunction:: pw::containers::AllOf
-.. doxygenfunction:: pw::containers::AnyOf
-.. doxygenfunction:: pw::containers::NoneOf
-.. doxygenfunction:: pw::containers::ForEach
-.. doxygenfunction:: pw::containers::Find
-.. doxygenfunction:: pw::containers::FindIf
-.. doxygenfunction:: pw::containers::FindIfNot
-.. doxygenfunction:: pw::containers::FindEnd(Sequence1 &sequence, Sequence2 &subsequence)
-.. doxygenfunction:: pw::containers::FindEnd(Sequence1 &sequence, Sequence2 &subsequence, BinaryPredicate &&pred)
-.. doxygenfunction:: pw::containers::FindFirstOf(C1& container, C2& options)
-.. doxygenfunction:: pw::containers::FindFirstOf(C1& container, C2& options, BinaryPredicate&& pred)
-.. doxygenfunction:: pw::containers::AdjacentFind(Sequence& sequence)
-.. doxygenfunction:: pw::containers::AdjacentFind(Sequence& sequence, BinaryPredicate&& pred)
-.. doxygenfunction:: pw::containers::Count
-.. doxygenfunction:: pw::containers::CountIf
-.. doxygenfunction:: pw::containers::Mismatch(C1& c1, C2& c2)
-.. doxygenfunction:: pw::containers::Mismatch(C1& c1, C2& c2, BinaryPredicate pred)
-.. doxygenfunction:: pw::containers::Equal(const C1& c1, const C2& c2)
-.. doxygenfunction:: pw::containers::Equal(const C1& c1, const C2& c2, BinaryPredicate&& pred)
-.. doxygenfunction:: pw::containers::IsPermutation(const C1& c1, const C2& c2)
-.. doxygenfunction:: pw::containers::IsPermutation(const C1& c1, const C2& c2, BinaryPredicate&& pred)
-.. doxygenfunction:: pw::containers::Search(Sequence1& sequence, Sequence2& subsequence)
-.. doxygenfunction:: pw::containers::Search(Sequence1& sequence, Sequence2& subsequence, BinaryPredicate&& pred)
-.. doxygenfunction:: pw::containers::SearchN(Sequence& sequence, Size count, T&& value)
-.. doxygenfunction:: pw::containers::SearchN(Sequence& sequence, Size count, T&& value, BinaryPredicate&& pred)
+:cs:`pw_containers/public/pw_containers/algorithm.h` provides ``constexpr``
+implementations of  various ``<algorithm>`` functions including :cc:`pw::copy`,
+:cc:`pw::all_of`, :cc:`pw::any_of`, and :cc:`pw::find_if`.

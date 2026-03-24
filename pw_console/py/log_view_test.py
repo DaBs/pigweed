@@ -14,11 +14,12 @@
 """Tests for pw_console.log_view"""
 
 import logging
-import time
+import re
 import sys
+from typing import Pattern
 import unittest
-from datetime import datetime
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
+
 from parameterized import parameterized  # type: ignore
 from prompt_toolkit.data_structures import Point
 
@@ -48,6 +49,8 @@ def _create_log_view():
     )
     application.prefs.reset_config()
     log_view = LogView(log_pane, application)
+    # So we can see the full 'DEBUG' column value.
+    log_view.table.user_resized_width['level'] = 5
     return log_view, log_pane
 
 
@@ -193,11 +196,7 @@ class TestLogView(unittest.TestCase):
         what line is selected."""
 
         # Mock time to always return the same value.
-        mock_time = MagicMock(  # type: ignore
-            return_value=time.mktime(datetime(2021, 7, 13, 0, 0, 0).timetuple())
-        )
-        with patch('time.time', new=mock_time):
-            log_view, log_pane = self._create_log_view_with_logs(log_count=4)
+        log_view, log_pane = self._create_log_view_with_logs(log_count=4)
 
         # Mock needed LogPane functions that pull info from prompt_toolkit.
         log_pane.get_horizontal_scroll_amount = MagicMock(return_value=0)
@@ -214,21 +213,23 @@ class TestLogView(unittest.TestCase):
         log_view.render_content()
         self.assertEqual(log_view.get_cursor_position(), Point(x=0, y=9))
 
-        expected_formatted_text = [
+        time_pattern = re.compile(r'\d{4}[01]\d[0-3]\d [0-2]\d:[0-5]\d:[0-5]\d')
+
+        expected_formatted_text: list[tuple[str, str | Pattern[str]]] = [
             ('', ''),
-            ('class:log-time', '20210713 00:00:00'),
+            ('class:log-time', time_pattern),
             ('', '  '),
             ('class:log-level-10', 'DEBUG'),
             ('', '  Test log 0'),
-            ('class:log-time', '20210713 00:00:00'),
+            ('class:log-time', time_pattern),
             ('', '  '),
             ('class:log-level-10', 'DEBUG'),
             ('', '  Test log 1'),
-            ('class:log-time', '20210713 00:00:00'),
+            ('class:log-time', time_pattern),
             ('', '  '),
             ('class:log-level-10', 'DEBUG'),
             ('', '  Test log 2'),
-            ('class:selected-log-line class:log-time', '20210713 00:00:00'),
+            ('class:selected-log-line class:log-time', time_pattern),
             ('class:selected-log-line ', '  '),
             ('class:selected-log-line class:log-level-10', 'DEBUG'),
             (
@@ -243,7 +244,16 @@ class TestLogView(unittest.TestCase):
         )
         # pylint: enable=protected-access
 
-        self.assertEqual(result_text, expected_formatted_text)
+        for expected, actual in zip(expected_formatted_text, result_text):
+            (expected_style, expected_value) = expected
+            (actual_style, actual_value) = actual  # type: ignore
+
+            self.assertEqual(actual_style, expected_style)
+
+            if isinstance(expected_value, str):
+                self.assertEqual(actual_value, expected_value)
+            else:
+                self.assertRegex(actual_value, expected_value)
 
     def test_clear_scrollback(self) -> None:
         """Test various functions with clearing log scrollback history."""
@@ -403,34 +413,67 @@ class TestLogView(unittest.TestCase):
         log_view.render_content()
         log_view.log_screen.reset_logs.assert_called_once()
         log_view.log_screen.get_lines.assert_called_once_with(
-            marked_logs_start=None, marked_logs_end=None
+            marked_logs_start_line=None, marked_logs_end_line=None
         )
         log_view.log_screen.get_lines.reset_mock()
         log_view.log_screen.reset_logs.reset_mock()
 
-        self.assertIsNone(log_view.marked_logs_start)
-        self.assertIsNone(log_view.marked_logs_end)
+        self.assertIsNone(log_view.marked_logs_start_line)
+        self.assertIsNone(log_view.marked_logs_end_line)
+
+        # Test a reverse drag selection. Click from the bottom of the window and
+        # drag upwards.
         log_view.visual_select_line(Point(0, 9))
         self.assertEqual(
-            (99, 99), (log_view.marked_logs_start, log_view.marked_logs_end)
+            (99, 99),
+            (log_view.marked_logs_start_line, log_view.marked_logs_end_line),
         )
 
         log_view.visual_select_line(Point(0, 8))
         log_view.visual_select_line(Point(0, 7))
         self.assertEqual(
-            (97, 99), (log_view.marked_logs_start, log_view.marked_logs_end)
+            (99, 97),
+            (log_view.marked_logs_start_line, log_view.marked_logs_end_line),
         )
 
-        log_view.clear_visual_selection()
-        self.assertIsNone(log_view.marked_logs_start)
-        self.assertIsNone(log_view.marked_logs_end)
+        log_text = log_view._logs_to_text(  # pylint: disable=protected-access
+            selected_lines_only=True, use_table_formatting=False
+        )
+        self.assertEqual(
+            [
+                'Test log 97',
+                'Test log 98',
+                'Test log 99',
+            ],
+            re.findall(r'Test log [0-9]+', log_text),
+        )
 
+        # Clear the selection
+        log_view.clear_visual_selection()
+        self.assertIsNone(log_view.marked_logs_start_line)
+        self.assertIsNone(log_view.marked_logs_end_line)
+
+        # Test a drag from the top of the window downwards.
         log_view.visual_select_line(Point(0, 1))
         log_view.visual_select_line(Point(0, 2))
         log_view.visual_select_line(Point(0, 3))
         log_view.visual_select_line(Point(0, 4))
         self.assertEqual(
-            (91, 94), (log_view.marked_logs_start, log_view.marked_logs_end)
+            (91, 94),
+            (log_view.marked_logs_start_line, log_view.marked_logs_end_line),
+        )
+
+        log_text = log_view._logs_to_text(  # pylint: disable=protected-access
+            selected_lines_only=True, use_table_formatting=False
+        )
+        self.assertEqual(
+            [
+                'Test log 91',
+                'Test log 92',
+                'Test log 93',
+                'Test log 94',
+            ],
+            re.findall(r'Test log [0-9]+', log_text),
         )
 
         # Make sure the log screen was not re-generated.
@@ -442,7 +485,7 @@ class TestLogView(unittest.TestCase):
         log_view.log_screen.reset_logs.assert_called_once()
         # Check the visual selection was specified
         log_view.log_screen.get_lines.assert_called_once_with(
-            marked_logs_start=91, marked_logs_end=94
+            marked_logs_start_line=91, marked_logs_end_line=94
         )
         log_view.log_screen.get_lines.reset_mock()
         log_view.log_screen.reset_logs.reset_mock()

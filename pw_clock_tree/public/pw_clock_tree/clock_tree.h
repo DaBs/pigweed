@@ -13,32 +13,38 @@
 // the License.
 #pragma once
 
+#include <atomic>
 #include <cstdint>
 #include <memory>
 #include <mutex>
+#include <optional>
 
 #include "pw_assert/assert.h"
+#include "pw_clock_tree/internal/deferred_init.h"
 #include "pw_status/status.h"
 #include "pw_status/try.h"
 #include "pw_sync/interrupt_spin_lock.h"
 #include "pw_sync/mutex.h"
 
+/// Clock tree management library
 namespace pw::clock_tree {
+
+/// @module{pw_clock_tree}
 
 /// Abstract base class for a clock tree element of a clock tree.
 ///
-/// Class implementations of `Element` must implement `Acquire` and `Release`
-/// functions. For clock tree elements that only get enabled / configured,
-/// it is sufficient to only override the `DoEnable` function, otherwise it
-/// is required to override the `DoDisable` function to disable the respective
-/// clock tree element.
+/// Class implementations of `Element` must implement `DoAcquireLocked` and
+/// `DoReleaseLocked` functions. For clock tree elements that only get enabled /
+/// configured, it is sufficient to only override the `DoEnable` function,
+/// otherwise it is required to override the `DoDisable` function to disable the
+/// respective clock tree element.
 ///
 /// Note: Clock tree element classes shouldn't be directly derived from the
 /// `Element` class, but from the `ElementBlocking`,
 /// `ElementNonBlockingCannotFail` or `ElementNonBlockingMightFail` class.
 class Element {
  public:
-  constexpr Element(bool may_block = false) : may_block_(may_block) {}
+  constexpr Element(bool may_block) : may_block_(may_block) {}
   virtual ~Element() = default;
 
   /// Get reference count for this clock tree element.
@@ -53,6 +59,42 @@ class Element {
   Element& operator=(const Element&) = delete;
   Element& operator=(const Element&&) = delete;
 
+  /// Acquire a reference to this clock tree element.
+  ///
+  /// Note: Calling this method called from interrupt context or with
+  /// interrupts disabled is only permitted on an `ElementNonBlockingMightFail`
+  /// or `ElementNonBlockingCannotFail` instance, and not on a
+  /// `ElementBlocking` or generic `Element` instance.
+  Status Acquire() { return DoAcquire(); }
+
+  /// Release a reference to this clock tree element.
+  ///
+  /// Note: Calling this method called from interrupt context or with
+  /// interrupts disabled is only permitted on an `ElementNonBlockingMightFail`
+  /// or `ElementNonBlockingCannotFail` instance, and not on a
+  /// `ElementBlocking` or generic `Element` instance.
+  Status Release() { return DoRelease(); }
+
+  /// Acquire a reference to this clock tree element while `element_with`
+  /// clock tree is enabled.
+  /// Acquiring the clock tree element might fail.
+  ///
+  /// This is useful when dealing with synchronized clock muxes where, in order
+  /// to switch to a new clock source, both the old and new clock must be
+  /// running. This ensures that the old clock source (`element_with`) is
+  /// running before attempting to activate the new clock source (`element`).
+  ///
+  /// Note: May not be called from inside an interrupt context or with
+  /// interrupts disabled.
+  Status AcquireWith(Element& element_with) {
+    PW_TRY(element_with.Acquire());
+    Status status = Acquire();
+    // Ignore any error on release because it should not fail if the acquire
+    // succeeded, and there's no reasonable alternative.
+    element_with.Release().IgnoreError();
+    return status;
+  }
+
  protected:
   /// Acquire a reference to the clock tree element.
   ///
@@ -65,7 +107,7 @@ class Element {
   /// gets acquired. This ensures that all dependent clock tree
   /// elements have been enabled before this clock tree element gets
   /// configured and enabled.
-  virtual Status Acquire() = 0;
+  virtual Status DoAcquireLocked() = 0;
 
   /// Release a reference to the clock tree element.
   ///
@@ -82,13 +124,16 @@ class Element {
   /// been released and the clock tree element has been disabled.
   /// This ensures that the clock tree element gets disabled before
   /// all dependent clock tree elements have been disabled.
-  virtual Status Release() = 0;
+  virtual Status DoReleaseLocked() = 0;
 
   /// Increment reference count and return incremented value.
   uint32_t IncRef() { return ++ref_count_; }
 
   /// Decrement reference count and return decremented value.
-  uint32_t DecRef() { return --ref_count_; }
+  uint32_t DecRef() {
+    PW_ASSERT(ref_count_ > 0);
+    return --ref_count_;
+  }
 
   /// Function called when the clock tree element needs to get enabled.
   virtual Status DoEnable() = 0;
@@ -106,26 +151,75 @@ class Element {
   /// Whether acquiring or releasing the element may block.
   const bool may_block_;
 
-  friend class ClockTree;
-  template <typename ElementType>
-  friend class DependentElement;
-  friend class ClockDivider;
+  /// Handle Acquire(), deferring locking the child class.
+  virtual Status DoAcquire() = 0;
+
+  /// Handle Release(), deferring locking the child class.
+  virtual Status DoRelease() = 0;
 };
 
 /// Abstract class of a clock tree element that might need to block to perform
 /// element updates.
 class ElementBlocking : public Element {
  public:
-  constexpr ElementBlocking() : Element(/*may_block=*/true) {}
+  static constexpr bool kMayBlock = true;
+  static constexpr bool kMayFail = true;
+  constexpr ElementBlocking() : Element(kMayBlock) {}
+
+ protected:
+  sync::Mutex& lock() { return *mutex_; }
+
+ private:
+  // sync::Mutex is not constexpr-constructible so use DeferredInit so we can
+  // keep our constexpr constructor.
+  internal::DeferredInit<sync::Mutex> mutex_;
+
+  Status DoAcquire() final {
+    std::lock_guard lock(this->lock());
+    return DoAcquireLocked();
+  }
+  Status DoRelease() final {
+    std::lock_guard lock(this->lock());
+    return DoReleaseLocked();
+  }
+};
+
+/// Abstract class of a clock tree element that will not block to perform
+/// element updates and might fail when performing clock updates.
+class ElementNonBlockingMightFail : public Element {
+ public:
+  static constexpr bool kMayBlock = false;
+  static constexpr bool kMayFail = true;
+  constexpr ElementNonBlockingMightFail() : Element(kMayBlock) {}
+
+ protected:
+  sync::InterruptSpinLock& lock() { return spin_lock_; }
+
+ private:
+  sync::InterruptSpinLock spin_lock_;
+
+  Status DoAcquire() final {
+    std::lock_guard lock(this->lock());
+    return DoAcquireLocked();
+  }
+  Status DoRelease() final {
+    std::lock_guard lock(this->lock());
+    return DoReleaseLocked();
+  }
 };
 
 /// Abstract class of a clock tree element that will not block to perform
 /// element updates and will not fail when performing clock updates.
-class ElementNonBlockingCannotFail : public Element {};
+class ElementNonBlockingCannotFail : public ElementNonBlockingMightFail {
+ public:
+  static constexpr bool kMayFail = false;
 
-/// Abstract class of a clock tree element that will not block to perform
-/// element updates and might fail when performing clock updates.
-class ElementNonBlockingMightFail : public Element {};
+  /// Acquire a reference to this clock tree element.
+  void Acquire() { PW_DASSERT(ElementNonBlockingMightFail::Acquire().ok()); }
+
+  /// Release a reference to this clock tree element.
+  void Release() { PW_DASSERT(ElementNonBlockingMightFail::Release().ok()); }
+};
 
 /// Abstract class template of a clock tree element that provides a clock
 /// source.
@@ -135,10 +229,10 @@ class ElementNonBlockingMightFail : public Element {};
 /// derived from another clock.
 ///
 /// Class implementations of `ClockSource` must implement
-/// `Acquire` and `Release` functions. For clock sources that only get
-/// enabled / configured, it is sufficient to only override the `DoEnable`
-/// function, otherwise it is required to override the `DoDisable` function to
-/// disable the clock source.
+/// `DoAcquireLocked` and `DoReleaseLocked` functions. For clock sources that
+/// only get enabled / configured, it is sufficient to only override the
+/// `DoEnable` function, otherwise it is required to override the `DoDisable`
+/// function to disable the clock source.
 ///
 /// Template argument `ElementType` can be of class `ElementBlocking`,
 /// `ElementNonBlockingCannotFail` or
@@ -149,7 +243,7 @@ class ClockSource : public ElementType {
   /// Acquire a reference to the clock source.
   ///
   /// When the first reference gets acquired, the clock source gets enabled.
-  Status Acquire() final {
+  Status DoAcquireLocked() final {
     if (this->IncRef() > 1) {
       // This clock tree element is already enabled.
       return OkStatus();
@@ -166,7 +260,7 @@ class ClockSource : public ElementType {
   /// Release a reference to the clock source.
   ///
   /// When the last reference gets released, the clock source gets disabled.
-  Status Release() final {
+  Status DoReleaseLocked() final {
     if (this->DecRef() > 0) {
       // The clock tree element remains enabled.
       return OkStatus();
@@ -185,6 +279,16 @@ class ClockSource : public ElementType {
 /// be used to satisfy the dependent source clock tree element dependency
 /// for clock source classes that expect a source clock tree element.
 class ClockSourceNoOp : public ClockSource<ElementNonBlockingCannotFail> {
+ private:
+  pw::Status DoEnable() final { return pw::OkStatus(); }
+
+  pw::Status DoDisable() final { return pw::OkStatus(); }
+};
+
+/// Class that represents a no-op clock source clock tree element that can
+/// be used to satisfy the dependent source clock tree element dependency
+/// for clock source classes that expect a source clock tree element.
+class ClockSourceNoOpBlocking : public ClockSource<ElementBlocking> {
  private:
   pw::Status DoEnable() final { return pw::OkStatus(); }
 
@@ -210,70 +314,13 @@ class DependentElement : public ElementType {
   /// Create a dependent clock tree element that depends on `source`.
   constexpr DependentElement(ElementType& source) : source_(&source) {}
 
- protected:
-  /// Update source dependency.
-  ///
-  /// It is the responsibility of the derived class to ensure that the
-  /// source dependency can only be changed when permitted, i.e. only
-  /// if reference count is zero.
-  /// If the update is permitted while the reference count is greater than
-  /// zero, the caller of this function must make sure that the `DoEnable`
-  /// method has access to the updated configuration matching the new `source`
-  /// dependency. Only if the `UpdateSource` call succeeds, the new source has
-  /// been configured as the `source_` element for this element, otherwise the
-  /// old source element is still configured as `source_` element for this
-  /// element. If the `DoEnable` call of the new source fails, the current
-  /// element will be disabled, since the previous source got already released,
-  /// and the old source remains configured as the dependent element.
-  Status UpdateSource(ElementType& new_source, bool permit_change_if_in_use) {
-    // If the element is not enabled, we can update the `source_` directly.
-    if (this->ref_count() == 0) {
-      source_ = &new_source;
-      return OkStatus();
-    }
-
-    // The element is active, check whether we are allowed to change the source.
-    if (!permit_change_if_in_use) {
-      return Status::FailedPrecondition();
-    }
-
-    ElementType* old_source = source_;
-
-    // Acquire the dependent sources for the new_source element.
-    PW_TRY(new_source.Acquire());
-
-    // Disable this current element configuration.
-    if (Status status = this->DoDisable(); !status.ok()) {
-      new_source.Release().IgnoreError();
-      return status;
-    }
-
-    // Enable the new source element configuration.
-    Status status = this->DoEnable();
-
-    // Release the reference to the old dependent source regardless whether
-    // we have enabled the new source, since we have successfully disabled it.
-    old_source->Release().IgnoreError();
-
-    // Check whether the `DoEnable` method succeeded for the new source.
-    if (!status.ok()) {
-      new_source.Release().IgnoreError();
-      this->DecRef();
-      return status;
-    }
-
-    // Everything has succeeded, change the source_ element.
-    source_ = &new_source;
-    return OkStatus();
-  }
-
  private:
   /// Acquire a reference to the dependent clock tree element.
   ///
   /// When the first reference gets acquired, a reference to the source
   /// element gets acquired, before the dependent clock tree element gets
   /// enabled.
-  Status Acquire() final {
+  Status DoAcquireLocked() final {
     if (this->IncRef() > 1) {
       // This clock tree element is already enabled.
       return OkStatus();
@@ -299,7 +346,7 @@ class DependentElement : public ElementType {
   /// When the last reference gets released, the dependent clock tree
   /// element gets disabled (if implemented), before the reference to the
   /// `source` element gets released.
-  Status Release() final {
+  Status DoReleaseLocked() final {
     if (this->DecRef() > 0) {
       // The clock tree element remains enabled.
       return OkStatus();
@@ -316,17 +363,24 @@ class DependentElement : public ElementType {
     return source_->Release();
   }
 
-  /// Pointer to the source clock tree element this clock tree element depends
-  /// on.
-  ElementType* source_;
+ private:
+  // NOTE: This is an Element* not ElementType* to allow the Acquire() and
+  // Release() calls above to consistently use a Status return type.
+  // We still use ElementType& in the constructor to ensure a nonblocking clock
+  // element cannot depend on a blocking one.
+  // TODO: https://pwbug.dev/434801926 - Change this this to ElementType and
+  // use something like:
+  //   if constexpr (std::remove_pointer_t<decltype(source_)>::kMayFail)
+  // to handle the optional Status return value.
+  Element* source_;
 };
 
 /// Abstract class of the clock divider specific interface.
 ///
 /// The clock divider interface allows APIs to accept a `ClockDivider`
-/// element, if they want to use the `ClockTree`'s `SetDividerValue` method.
-/// They can use the `element` method to call the `ClockTree`'s `Acquire` and
-/// `Release` methods.
+/// element, if they want to use the `SetDivider` method.
+/// They can use the `element` method to call the `Acquire` and `Release`
+/// methods.
 class ClockDivider {
  public:
   constexpr ClockDivider(Element& element) : element_(element) {}
@@ -338,7 +392,7 @@ class ClockDivider {
   /// The `divider` value will get updated as part of this method if the clock
   /// divider is currently active, otherwise the new divider value will be
   /// configured when the clock divider gets enabled next.
-  virtual Status Set(uint32_t divider) = 0;
+  Status SetDivider(uint32_t divider) { return DoSetDivider(divider); }
 
   /// Return the element implementing this interface.
   Element& element() const { return element_; }
@@ -346,6 +400,8 @@ class ClockDivider {
  private:
   /// Reference to element implementing this interface.
   Element& element_;
+
+  virtual Status DoSetDivider(uint32_t divider) = 0;
 };
 
 /// Abstract class template of a clock divider element.
@@ -376,7 +432,36 @@ class ClockDividerElement : public DependentElement<ElementType>,
   /// The `divider` value will get updated as part of this method if the clock
   /// divider is currently active, otherwise the new divider value will be
   /// configured when the clock divider gets enabled next.
-  Status Set(uint32_t divider) override {
+  template <typename T = ElementType>
+  typename std::enable_if_t<T::kMayFail, pw::Status> SetDivider(
+      uint32_t divider) {
+    return ClockDivider::SetDivider(divider);
+  }
+
+  /// Set `divider` value.
+  ///
+  /// The `divider` value will get updated as part of this method if the clock
+  /// divider is currently active, otherwise the new divider value will be
+  /// configured when the clock divider gets enabled next.
+  template <typename T = ElementType>
+  typename std::enable_if_t<!T::kMayFail, void> SetDivider(uint32_t divider) {
+    PW_ASSERT_OK(ClockDivider::SetDivider(divider));
+  }
+
+ protected:
+  /// Get current divider value.
+  uint32_t divider() const { return divider_; }
+
+ private:
+  /// Configured divider value.
+  uint32_t divider_;
+
+  Status DoSetDivider(uint32_t divider) final {
+    std::lock_guard lock(this->lock());
+    return DoSetDividerLocked(divider);
+  }
+
+  Status DoSetDividerLocked(uint32_t divider) {
     uint32_t old_divider = divider_;
     divider_ = divider;
     if (this->ref_count() == 0) {
@@ -390,14 +475,6 @@ class ClockDividerElement : public DependentElement<ElementType>,
     }
     return status;
   }
-
- protected:
-  /// Get current divider value.
-  uint32_t divider() const { return divider_; }
-
- private:
-  /// Configured divider value.
-  uint32_t divider_;
 };
 
 /// Alias for a blocking clock divider tree element.
@@ -413,189 +490,42 @@ using ClockDividerNonBlockingCannotFail =
 using ClockDividerNonBlockingMightFail =
     ClockDividerElement<ElementNonBlockingMightFail>;
 
-/// Clock tree class that manages the state of clock tree elements.
+/// An optional reference to an Element which can be Acquired and Released.
 ///
-/// The `ClockTree` provides the `Acquire` and `Release` methods to
-/// acquire a reference to `ElementNonBlockingCannotFail`,
-/// `ElementNonBlockingMightFail`, or `ElementBlocking` elements or
-/// to the generic `Element` element. These functions will acquire the
-/// proper lock to ensure that clock updates are synchronized.
-///
-/// The `SetDividerValue` method allows to change the divider value for
-/// `ClockDividerNonBlockingCannotFail`, `ClockDividerNonBlockingMightFail`
-/// or `ClockDividerBlocking` elements, or to the generic `ClockDivider`
-/// element.
-class ClockTree {
+/// This avoids the verbosity of checking if an element pointer is null in
+/// e.g. a driver which accepts an optional Element* argument.
+class OptionalElement {
  public:
-  /// Acquire a reference to a non-blocking clock tree element.
-  /// Acquiring the clock tree element will succeed.
-  void Acquire(ElementNonBlockingCannotFail& element) {
-    std::lock_guard lock(interrupt_spin_lock_);
-    Status status = element.Acquire();
-    PW_DASSERT(status.ok());
-  }
+  explicit constexpr OptionalElement(Element* element = nullptr)
+      : element_(element) {}
 
-  /// Acquire a reference to a non-blocking clock tree element.
-  /// Acquiring the clock tree element might fail.
-  Status Acquire(ElementNonBlockingMightFail& element) {
-    std::lock_guard lock(interrupt_spin_lock_);
-    return element.Acquire();
-  }
-
-  /// Acquire a reference to a blocking clock tree element.
-  /// Acquiring the clock tree element might fail.
-  Status Acquire(ElementBlocking& element) {
-    std::lock_guard lock(mutex_);
-    return element.Acquire();
-  }
-
-  /// Acquire a reference to a clock tree element.
-  /// Acquiring the clock tree element might fail.
-  ///
-  /// Note: May not be called from inside an interrupt context or with
-  /// interrupts disabled.
-  Status Acquire(Element& element) {
-    if (element.may_block()) {
-      std::lock_guard lock(mutex_);
-      return element.Acquire();
-    }
-    std::lock_guard lock(interrupt_spin_lock_);
-    return element.Acquire();
-  }
-
-  /// Acquire a reference to clock tree element `element` while `element_with`
-  /// clock tree is enabled.
-  /// Acquiring the clock tree element might fail.
-  ///
-  /// Note: May not be called from inside an interrupt context or with
-  /// interrupts disabled.
-  Status AcquireWith(Element& element, Element& element_with) {
-    PW_TRY(Acquire(element_with));
-    Status status = Acquire(element);
-    Release(element_with).IgnoreError();
-    return status;
-  }
-
-  /// Release a reference to a non-blocking clock tree element.
-  /// Releasing the clock tree element will succeed.
-  void Release(ElementNonBlockingCannotFail& element) {
-    std::lock_guard lock(interrupt_spin_lock_);
-    Status status = element.Release();
-    PW_DASSERT(status.ok());
-  }
-
-  /// Release a reference to a non-blocking clock tree element.
-  /// Releasing the clock tree element might fail.
-  Status Release(ElementNonBlockingMightFail& element) {
-    std::lock_guard lock(interrupt_spin_lock_);
-    return element.Release();
-  }
-
-  /// Release a reference to a blocking clock tree element.
-  /// Releasing the clock tree element might fail.
-  Status Release(ElementBlocking& element) {
-    std::lock_guard lock(mutex_);
-    return element.Release();
-  }
-
-  /// Release a reference to a clock tree element.
-  /// Releasing the clock tree element might fail.
-  ///
-  /// Note: May not be called from inside an interrupt context or with
-  /// interrupts disabled.
-  Status Release(Element& element) {
-    if (element.may_block()) {
-      std::lock_guard lock(mutex_);
-      return element.Release();
-    }
-    std::lock_guard lock(interrupt_spin_lock_);
-    return element.Release();
-  }
-
-  /// Set divider value for a non-blocking clock divider element.
-  /// Setting the clock divider value will succeed.
-  void SetDividerValue(ClockDividerNonBlockingCannotFail& clock_divider,
-                       uint32_t divider_value) {
-    std::lock_guard lock(interrupt_spin_lock_);
-    Status status = clock_divider.Set(divider_value);
-    PW_DASSERT(status.ok());
-  }
-
-  /// Set divider value for a non-blocking clock divider element.
-  /// Setting the clock divider value might fail.
-  Status SetDividerValue(ClockDividerNonBlockingMightFail& clock_divider,
-                         uint32_t divider_value) {
-    std::lock_guard lock(interrupt_spin_lock_);
-    return clock_divider.Set(divider_value);
-  }
-
-  /// Set divider value for a blocking clock divider element.
-  /// Setting the clock divider value might fail.
-  Status SetDividerValue(ClockDividerBlocking& clock_divider,
-                         uint32_t divider_value) {
-    std::lock_guard lock(mutex_);
-    return clock_divider.Set(divider_value);
-  }
-
-  /// Set divider value for a clock divider element.
-  /// Setting the clock divider value might fail.
-  ///
-  /// Note: May not be called from inside an interrupt context or with
-  /// interrupts disabled.
-  Status SetDividerValue(ClockDivider& clock_divider, uint32_t divider_value) {
-    if (clock_divider.element().may_block()) {
-      std::lock_guard lock(mutex_);
-      return clock_divider.Set(divider_value);
-    }
-    std::lock_guard lock(interrupt_spin_lock_);
-    return clock_divider.Set(divider_value);
-  }
-
- protected:
-  /// `mutex_` protects `ElementBlocking` clock tree elements.
-  sync::Mutex mutex_;
-
-  /// `interrupt_spin_lock_` protects `ElementNonBlockingCannotFail`
-  /// and `ElementNonBlockingMightFail` clock tree elements.
-  sync::InterruptSpinLock interrupt_spin_lock_;
-};
-
-/// Helper class that allows drivers to accept optional clock tree
-/// information and streamline clock tree operations.
-class ElementController {
- public:
-  /// Create an element controller that accepts optional clock
-  /// tree and element information.
-  constexpr ElementController(ClockTree* clock_tree = nullptr,
-                              Element* element = nullptr)
-      : clock_tree_(clock_tree), element_(element) {}
+  explicit constexpr OptionalElement(Element& element)
+      : OptionalElement(&element) {}
 
   /// Acquire a reference to the optional clock tree element.
   ///
-  /// If not both optional clock_tree and element pointers are
-  /// non-null, the function just returns `pw::OkStatus()`.
+  /// If the optional element pointer is null, the function just returns
+  /// `pw::OkStatus()`.
   Status Acquire() {
-    if (clock_tree_ != nullptr && element_ != nullptr) {
-      return clock_tree_->Acquire(*element_);
+    if (element_ != nullptr) {
+      return element_->Acquire();
     }
     return OkStatus();
   }
 
   /// Release a reference to the optional clock tree element.
   ///
-  /// If not both optional clock_tree and element pointers are
-  /// non-null, the function just returns `pw::OkStatus()`.
+  /// If the optional element pointer is null, the function just returns
+  /// `pw::OkStatus()`.
   Status Release() {
-    if (clock_tree_ != nullptr && element_ != nullptr) {
-      return clock_tree_->Release(*element_);
+    if (element_ != nullptr) {
+      return element_->Release();
     }
     return OkStatus();
   }
 
-  /// Pointer to optional `ClockTree` object.
-  ClockTree* clock_tree_ = nullptr;
-
-  /// Pointer to optional `Element` object.
+ private:
   Element* element_ = nullptr;
 };
+
 }  // namespace pw::clock_tree

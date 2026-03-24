@@ -19,7 +19,6 @@ load("//pw_unit_test:pw_cc_test.bzl", "pw_cc_test")
 
 package(
     default_visibility = ["//visibility:public"],
-    features = ["-layering_check"],
 )
 
 licenses(["notice"])
@@ -28,6 +27,7 @@ cc_library(
     name = "pw_stream_uart_linux",
     srcs = ["stream.cc"],
     hdrs = ["public/pw_stream_uart_linux/stream.h"],
+    features = ["-conversion_warnings"],
     strip_include_prefix = "public",
     target_compatible_with = [
         "@platforms//os:linux",
@@ -36,6 +36,7 @@ cc_library(
         "//pw_bytes",
         "//pw_log",
         "//pw_preprocessor",
+        "//pw_status",
         "//pw_stream",
     ],
 )
@@ -45,6 +46,7 @@ pw_cc_test(
     srcs = [
         "stream_test.cc",
     ],
+    features = ["-conversion_warnings"],
     deps = [
         ":pw_stream_uart_linux",
     ],

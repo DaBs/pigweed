@@ -23,10 +23,8 @@
 # Don't automatically create __init__.py files.
 #
 # This prevents spurious package name collisions at import time, and should be
-# the default (https://github.com/bazelbuild/bazel/issues/7386). It's
-# particularly helpful for Pigweed, because we have many potential package name
-# collisions due to a profusion of stuttering paths like
-# pw_transfer/py/pw_transfer.
+# the default (https://github.com/bazelbuild/bazel/issues/7386). Pigweed's
+# Python libraries break without this.
 common --incompatible_default_to_explicit_init_py
 
 # Do not attempt to configure an autodetected (local) toolchain. We vendor all
@@ -59,4 +57,21 @@ common --legacy_external_runfiles=True
 # will be built for the host. This was originally intended to be flipped in
 # Bazel 8.0.0, but didn't quite make the cut.
 # Also see: https://github.com/bazelbuild/bazel/issues/23179
-test --incompatible_bazel_test_exec_run_under=True
+common --incompatible_bazel_test_exec_run_under=True
+
+# Names the platform-specific output directories in `bazel-out/` after their
+# associated platform.
+#
+# These names are used by Pigweed's IDE integration to surface available views
+# for code intelligence.
+#
+# Warning: This can cause confusing conflicts in C++ compile actions if there's
+# any intermixing of the well-known host platform definitions. More info:
+# https://github.com/bazelbuild/bazel/issues/26228
+common --experimental_platform_in_output_dir=True
+
+# Enable prebuilt protobuf toolchains
+build --incompatible_enable_proto_toolchain_resolution
+build --@com_google_protobuf//bazel/toolchains:prefer_prebuilt_protoc
+build --extra_toolchains=@pigweed//pw_build:pw_python_proto_toolchain_toolchain
+

@@ -284,8 +284,8 @@ export class ReadTransfer extends Transfer {
   protected handleDataChunk(chunk: Chunk): void {
     const chunkData = chunk.getData() as Uint8Array;
 
-    if (chunk.getOffset() != this.offset) {
-      if (chunk.getOffset() + chunkData.length <= this.offset) {
+    if (Number(chunk.getOffset()) != this.offset) {
+      if (Number(chunk.getOffset()) + chunkData.length <= this.offset) {
         // If the chunk's data has already been received, don't go through a full
         // recovery cycle to avoid shrinking the window size and potentially
         // thrashing. The expected data may already be in-flight, so just allow
@@ -316,13 +316,13 @@ export class ReadTransfer extends Transfer {
     this.offset += chunk.getData().length;
 
     if (chunk.hasRemainingBytes()) {
-      if (chunk.getRemainingBytes() === 0) {
+      if (Number(chunk.getRemainingBytes()) === 0) {
         // No more data to read. Acknowledge receipt and finish.
         this.terminate(Status.OK);
         return;
       }
 
-      this.remainingTransferSize = chunk.getRemainingBytes();
+      this.remainingTransferSize = Number(chunk.getRemainingBytes());
     } else if (this.remainingTransferSize !== undefined) {
       // Update the remaining transfer size, if it is known.
       this.remainingTransferSize -= chunk.getData().length;
@@ -436,7 +436,7 @@ export class WriteTransfer extends Transfer {
       return;
     }
 
-    const bytesAcknowledged = chunk.getOffset();
+    const bytesAcknowledged = Number(chunk.getOffset());
 
     let writeChunk: Chunk;
     // eslint-disable-next-line no-constant-condition
@@ -463,7 +463,7 @@ export class WriteTransfer extends Transfer {
       retransmit = chunk.getType() === Chunk.Type.PARAMETERS_RETRANSMIT;
     }
 
-    if (chunk.getOffset() > this.data.length) {
+    if (Number(chunk.getOffset()) > this.data.length) {
       // Bad offset; terminate the transfer.
       console.error(
         `Transfer ${
@@ -488,7 +488,7 @@ export class WriteTransfer extends Transfer {
     if (retransmit) {
       // Check whether the client has sent a previous data offset, which
       // indicates that some chunks were lost in transmission.
-      if (chunk.getOffset() < this.offset) {
+      if (Number(chunk.getOffset()) < this.offset) {
         console.debug(
           `Write transfer ${
             this.id
@@ -496,7 +496,7 @@ export class WriteTransfer extends Transfer {
         );
       }
 
-      this.offset = chunk.getOffset();
+      this.offset = Number(chunk.getOffset());
 
       // Retransmit is the default behavior for older versions of the
       // transfer protocol. The window_end_offset field is not guaranteed

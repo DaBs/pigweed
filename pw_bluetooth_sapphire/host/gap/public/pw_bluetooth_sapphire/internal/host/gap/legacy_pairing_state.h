@@ -44,6 +44,11 @@ namespace bt::gap {
 // (possibly with different capabilities).
 class LegacyPairingState final {
  public:
+  // The amount of time to wait before retrying enabling encryption if we
+  // receive a transaction collision while doing so.
+  static constexpr std::chrono::steady_clock::duration
+      kDelayRetryEnableEncryption = std::chrono::seconds(2);
+
   // Used to report the status of each pairing procedure on this link. The
   // callback's result will contain |HostError::kFailed| if the pairing
   // procedure does not proceed in the order of events expected.
@@ -56,7 +61,8 @@ class LegacyPairingState final {
   // |status_callback_| until the ACL connection is complete.
   LegacyPairingState(Peer::WeakPtr peer,
                      PairingDelegate::WeakPtr pairing_delegate,
-                     bool outgoing_connection);
+                     bool outgoing_connection,
+                     pw::async::Dispatcher* dispatcher);
 
   // Constructs a LegacyPairingState for the ACL connection |link| to |peer| to
   // handle pairing protocols, commands, and events. |link| must be valid for
@@ -80,6 +86,7 @@ class LegacyPairingState final {
                      PairingDelegate::WeakPtr pairing_delegate,
                      WeakPtr<hci::BrEdrConnection> link,
                      bool outgoing_connection,
+                     pw::async::Dispatcher* dispatcher,
                      fit::closure auth_cb,
                      StatusCallback status_cb);
   ~LegacyPairingState();
@@ -122,7 +129,7 @@ class LegacyPairingState final {
   // (or HCI_Link_Key_Request_Negative_Reply if the returned value is null).
   [[nodiscard]] std::optional<hci_spec::LinkKey> OnLinkKeyRequest();
 
-  // |cb| is called with the pin code value to send HCI_PIN_Code_Request_Reply
+  // |cb| is called with the pin code value to send HCI_PIN_Code_Request_Reply
   // or std::nullopt to send HCI_PIN_Code_Request_Negative_Reply.
   using UserPinCodeCallback =
       fit::callback<void(std::optional<uint16_t> passkey)>;
@@ -188,6 +195,8 @@ class LegacyPairingState final {
 
   // Extra information for pairing constructed when a pairing procedure begins
   // and destroyed when the pairing procedure is reset or errors out.
+  // |outgoing_connection| should be true if this device connected, and false if
+  // it was an incoming connection.
   //
   // Instances must be heap allocated so that they can be moved without
   // destruction, preserving their WeakPtr holders. WeakPtrs are vended to
@@ -199,15 +208,17 @@ class LegacyPairingState final {
     static std::unique_ptr<Pairing> MakeInitiator(
         BrEdrSecurityRequirements security_requirements,
         bool outgoing_connection,
-        Peer::PairingToken&& token);
+        Peer::PairingToken&& token,
+        pw::async::Dispatcher& dispatcher);
     static std::unique_ptr<Pairing> MakeResponder(
         bool outgoing_connection,
         Peer::PairingToken&& token,
+        pw::async::Dispatcher& dispatcher,
         std::optional<pw::bluetooth::emboss::IoCapability> peer_iocap =
             std::nullopt);
     // Make a responder for a peer that has initiated pairing.
     static std::unique_ptr<Pairing> MakeResponderForBonded(
-        Peer::PairingToken&& token);
+        Peer::PairingToken&& token, pw::async::Dispatcher& dispatcher);
 
     // Used to prevent PairingDelegate callbacks from using captured stale
     // pointers.
@@ -246,10 +257,15 @@ class LegacyPairingState final {
 
     Peer::PairingToken pairing_token;
 
+    SmartTask retry_enable_encryption_task;
+
    private:
-    explicit Pairing(bool automatic, Peer::PairingToken&& token)
+    Pairing(bool automatic,
+            Peer::PairingToken&& token,
+            pw::async::Dispatcher& dispatcher)
         : allow_automatic(automatic),
           pairing_token(std::move(token)),
+          retry_enable_encryption_task(dispatcher),
           weak_self_(this) {}
 
     WeakSelf<Pairing> weak_self_;
@@ -283,6 +299,10 @@ class LegacyPairingState final {
   // |state_| to |kFailed|. Logs an error using |handler_name| for
   // identification.
   void FailWithUnexpectedEvent(const char* handler_name);
+
+  enum class ActionOnError { kIgnore, kRetry, kFail };
+  ActionOnError GetActionOnError(
+      const bt::Error<pw::bluetooth::emboss::StatusCode>& error);
 
   static const char* ToString(State state);
 
@@ -333,10 +353,21 @@ class LegacyPairingState final {
   // Callback that status of this pairing is reported back through.
   StatusCallback status_callback_;
 
+  pw::async::Dispatcher& dispatcher_;
+
   struct InspectProperties {
     inspect::StringProperty encryption_status;
   };
   InspectProperties inspect_properties_;
+
+  struct InspectMetrics {
+    UintMetricCounter central_lmp_transaction_collision;
+    UintMetricCounter peripheral_lmp_transaction_collision;
+    UintMetricCounter central_different_transaction_collision;
+    UintMetricCounter peripheral_different_transaction_collision;
+  };
+  InspectMetrics inspect_metrics_;
+
   inspect::Node inspect_node_;
 
   BT_DISALLOW_COPY_AND_ASSIGN_ALLOW_MOVE(LegacyPairingState);

@@ -20,7 +20,10 @@ load("//pw_unit_test:pw_cc_test.bzl", "pw_cc_test")
 
 package(
     default_visibility = ["//visibility:public"],
-    features = ["-layering_check"],
+    features = [
+        "-layering_check",
+        "-ctad_warnings",
+    ],
 )
 
 # Basic target with protocol definitions and no logic, suitable for test
@@ -31,6 +34,7 @@ cc_library(
         "public/pw_bluetooth_sapphire/internal/host/l2cap/frame_headers.h",
         "public/pw_bluetooth_sapphire/internal/host/l2cap/l2cap_defs.h",
     ],
+    features = ["-conversion_warnings"],
     strip_include_prefix = "public",
     tags = ["noclangtidy"],
     deps = [
@@ -44,6 +48,7 @@ cc_library(
     name = "l2cap",
     srcs = [
         "a2dp_offload_manager.cc",
+        "autosniff.cc",
         "basic_mode_rx_engine.cc",
         "basic_mode_tx_engine.cc",
         "bredr_command_handler.cc",
@@ -74,6 +79,7 @@ cc_library(
     ],
     hdrs = [
         "public/pw_bluetooth_sapphire/internal/host/l2cap/a2dp_offload_manager.h",
+        "public/pw_bluetooth_sapphire/internal/host/l2cap/autosniff.h",
         "public/pw_bluetooth_sapphire/internal/host/l2cap/basic_mode_rx_engine.h",
         "public/pw_bluetooth_sapphire/internal/host/l2cap/basic_mode_tx_engine.h",
         "public/pw_bluetooth_sapphire/internal/host/l2cap/bredr_command_handler.h",
@@ -104,6 +110,7 @@ cc_library(
         "public/pw_bluetooth_sapphire/internal/host/l2cap/tx_engine.h",
         "public/pw_bluetooth_sapphire/internal/host/l2cap/types.h",
     ],
+    features = ["-conversion_warnings"],
     implementation_deps = [
         "//pw_bluetooth:emboss_l2cap_frames",
         "//pw_preprocessor",
@@ -120,6 +127,7 @@ cc_library(
         ":definitions",
         "//pw_bluetooth",
         "//pw_bluetooth:emboss_hci_android",
+        "//pw_bluetooth_sapphire:lease",
         "//pw_bluetooth_sapphire/host/common",
         "//pw_bluetooth_sapphire/host/hci",
         "//pw_bluetooth_sapphire/host/sm:definitions",
@@ -165,6 +173,11 @@ cc_library(
         "public/pw_bluetooth_sapphire/internal/host/l2cap/mock_channel_test.h",
         "public/pw_bluetooth_sapphire/internal/host/l2cap/test_packets.h",
     ],
+    copts = [
+        # TODO: https://pwbug.dev/464024322 - Fix warnings.
+        "-Wno-shadow",
+    ],
+    features = ["-conversion_warnings"],
     implementation_deps = [
         "//pw_bluetooth_sapphire/host/testing:gtest_helpers",
         "//pw_bluetooth_sapphire/host/testing:test_helpers",
@@ -212,12 +225,16 @@ pw_cc_test(
         "signaling_channel_test.cc",
         "types_test.cc",
     ],
+    # TODO: https://pwbug.dev/464024322 - Fix warnings.
+    copts = ["-Wno-shadow"],
+    features = ["-conversion_warnings"],
     test_main = "//pw_bluetooth_sapphire/host/testing:gtest_main",
     deps = [
         ":channel_manager_mock_controller_test_fixture",
         ":l2cap",
         ":testing",
         "//pw_async:fake_dispatcher_fixture",
+        "//pw_bluetooth_sapphire:null_lease_provider",
         "//pw_bluetooth_sapphire/host/hci",
         "//pw_bluetooth_sapphire/host/hci:testing",
         "//pw_bluetooth_sapphire/host/testing",
@@ -248,9 +265,11 @@ pw_cc_fuzz_test(
 pw_cc_fuzz_test(
     name = "bredr_dynamic_channel_registry_fuzzer",
     srcs = ["bredr_dynamic_channel_registry_fuzztest.cc"],
+    features = ["-conversion_warnings"],
     deps = [
         ":l2cap",
         ":testing",
+        "//pw_bluetooth_sapphire:null_lease_provider",
         "//pw_random:fuzzer_generator",
     ],
 )
@@ -258,8 +277,6 @@ pw_cc_fuzz_test(
 pw_cc_fuzz_test(
     name = "channel_configuration_fuzzer",
     srcs = ["channel_configuration_fuzztest.cc"],
-    # TODO: https://pwbug.dev/393957973 - Fix this test.
-    tags = ["noubsan"],
     deps = [
         ":l2cap",
         ":testing",
@@ -269,8 +286,7 @@ pw_cc_fuzz_test(
 pw_cc_fuzz_test(
     name = "common_handler_fuzzer",
     srcs = ["common_handler_fuzztest.cc"],
-    # TODO: https://pwbug.dev/393957973 - Fix this test.
-    tags = ["noubsan"],
+    features = ["-conversion_warnings"],
     deps = [
         ":l2cap",
         ":testing",
@@ -280,6 +296,7 @@ pw_cc_fuzz_test(
 pw_cc_fuzz_test(
     name = "l2cap_fuzzer",
     srcs = ["l2cap_fuzztest.cc"],
+    features = ["-conversion_warnings"],
     target_compatible_with = select({
         "//pw_unit_test:backend_is_googletest": [],
         "@platforms//os:fuchsia": [],

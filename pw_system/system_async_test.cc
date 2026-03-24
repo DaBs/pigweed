@@ -17,7 +17,7 @@
 #include "pw_async2/dispatcher.h"
 #include "pw_channel/loopback_channel.h"
 #include "pw_log/log.h"
-#include "pw_multibuf/simple_allocator_for_test.h"
+#include "pw_multibuf/simple_allocator.h"
 #include "pw_system/system.h"
 #include "pw_unit_test/framework.h"
 
@@ -30,15 +30,15 @@ class : public pw::async2::Task {
 } my_task;
 
 // DOCSTAG: [pw_system-async-example-main]
-int main() {
+pw::channel::ByteReaderWriter& Init() {
   // First, do any required low-level platform initialization.
 
   // Initialize a channel to handle pw_system communications, including for
   // pw_rpc. This example uses LoopbackByteChannel, but a channel that actually
   // transmits data should be used instead.
-  std::byte channel_buffer[128];
+  static std::byte channel_buffer[128];
   pw::multibuf::SimpleAllocator alloc(channel_buffer, pw::System().allocator());
-  pw::channel::LoopbackByteChannel channel(alloc);
+  static pw::channel::LoopbackByteChannel channel(alloc);
 
   // Post any async tasks that should run. These will execute after calling
   // pw::SystemStart.
@@ -47,9 +47,21 @@ int main() {
   // As needed, start threads to run user code. Or, register a task to start
   // threads after pw::SystemStart.
 
-  // When ready, start running the pw::System threads and dispatcher. This
-  // function call never returns.
-  pw::SystemStart(channel.channel());
+  // When all initialization is done, return a reference to the channel.
+  return channel.channel();
+}
+
+int main() {
+  // Perform all initialization in a function. It returns back a reference to
+  // a non-stack allocated io_channel to use. By doing all initialization in
+  // another function like this, we help ensure that the stack contains almost
+  // nothing that can be trashed by the next call.
+  pw::channel::ByteReaderWriter& io_channel = Init();
+
+  // Start running the pw::System threads and dispatcher. This function call
+  // never return, and because of that, some backends may trash the current
+  // stack contents, including whatever is on it.
+  pw::system::StartAndClobberTheStack(io_channel);
 
   return 0;
 }

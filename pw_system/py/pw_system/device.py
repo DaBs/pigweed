@@ -71,8 +71,9 @@ class Device:
         use_rpc_logging: bool = True,
         use_hdlc_encoding: bool = True,
         logger: logging.Logger | logging.LoggerAdapter = DEFAULT_DEVICE_LOGGER,
-        extra_frame_handlers: dict[int, Callable[[bytes, Any], Any]]
-        | None = None,
+        extra_frame_handlers: (
+            dict[int, Callable[[bytes, Any], Any]] | None
+        ) = None,
     ):
         self.channel_id = channel_id
         self.protos = list(proto_library)
@@ -123,9 +124,9 @@ class Device:
             extra_frame_handlers_wrapper: rpc.FrameHandlers = {}
             if extra_frame_handlers is not None:
                 for address, handler in extra_frame_handlers.items():
-                    extra_frame_handlers_wrapper[
-                        address
-                    ] = create_frame_handler_wrapper(handler)
+                    extra_frame_handlers_wrapper[address] = (
+                        create_frame_handler_wrapper(handler)
+                    )
 
             self.client = rpc.HdlcRpcClient(
                 reader,

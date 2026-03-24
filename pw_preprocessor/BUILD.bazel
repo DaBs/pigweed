@@ -81,6 +81,15 @@ pw_cc_test(
     deps = [":pw_preprocessor"],
 )
 
+pw_cc_test(
+    name = "apply_test",
+    srcs = ["apply_test.cc"],
+    deps = [
+        ":pw_preprocessor",
+        "//pw_unit_test:constexpr",
+    ],
+)
+
 filegroup(
     name = "doxygen",
     srcs = [

@@ -19,8 +19,8 @@ load("@rules_cc//cc/toolchains:feature.bzl", "cc_feature")
 load("@rules_cc//cc/toolchains:feature_constraint.bzl", "cc_feature_constraint")
 load("@rules_cc//cc/toolchains:feature_set.bzl", "cc_feature_set")
 load("@rules_cc//cc/toolchains:toolchain.bzl", "cc_toolchain")
+load("//pw_build:pigweed_is_root.bzl", "pigweed_is_root")
 load("//pw_toolchain/cc:builtin_module_map.bzl", "builtin_module_map")
-load("//pw_toolchain/host_clang:paths.bzl", "LLVM_TOOLCHAIN")
 
 package(default_visibility = ["//visibility:public"])
 
@@ -41,8 +41,9 @@ cc_args(
         # Force dropping the system libc++.
         "-nostdlib++",
         # Use libc++ provided by the toolchain.
-        LLVM_TOOLCHAIN + "/lib/libc++.a",
+        "{TOOLCHAIN_ROOT}/lib/libc++.a",
     ],
+    format = {"TOOLCHAIN_ROOT": "@llvm_toolchain//:toolchain_root"},
     target_compatible_with = ["@platforms//os:macos"],
 )
 
@@ -62,19 +63,6 @@ cc_args(
     name = "libtool_darwin_flags",
     actions = ["@rules_cc//cc/toolchains/actions:cpp_link_static_library"],
     args = ["-no_warning_for_no_symbols"],
-)
-
-# Thread safety warnings are only supported by Clang.
-cc_args(
-    name = "thread_safety_warnings",
-    actions = [
-        "@rules_cc//cc/toolchains/actions:c_compile_actions",
-        "@rules_cc//cc/toolchains/actions:cpp_compile_actions",
-    ],
-    args = [
-        "-Wthread-safety",
-        "-D_LIBCPP_ENABLE_THREAD_SAFETY_ANNOTATIONS=1",
-    ],
 )
 
 cc_args(
@@ -131,7 +119,33 @@ cc_feature_set(
     name = "asan_constraint",
     # Rust uses the C++ linker, but not the C++ compiler, so we need to ensure
     # -fsanitize=address is not be specified during Rust linking.
-    all_of = [":rules_rust_unsupported_feature"],
+    all_of = ["//pw_toolchain/cc/feature:rules_rust_unsupported_feature"],
+)
+
+bool_flag(
+    name = "msan",
+    build_setting_default = False,
+)
+
+config_setting(
+    name = "msan_enabled",
+    flag_values = {
+        ":msan": "true",
+    },
+)
+
+cc_feature(
+    name = "msan_feature",
+    args = ["//pw_toolchain/cc/args:msan"],
+    feature_name = "msan",
+    requires_any_of = [":msan_constraint"],
+)
+
+cc_feature_set(
+    name = "msan_constraint",
+    # Rust uses the C++ linker, but not the C++ compiler, so we need to ensure
+    # -fsanitize=memory is not be specified during Rust linking.
+    all_of = ["//pw_toolchain/cc/feature:rules_rust_unsupported_feature"],
 )
 
 bool_flag(
@@ -157,7 +171,7 @@ cc_feature_set(
     name = "ubsan_constraint",
     # Rust uses the C++ linker, but not the C++ compiler, so we need to ensure
     # -fsanitize=undefined is not be specified during Rust linking.
-    all_of = [":rules_rust_unsupported_feature"],
+    all_of = ["//pw_toolchain/cc/feature:rules_rust_unsupported_feature"],
 )
 
 bool_flag(
@@ -183,7 +197,7 @@ cc_feature_set(
     name = "tsan_constraint",
     # Rust uses the C++ linker, but not the C++ compiler, so we need to ensure
     # -fsanitize=undefined is not be specified during Rust linking.
-    all_of = [":rules_rust_unsupported_feature"],
+    all_of = ["//pw_toolchain/cc/feature:rules_rust_unsupported_feature"],
 )
 
 bool_flag(
@@ -204,38 +218,26 @@ cc_feature(
     feature_name = "fuzztest",
 )
 
-# This is a sentinel feature defined by rules_rust. It is by definition
-# unsupported: rules_rust will disable this feature when linking Rust code.
-cc_feature(
-    name = "rules_rust_unsupported_feature",
-    feature_name = "rules_rust_unsupported_feature",
-)
-
-# This is a sentinel feature defined by rules_go. It is by definition
-# unsupported: rules_go will disable this feature when linking Go code.
-cc_feature(
-    name = "rules_go_unsupported_feature",
-    feature_name = "rules_go_unsupported_feature",
-)
-
 cc_feature_constraint(
     name = "rules_go_constraint",
 
     # This constraint is saying "not not Golang" (yes Golang / only Golang).
-    none_of = [":rules_go_unsupported_feature"],
+    none_of = ["//pw_toolchain/cc/feature:rules_go_unsupported_feature"],
 )
 
-# Golang doesn't link with PIE enabled. See pwbug.dev/347708308.
-#
-# We want to disable PIE only when we're *not* compiling Golang code.
 cc_args(
-    name = "no_pie_for_go_flags",
+    name = "cgo_link_flags",
     actions = ["@rules_cc//cc/toolchains/actions:link_actions"],
-    args = [
-        "-no-pie",
-    ],
+    args = select({
+        "@platforms//os:linux": [
+            # Golang doesn't link with PIE enabled on linux. See
+            # https://pwbug.dev/347708308. We want to disable PIE only when
+            # we're linking Golang code.
+            "-no-pie",
+        ],
+        "//conditions:default": [],
+    }),
     requires_any_of = [":rules_go_constraint"],
-    target_compatible_with = ["@platforms//os:linux"],
 )
 
 cc_args(
@@ -244,7 +246,10 @@ cc_args(
         "@rules_cc//cc/toolchains/actions:compile_actions",
         "@rules_cc//cc/toolchains/actions:link_actions",
     ],
-    args = ["-Wno-unused-parameter"],
+    args = [
+        "-Wno-strict-prototypes",
+        "-Wno-unused-parameter",
+    ],
     requires_any_of = [":rules_go_constraint"],
 )
 
@@ -253,25 +258,34 @@ cc_feature(
     feature_name = "supports_pic",
 )
 
-# Symlink to clangd, for user convenience.
+# TODO: b/419617754 - Anything that depends on this target is forcefully bound
+# to a specific clang package/tool version. Please avoid proliferation of this
+# pattern.
 copy_file(
     name = "copy_clangd",
-    src = select({
-        "@platforms//os:macos": "@llvm_toolchain_macos//:bin/clangd",
-        "//conditions:default": "@llvm_toolchain//:bin/clangd",
-    }),
+    src = "@llvm_toolchain//:bin/clangd",
     out = "clangd",
     allow_symlink = True,
 )
 
-# Symlink to clang-tidy, for user convenience.
+# TODO: b/419617754 - Anything that depends on this target is forcefully bound
+# to a specific clang package/tool version. Please avoid proliferation of this
+# pattern.
 copy_file(
     name = "copy_clang_tidy",
-    src = select({
-        "@platforms//os:macos": "@llvm_toolchain_macos//:clang-tidy",
-        "//conditions:default": "@llvm_toolchain//:clang-tidy",
-    }),
+    src = "@llvm_toolchain//:clang-tidy",
     out = "clang-tidy",
+    allow_symlink = True,
+    is_executable = True,
+)
+
+# TODO: b/419617754 - Anything that depends on this target is forcefully bound
+# to a specific clang package/tool version. Please avoid proliferation of this
+# pattern.
+copy_file(
+    name = "copy_addr2line",
+    src = "@llvm_toolchain//:bin/llvm-addr2line",
+    out = "addr2line",
     allow_symlink = True,
     is_executable = True,
 )
@@ -321,9 +335,9 @@ builtin_module_map(
             "@linux_sysroot//:usr-include",
         ],
         "@platforms//os:macos": [
-            "@llvm_toolchain_macos//:include-x86_64-unknown-linux-gnu-c++-v1",
-            "@llvm_toolchain_macos//:include-c++-v1",
-            "@llvm_toolchain_macos//:lib-clang-include",
+            "@llvm_toolchain//:include-x86_64-unknown-linux-gnu-c++-v1",
+            "@llvm_toolchain//:include-c++-v1",
+            "@llvm_toolchain//:lib-clang-include",
             "@macos_sysroot//:usr-include",
             "@macos_sysroot//:CoreFoundation.framework-Headers",
             "@macos_sysroot//:IOKit.framework-Headers",
@@ -338,7 +352,7 @@ alias(
     actual = select({
         "@platforms//os:linux": "@linux_sysroot//:sysroot",
         "@platforms//os:macos": "@macos_sysroot//:sysroot",
-        "//conditions:default": "//pw_build:empty_cc_library",
+        "//conditions:default": "@rules_cc//:empty_lib",
     }),
 )
 
@@ -347,7 +361,6 @@ cc_toolchain(
     args = select({
         "@platforms//os:linux": [
             ":linux_link_libs",
-            ":no_pie_for_go_flags",
             "@linux_sysroot//:sysroot",
         ],
         "@platforms//os:macos": [
@@ -357,32 +370,42 @@ cc_toolchain(
         ],
         "//conditions:default": [],
     }) + [
-        ":thread_safety_warnings",
         ":link_with_lld",
+        ":cgo_link_flags",
         "//pw_toolchain/cc/args:debugging",
         "//pw_toolchain/cc/args:reduced_size",
         "//pw_toolchain/cc/args:no_canonical_prefixes",
         "//pw_toolchain/cc/args:no_rtti",
+        "//pw_toolchain/cc/args:thread_safety_warnings",
         "//pw_toolchain/cc/args:wno_register",
         "//pw_toolchain/cc/args:wnon_virtual_dtor",
         "//pw_toolchain/cc/args:common_warnings",
         "//pw_toolchain/cc/args:color_diagnostics",
+        "//pw_toolchain/cc/args:warning_suppression_allowlist",
+    ] + (
+        ["//pw_toolchain/cc/args:internal_strict_warnings"] if pigweed_is_root() else []
+    ) + [
         # Must go after the general warnings that are enabled.
         ":silence_cgo_warnings",
     ] + select({
         "//pw_build:kythe": [":no_unknown_warning_option"],
         "//conditions:default": [],
-    }),
+    }) + [
+        # This should always go last so users can override previous choices.
+        "//pw_toolchain/cc/args:extra_toolchain_args",
+    ],
     enabled_features = [
-        "@rules_cc//cc/toolchains/args:experimental_replace_legacy_action_config_features",
         ":supports_pic",
         ":module_maps",
-        ":rules_go_unsupported_feature",
-        ":rules_rust_unsupported_feature",
+        "//pw_toolchain/cc/feature:rules_go_unsupported_feature",
+        "//pw_toolchain/cc/feature:rules_rust_unsupported_feature",
         "//pw_toolchain/cc/capability:compiler_is_clang",
         "//pw_toolchain/cc/capability:linker_is_clang",
     ] + select({
         ":asan_enabled": [":asan_feature"],
+        "//conditions:default": [],
+    }) + select({
+        ":msan_enabled": [":msan_feature"],
         "//conditions:default": [],
     }) + select({
         ":ubsan_enabled": [":ubsan_feature"],
@@ -397,24 +420,21 @@ cc_toolchain(
         "//pw_toolchain/cc:c++20_enabled": ["//pw_toolchain/cc/args:c++20_feature"],
         "//conditions:default": [],
     }) + select({
+        "//pw_toolchain/cc:c++23_enabled": ["//pw_toolchain/cc/args:c++23_feature"],
+        "//conditions:default": [],
+    }) + select({
         ":fuzztest_enabled": [":fuzztest_feature"],
         "//conditions:default": [],
-    }),
-    known_features = [
+    }) + [
         "@rules_cc//cc/toolchains/args:experimental_replace_legacy_action_config_features",
+    ],
+    known_features = [
         ":layering_check_feature",
-        ":module_maps",
         ":use_module_maps",
-        ":asan_feature",
-        ":ubsan_feature",
-        ":tsan_feature",
         ":verbose_compiler_output",
-        ":rules_rust_unsupported_feature",
-        ":supports_pic",
-        "//pw_toolchain/cc/args:c++17_feature",
-        "//pw_toolchain/cc/args:c++20_feature",
-        "//pw_toolchain/cc/capability:compiler_is_clang",
-        "//pw_toolchain/cc/capability:linker_is_clang",
+        "//pw_toolchain/cc/args:conversion_warnings_feature",
+        "//pw_toolchain/cc/args:ctad_warnings_feature",
+        "//pw_toolchain/cc/capability:known_toolchain_types",
     ],
     # TODO: https://pwbug.dev/219091175 - Remove this select (always set this to
     # builtin_module_map) once all Pigweed downstream projects are on Bazel 8.
@@ -422,10 +442,7 @@ cc_toolchain(
         ":layering_check_enabled": ":builtin_module_map",
         "//conditions:default": None,
     }),
-    tool_map = select({
-        "@platforms//os:macos": "@llvm_toolchain_macos//:all_tools",
-        "//conditions:default": "@llvm_toolchain//:all_tools",
-    }),
+    tool_map = "@llvm_toolchain//:all_tools",
 )
 
 toolchain(

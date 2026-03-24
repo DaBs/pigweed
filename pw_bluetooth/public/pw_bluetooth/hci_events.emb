@@ -49,6 +49,13 @@ enum LinkType:
   ESCO = 0x02
 
 
+enum AclConnectionMode:
+  [maximum_bits: 8]
+  ACTIVE = 0x00
+  HOLD   = 0x01
+  SNIFF  = 0x02
+
+
 enum EncryptionStatus:
   OFF                                = 0x00
   ON_WITH_E0_FOR_BREDR_OR_AES_FOR_LE = 0x01
@@ -60,6 +67,14 @@ enum LEAdvertisingDataStatus:
   COMPLETE             = 0b00
   INCOMPLETE           = 0b01
   INCOMPLETE_TRUNCATED = 0b10
+
+
+enum LEPeriodicAdvertisingDataStatus:
+  [maximum_bits: 8]
+  COMPLETE              = 0x00
+  INCOMPLETE            = 0x01
+  INCOMPLETE_TRUNCATED  = 0x02
+  FAILED_TO_RECEIVE_PDU = 0xFF
 
 
 enum LEDirectAddressType:
@@ -94,6 +109,14 @@ enum LEClockAccuracy:
   PPM_50  = 0x05
   PPM_30  = 0x06
   PPM_20  = 0x07
+
+
+enum LECteType:
+  [maximum_bits: 8]
+  AOA_CTE     = 0x00
+  AOD_CTE_1US = 0x01
+  AOD_CTE_2US = 0x02
+  NO_CTE      = 0xFF
 
 
 enum KeyType:
@@ -1336,10 +1359,27 @@ struct NumberOfCompletedPacketsEvent:
   let data_length = num_handles*NumberOfCompletedPacketsEventData.$size_in_bytes
   $next [+data_length]  NumberOfCompletedPacketsEventData[]  nocp_data
 
-# 7.7.20 Mode Change event
-# HCI_Mode_Change
-# TODO: b/265052417 - Definition needs to be added
 
+struct ModeChangeEvent:
+  -- 7.7.20 Mode Change event (v1.1)
+  -- HCI_Mode_Change
+  let hdr_size = hci.EventHeader.$size_in_bytes
+  0     [+hdr_size]  hci.EventHeader    header
+  $next [+1]         hci.StatusCode     status
+  $next [+2]         UInt               connection_handle
+    [requires: 0x0000 <= this <= 0x0EFF]
+
+  $next [+1]         AclConnectionMode  current_mode
+  $next [+2]         UInt               interval
+    -- Hold mode:
+    --   Number of baseband slots to wait
+    --   Hold interval = N * 0x625ms (1 Baseband slot)
+    --   Time range: 1.25ms to 40.9s
+    -- Sniff mode:
+    --   Number of baseband slots between sniff anchor points
+    --   Time between sniff anchor points = N * 0x625ms (1 Baseband slot)
+    --   Time range: 1.25ms to 40.9s
+    [requires: 0x0000 <= this <= 0xFFFE]
 
 # 7.7.21 Return Link Keys event
 # HCI_Return_Link_Keys
@@ -1523,7 +1563,18 @@ struct SynchronousConnectionCompleteEvent:
 
 # 7.7.37 Sniff Subrating event
 # HCI_Sniff_Subrating
-# TODO: b/265052417 - Definition needs to be added
+struct SniffSubratingEvent:
+  let hdr_size = hci.EventHeader.$size_in_bytes
+  0     [+hdr_size]  hci.EventHeader  header
+  $next [+1]         hci.StatusCode   status
+  $next [+2]         UInt             connection_handle
+    -- Only the lower 12-bits are meaningful.
+    [requires: 0x0000 <= this <= 0x0EFF]
+
+  $next [+2]         UInt             max_transmit_latency
+  $next [+2]         UInt             max_receive_latency
+  $next [+2]         UInt             minimum_remote_timeout
+  $next [+2]         UInt             minimum_local_timeout
 
 
 struct ExtendedInquiryResultEvent:
@@ -1669,6 +1720,8 @@ struct UserPasskeyNotificationEvent:
 struct LEMetaEvent:
   -- 7.7.65 LE Meta event
   let hdr_size = hci.EventHeader.$size_in_bytes
+  let event_fixed_size = $size_in_bytes-hdr_size
+  let return_parameters_size = header.parameter_total_size-event_fixed_size
   0        [+hdr_size]  hci.EventHeader     header
   hdr_size [+1]         UInt                subevent_code
   hdr_size [+1]         hci.LeSubEventCode  subevent_code_enum
@@ -1738,9 +1791,11 @@ struct LEAdvertisingReportSubevent:
     [requires: 0x01 <= this <= 0x0A]
 
   # The -1 at the end is sizeof(num_reports).
-  let reports_size = le_meta_event.header.parameter_total_size-(LEMetaEvent.$size_in_bytes-hci.EventHeader.$size_in_bytes)-1
+  let reports_size = le_meta_event.return_parameters_size-1
   $next [+reports_size]                UInt:8[reports_size]  reports
-    -- Since each report has a variable length, they are stored in a UInt:8 array.
+    -- NOTE(https://github.com/google/emboss/issues/230): Emboss currently
+    -- doesn't support variable length array elements and returns "error: Array
+    -- elements must be fixed size."
 
 
 struct LEConnectionUpdateCompleteSubevent:
@@ -1956,14 +2011,200 @@ struct LEExtendedAdvertisingReportSubevent:
     -- Number of separate reports in the event.
     [requires: 0x01 <= this <= 0x0A]
 
-  let reports_size = le_meta_event.header.parameter_total_size-(LEMetaEvent.$size_in_bytes-hci.EventHeader.$size_in_bytes)-1
+  # The -1 at the end is sizeof(num_reports).
+  let reports_size = le_meta_event.return_parameters_size-1
   $next [+reports_size]                UInt:8[reports_size]  reports
-    -- Since each report has a variable length, they are stored in a UInt:8 array.
+    -- NOTE(https://github.com/google/emboss/issues/230): Emboss currently
+    -- doesn't support variable length array elements and returns "error: Array
+    -- elements must be fixed size."
 
-# 7.7.65.14 LE Periodic Advertising Sync Established event
-# HCI_LE_Periodic_Advertising_Sync_Established
-# TODO: b/265052417 - Definition needs to be added
 
+struct LEPeriodicAdvertisingSyncEstablishedSubeventV1:
+  -- 7.7.65.14 LE Periodic Advertising Sync Established event (v6.1) (LE)
+  -- HCI_LE_Periodic_Advertising_Sync_Established
+  0     [+LEMetaEvent.$size_in_bytes]  LEMetaEvent        le_meta_event
+  $next [+1]                           hci.StatusCode     status
+  $next [+2]                           UInt               sync_handle
+    [requires: 0x0000 <= this <= 0x0EFF]
+
+  $next [+1]                           UInt               advertising_sid
+    [requires: 0x00 <= this <= 0x0F]
+
+  $next [+1]                           hci.LEAddressType  advertiser_address_type
+  $next [+hci.BdAddr.$size_in_bytes]   hci.BdAddr         advertiser_address
+  $next [+1]                           hci.LEPhy          advertiser_phy
+  $next [+2]                           UInt               periodic_advertising_interval
+    -- Time = N * 1.25 ms
+    -- Range: 7.5 ms to 81.91875 s
+    [requires: 0x0006 <= this <= 0xFFFF]
+
+  $next [+1]                           LEClockAccuracy    advertiser_clock_accuracy
+
+
+struct LEPeriodicAdvertisingSyncTransferReceivedSubeventV1:
+  -- 7.7.65.24 LE Periodic Advertising Sync Transfer Received event (v6.1) (LE)
+  -- HCI_LE_Periodic_Advertising_Sync_Transfer_Received
+  0     [+LEMetaEvent.$size_in_bytes]  LEMetaEvent        le_meta_event
+  $next [+1]                           hci.StatusCode     status
+  $next [+2]                           UInt               connection_handle
+    [requires: 0x0000 <= this <= 0x0EFF]
+
+  $next [+2]                           UInt               service_data
+  $next [+2]                           UInt               sync_handle
+    [requires: 0x0000 <= this <= 0x0EFF]
+
+  $next [+1]                           UInt               advertising_sid
+    [requires: 0x00 <= this <= 0x0F]
+
+  $next [+1]                           hci.LEAddressType  advertiser_address_type
+  $next [+hci.BdAddr.$size_in_bytes]   hci.BdAddr         advertiser_address
+  $next [+1]                           hci.LEPhy          advertiser_phy
+  $next [+2]                           UInt               periodic_advertising_interval
+    -- Time = N * 1.25 ms
+    -- Range: 7.5 ms to 81.91875 s
+    [requires: 0x0006 <= this <= 0xFFFF]
+
+  $next [+1]                           LEClockAccuracy    advertiser_clock_accuracy
+
+
+struct LEPeriodicAdvertisingSyncTransferReceivedSubeventV2:
+  -- 7.7.65.26 LE Periodic Advertising Sync Transfer Received event (v6.1) (LE)
+  -- HCI_LE_Periodic_Advertising_Sync_Transfer_Received
+  0     [+LEMetaEvent.$size_in_bytes]  LEMetaEvent        le_meta_event
+  $next [+1]                           hci.StatusCode     status
+  $next [+2]                           UInt               connection_handle
+    [requires: 0x0000 <= this <= 0x0EFF]
+
+  $next [+2]                           UInt               service_data
+  $next [+2]                           UInt               sync_handle
+    [requires: 0x0000 <= this <= 0x0EFF]
+
+  $next [+1]                           UInt               advertising_sid
+    [requires: 0x00 <= this <= 0x0F]
+
+  $next [+1]                           hci.LEAddressType  advertiser_address_type
+  $next [+hci.BdAddr.$size_in_bytes]   hci.BdAddr         advertiser_address
+  $next [+1]                           hci.LEPhy          advertiser_phy
+  $next [+2]                           UInt               periodic_advertising_interval
+    -- Time = N * 1.25 ms
+    -- Range: 7.5 ms to 81.91875 s
+    [requires: 0x0006 <= this <= 0xFFFF]
+
+  $next [+1]                           LEClockAccuracy    advertiser_clock_accuracy
+  $next [+1]                           UInt               num_subevents
+    [requires: 0x01 <= this <= 0x80]
+
+  $next [+1]                           UInt               subevent_interval
+    -- Time = N * 1.25 ms
+    -- Range: 7.5 ms to 318.75 ms
+    [requires: 0x06 <= this <= 0xFF]
+
+  $next [+1]                           UInt               response_slot_delay
+  $next [+1]                           UInt               response_slot_spacing
+    -- Time = N * 0.125 ms
+    -- Range: 0.25 ms to 31.875
+    [requires: 0x02 <= this <= 0xFF]
+
+
+struct LEPeriodicAdvertisingSyncEstablishedSubeventV2:
+  -- 7.7.65.14 LE Periodic Advertising Sync Established event v2 (v6.1) (LE)
+  -- HCI_LE_Periodic_Advertising_Sync_Established
+  0     [+LEMetaEvent.$size_in_bytes]  LEMetaEvent        le_meta_event
+  $next [+1]                           hci.StatusCode     status
+  $next [+2]                           UInt               sync_handle
+    [requires: 0x0000 <= this <= 0x0EFF]
+
+  $next [+1]                           UInt               advertising_sid
+    [requires: 0x00 <= this <= 0x0F]
+
+  $next [+1]                           hci.LEAddressType  advertiser_address_type
+  $next [+hci.BdAddr.$size_in_bytes]   hci.BdAddr         advertiser_address
+  $next [+1]                           hci.LEPhy          advertiser_phy
+  $next [+2]                           UInt               periodic_advertising_interval
+  $next [+1]                           LEClockAccuracy    advertiser_clock_accuracy
+  $next [+1]                           UInt               num_subevents
+    [requires: 0x00 <= this <= 0x80]
+
+  $next [+1]                           UInt               subevent_interval
+    -- Time = N * 1.25 ms
+    -- Time Range: 7.5 ms to 318.75 ms
+    [requires: this == 0x00 || (0x06 <= this <= 0xFF)]
+
+  $next [+1]                           UInt               response_slot_delay
+  $next [+1]                           UInt               response_slot_spacing
+    -- Time = N * 0.125 ms
+    -- Time Range: 0.25 ms to 31.875 ms
+    [requires: this == 0x00 || 0x02 <= this <= 0xFF]
+
+
+struct LEPeriodicAdvertisingReportSubeventV1:
+  -- 7.7.65.15 LE Periodic Advertising Report event (v6.1) (LE)
+  -- HCI_LE_Periodic_Advertising_Report
+  0     [+LEMetaEvent.$size_in_bytes]  LEMetaEvent                      le_meta_event
+  $next [+2]                           UInt                             sync_handle
+    [requires: 0x0000 <= this <= 0x0EFF]
+
+  $next [+1]                           Int                              tx_power
+  $next [+1]                           Int                              rssi
+    -- Units: dBm. A value of 0x7F means RSSI is not available.
+    [requires: -127 <= this <= 20 || this == 0x7F]
+
+  $next [+1]                           LECteType                        cte_type
+  $next [+1]                           LEPeriodicAdvertisingDataStatus  data_status
+  $next [+1]                           UInt                             data_length
+  $next [+data_length]                 UInt:8[data_length]              data
+
+
+struct LEPeriodicAdvertisingReportSubeventV2:
+  -- 7.7.65.15 LE Periodic Advertising Report event v2
+  -- HCI_LE_Periodic_Advertising_Report
+  0     [+LEMetaEvent.$size_in_bytes]  LEMetaEvent                      le_meta_event
+  $next [+2]                           UInt                             sync_handle
+    [requires: 0x0000 <= this <= 0x0EFF]
+
+  $next [+1]                           Int                              tx_power
+  $next [+1]                           Int                              rssi
+  $next [+1]                           LECteType                        cte_type
+  $next [+2]                           UInt                             periodic_event_counter
+  $next [+1]                           UInt                             subevent
+  $next [+1]                           LEPeriodicAdvertisingDataStatus  data_status
+  $next [+1]                           UInt                             data_length
+  $next [+data_length]                 UInt:8[data_length]              data
+
+
+struct LEPeriodicAdvertisingSyncLostSubevent:
+  -- 7.7.65.16 LE Periodic Advertising Sync Lost event (v6.1) (LE)
+  -- HCI_LE_Periodic_Advertising_Sync_Lost
+  0     [+LEMetaEvent.$size_in_bytes]  LEMetaEvent  le_meta_event
+  $next [+2]                           UInt         sync_handle
+    [requires: 0x0000 <= this <= 0x0EFF]
+
+
+enum BigFraming:
+  [maximum_bits: 8]
+  UNFRAMED = 0x00
+  FRAMED   = 0x01
+
+
+struct LEBigInfoAdvertisingReportSubevent:
+  -- 7.7.65.34 LE BIGInfo Advertising Report event (v6.1) (LE)
+  -- HCI_LE_BIGInfo_Advertising_Report
+  0     [+LEMetaEvent.$size_in_bytes]  LEMetaEvent  le_meta_event
+  $next [+2]                           UInt         sync_handle
+    [requires: 0x0000 <= this <= 0x0EFF]
+
+  $next [+1]                           UInt         num_bis
+  $next [+1]                           UInt         nse
+  $next [+2]                           UInt         iso_interval
+  $next [+1]                           UInt         bn
+  $next [+1]                           UInt         pto
+  $next [+1]                           UInt         irc
+  $next [+2]                           UInt         max_pdu
+  $next [+3]                           UInt         sdu_interval
+  $next [+2]                           UInt         max_sdu
+  $next [+1]                           IsoPhyType   phy
+  $next [+1]                           BigFraming   framing
+  $next [+1]                           UInt         encryption
 
 # 7.7.65.15 LE Periodic Advertising Report event
 # HCI_LE_Periodic_Advertising_Report
@@ -2250,3 +2491,28 @@ struct LEReadNumberOfSupportedAdvertisingSetsCommandCompleteEvent:
   $next [+1]         hci.StatusCode            status
   $next [+1]         UInt                      num_supported_advertising_sets
     [requires: 1 <= this <= 0xF0]
+
+
+struct LESetCIGParametersCommandCompleteEvent:
+  -- 7.7.14 Command Complete event (7.8.97 LE Set CIG Parameters command)
+  let hdr_size = hci.CommandCompleteEvent.$size_in_bytes
+  0     [+hdr_size]     hci.CommandCompleteEvent  command_complete
+  $next [+1]            hci.StatusCode            status
+  $next [+1]            UInt                      cig_id
+    [requires: 0x00 <= this <= 0xEF]
+
+  $next [+1]            UInt                      cis_count
+    [requires: 0x00 <= 0x1F]
+
+  $next [+cis_count*2]  UInt:16[cis_count]        connection_handles
+    -- [requires: 0x0000 <= each <= 0x0EFF]  # Can't currently be expressed
+
+
+struct LERejectCisRequestCommandCompleteEvent:
+  -- 7.7.14 Command Complete event (7.8.102 LE Reject CIS Request command)
+  let hdr_size = hci.CommandCompleteEvent.$size_in_bytes
+  0     [+hdr_size]  hci.CommandCompleteEvent  command_complete
+  $next [+1]         hci.StatusCode            status
+  $next [+2]         UInt                      connection_handle
+    -- Connection handle of the CIS connection. Only the lower 12-bits are meaningful.
+    [requires: 0x0000 <= this <= 0x0EFF]

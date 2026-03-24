@@ -38,12 +38,18 @@ class IsoDataChannel {
 
     // This method will be called when a packet is received for this connection.
     virtual void ReceiveInboundPacket(pw::span<const std::byte> packet) = 0;
+
+    // Returns the next outbound PDU fragment, or null if none is available.
+    // The packet must be fragmented to be no larger than
+    // `buffer_info().max_data_length()`.
+    virtual std::optional<DynamicByteBuffer> GetNextOutboundPdu() = 0;
   };
 
   static std::unique_ptr<IsoDataChannel> Create(
       const DataBufferInfo& buffer_info,
       CommandChannel* command_channel,
-      pw::bluetooth::Controller* hci);
+      pw::bluetooth::Controller* hci,
+      pw::bluetooth_sapphire::LeaseProvider& wake_lease_provider);
 
   // Register a new connection to receive all traffic destined for |handle| and
   // returns a value indicating success. If a connection already exists with
@@ -57,9 +63,17 @@ class IsoDataChannel {
   // if the connection was recognized and successfully unregistered.
   virtual bool UnregisterConnection(hci_spec::ConnectionHandle handle) = 0;
 
-  // Send data over the data channel. The packet must be fragmented to be no
-  // larger than `buffer_info().max_data_length()`.
-  virtual void SendData(DynamicByteBuffer packet) = 0;
+  // Called by IsoStream when a packet is available
+  virtual void TrySendPackets() = 0;
+
+  // Resets controller packet count for |handle| so that controller buffer
+  // credits can be reused. This must be called on the
+  // HCI_Disconnection_Complete event to notify IsoDataChannel that packets in
+  // the controller's buffer for |handle| have been flushed. See Core Spec
+  // v6.0, Vol 4, Part E, Secion 4.3. This must be called after
+  // |UnregisterConnection|.
+  virtual void ClearControllerPacketCount(
+      hci_spec::ConnectionHandle handle) = 0;
 
   // Get the buffer info for the data channel.
   virtual const DataBufferInfo& buffer_info() const = 0;

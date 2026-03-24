@@ -24,9 +24,7 @@ use crate::MessageWriter;
 // engine.
 pub enum Argument<'a> {
     String(&'a str),
-    Varint(i32),
-    Varint64(i64),
-    Char(u8),
+    Varint(i64),
 }
 
 impl<'a> From<&'a str> for Argument<'a> {
@@ -35,15 +33,47 @@ impl<'a> From<&'a str> for Argument<'a> {
     }
 }
 
+impl From<char> for Argument<'_> {
+    fn from(val: char) -> Self {
+        Self::Varint(val as i64)
+    }
+}
+
+impl From<u8> for Argument<'_> {
+    fn from(val: u8) -> Self {
+        Self::Varint(val as i64)
+    }
+}
+
 impl From<i32> for Argument<'_> {
     fn from(val: i32) -> Self {
-        Self::Varint(val)
+        Self::Varint(val as i64)
     }
 }
 
 impl From<u32> for Argument<'_> {
     fn from(val: u32) -> Self {
-        Self::Varint64(val as i64)
+        Self::Varint(val as i64)
+    }
+}
+
+// TODO: b/400978670 - investigate whether changing these
+// 64bit values to references saves space on 32bit systems.
+impl From<i64> for Argument<'_> {
+    fn from(val: i64) -> Self {
+        Self::Varint(val)
+    }
+}
+
+impl From<u64> for Argument<'_> {
+    fn from(val: u64) -> Self {
+        Self::Varint(val as i64)
+    }
+}
+
+impl From<usize> for Argument<'_> {
+    fn from(val: usize) -> Self {
+        Self::Varint(val as i64)
     }
 }
 
@@ -55,11 +85,6 @@ struct CursorMessageWriter<'a> {
 }
 
 impl MessageWriter for CursorMessageWriter<'_> {
-    fn new() -> Self {
-        // Ensure `tokenize_to_buffer` never calls `new()`.
-        unimplemented!();
-    }
-
     fn write(&mut self, data: &[u8]) -> Result<()> {
         self.cursor.write_all(data)
     }
@@ -82,7 +107,7 @@ pub fn encode_string<W: MessageWriter>(writer: &mut W, value: &str) -> Result<()
     let string_bytes = value.as_bytes();
 
     // Limit the encoding to the lesser of 127 or the available space in the buffer.
-    let max_len = min(MAX_STRING_LENGTH, writer.remaining() - 1);
+    let max_len = min(MAX_STRING_LENGTH, writer.remaining().saturating_sub(1));
     let overflow = max_len < string_bytes.len();
     let len = min(max_len, string_bytes.len());
 
@@ -112,14 +137,9 @@ fn tokenize_engine<W: crate::MessageWriter>(
             Argument::Varint(i) => {
                 let mut encode_buffer = [0u8; 10];
                 let len = i.varint_encode(&mut encode_buffer)?;
-                writer.write(&encode_buffer[..len])?;
+                let encoded_slice = encode_buffer.get(..len).ok_or(Error::OutOfRange)?;
+                writer.write(encoded_slice)?;
             }
-            Argument::Varint64(i) => {
-                let mut encode_buffer = [0u8; 10];
-                let len = i.varint_encode(&mut encode_buffer)?;
-                writer.write(&encode_buffer[..len])?;
-            }
-            Argument::Char(c) => writer.write(&[*c])?,
         }
     }
 
@@ -148,20 +168,34 @@ pub fn tokenize_to_buffer_no_args(buffer: &mut [u8], token: u32) -> Result<usize
 }
 
 #[inline(never)]
-pub fn tokenize_to_writer<W: crate::MessageWriter>(
+pub fn tokenize_to_default_writer<W: crate::MessageWriter + Default>(
     token: u32,
     args: &[Argument<'_>],
 ) -> Result<()> {
-    let mut writer = W::new();
-    tokenize_engine(&mut writer, token, args)?;
-    writer.finalize()
+    let mut writer = W::default();
+    match tokenize_engine(&mut writer, token, args) {
+        // Still finalize the writer even if the buffer
+        // is full so as to avoid loosing the entire
+        // log message.
+        Ok(_) | Err(Error::OutOfRange) => writer.finalize(),
+        Err(error) => Err(error),
+    }
 }
 
 #[inline(never)]
-pub fn tokenize_to_writer_no_args<W: crate::MessageWriter>(token: u32) -> Result<()> {
-    let mut writer = W::new();
-    writer.write(&token.to_le_bytes()[..])?;
-    writer.finalize()
+pub fn tokenize_to_default_writer_no_args<W: crate::MessageWriter + Default>(
+    token: u32,
+) -> Result<()> {
+    let mut writer = W::default();
+    let result = writer.write(&token.to_le_bytes()[..]);
+
+    match result {
+        // Still finalize the writer even if the buffer
+        // is full so as to avoid loosing the entire
+        // log message.
+        Ok(_) | Err(Error::OutOfRange) => writer.finalize(),
+        Err(error) => Err(error),
+    }
 }
 
 #[cfg(test)]

@@ -144,17 +144,18 @@ void Framework::EndCurrentTest() {
   current_test_ = nullptr;
 }
 
-FailureMessageAdapter Framework::CurrentTestSkip(int line) {
+FailureMessageAdapter Framework::CurrentTestSkip(const char* file, int line) {
   if (current_result_ == TestResult::kSuccess) {
     current_result_ = TestResult::kSkipped;
   }
   return CurrentTestExpectSimple(
-      "(test skipped)", "(test skipped)", line, true);
+      "(test skipped)", "(test skipped)", file, line, true);
 }
 
 FailureMessageAdapter Framework::CurrentTestExpectSimple(
     const char* expression,
     const char* evaluated_expression,
+    const char* file,
     int line,
     bool success) {
   PW_CHECK_NOTNULL(
@@ -175,6 +176,7 @@ FailureMessageAdapter Framework::CurrentTestExpectSimple(
   TestExpectation expectation = {
       .expression = expression,
       .evaluated_expression = evaluated_expression,
+      .file_name = file,
       .line_number = line,
       .success = success,
   };

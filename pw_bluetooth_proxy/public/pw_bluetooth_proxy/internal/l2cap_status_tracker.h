@@ -17,10 +17,10 @@
 #include <cstdint>
 #include <optional>
 
+#include "pw_bluetooth_proxy/internal/mutex.h"
 #include "pw_bluetooth_proxy/l2cap_status_delegate.h"
 #include "pw_containers/vector.h"
 #include "pw_sync/lock_annotations.h"
-#include "pw_sync/mutex.h"
 
 namespace pw::bluetooth::proxy {
 
@@ -47,6 +47,9 @@ class L2capStatusTracker {
   void HandleConnectionComplete(const L2capChannelConnectionInfo& info)
       PW_LOCKS_EXCLUDED(mutex_);
 
+  void HandleConfigurationChanged(const L2capChannelConfigurationInfo& info)
+      PW_LOCKS_EXCLUDED(mutex_);
+
   void HandleAclDisconnectionComplete(uint16_t connection_handle)
       PW_LOCKS_EXCLUDED(mutex_);
 
@@ -62,6 +65,10 @@ class L2capStatusTracker {
 
  private:
   void DeliverPendingConnectionComplete(const L2capChannelConnectionInfo& info)
+      PW_EXCLUSIVE_LOCKS_REQUIRED(mutex_);
+
+  void DeliverPendingConfigurationComplete(
+      const L2capChannelConfigurationInfo& info)
       PW_EXCLUSIVE_LOCKS_REQUIRED(mutex_);
 
   void DeliverPendingAclDisconnectionComplete(uint16_t connection_handle)
@@ -83,12 +90,14 @@ class L2capStatusTracker {
 
   std::optional<L2capChannelConnectionInfo> pending_connection_complete_
       PW_GUARDED_BY(mutex_);
+  std::optional<L2capChannelConfigurationInfo> pending_configuration_complete_
+      PW_GUARDED_BY(mutex_);
   std::optional<uint16_t> pending_acl_disconnection_complete_
       PW_GUARDED_BY(mutex_);
   std::optional<DisconnectParams> pending_disconnection_complete_
       PW_GUARDED_BY(mutex_);
 
-  sync::Mutex mutex_;
+  internal::Mutex mutex_;
 };
 
 }  // namespace pw::bluetooth::proxy

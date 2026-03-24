@@ -39,12 +39,6 @@ Quickstart
            }),
          )
 
-      .. note::
-
-         This assumes that your Bazel ``WORKSPACE`` has a `repository
-         <https://bazel.build/concepts/build-ref#repositories>`_ named
-         ``@pigweed`` that points to the upstream Pigweed repository.
-
       If creating your own implementation, depend on the virtual interface:
 
       .. code-block:: python
@@ -68,11 +62,37 @@ Write some C++ code to interact with an I2C device:
 Guides
 ------
 
+API overview
+============
+* :cc:`pw::i2c::Address` is a helper class for representing I2C
+  addresses.
+* :cc:`pw::i2c::Message` is a helper class for representing individual
+  read and write components within a single i2c transaction.
+* :cc:`pw::i2c::Initiator` is the common, base driver interface for
+  communicating with I2C devices.
+* :cc:`pw::i2c::Device` is a helper class that takes a reference
+  to an :cc:`pw::i2c::Initiator` instance and provides easier access
+  to a single I2C device.
+* :cc:`pw::i2c::RegisterDevice` extends :cc:`pw::i2c::Device`
+  for easier access to a single I2C device's registers.
+* :cc:`pw::i2c::I2cService` is a service for performing I2C
+  transactions over RPC.
+* :cc:`pw::i2c::MockMessageInitiator` is a generic mocked backend for
+  :cc:`pw::i2c::Initiator`. It accepts multiple
+  :cc:`pw::i2c::MockMessageTransaction`, each of which is mock
+  transmitted as one bus transaction.
+* :cc:`pw::i2c::MockMessageTransaction` represents a test i2c
+  transaction. Each transaction consists of an arbitrary sequence of
+  :cc:`pw::i2c::MockMessage` objects that are transmitted in one bus
+  operation.
+* :cc:`pw::i2c::MockMessage` represents one read or write element of
+  an i2c transaction.
+
 .. _module-pw_i2c-guides-mock:
 
 Mock I2C transactions
 =====================
-See the example in :cpp:class:`pw::i2c::MockInitiator`.
+See the example in :cc:`pw::i2c::MockInitiator`.
 
 .. _module-pw_i2c-guides-registerdevice:
 
@@ -121,9 +141,8 @@ Configure and read an I2C device's registers
 
    Status Device::Enable() {
      // Set port 0 as inputs for buttons (1=input)
-     device_.WriteRegister8(Register::ConfigPort0,
-                            0xff,
-                            pw::chrono::SystemClock::for_at_least(10ms));
+     device_.WriteRegister8(
+         Register::ConfigPort0, 0xff, pw::chrono::SystemClock::for_at_least(10ms));
      // Select pullup resistors for button input (1=pullup)
      device_.WriteRegister8(Register::PullUpDownSelectionPort0,
                             0xff,
@@ -152,9 +171,7 @@ files for real ``pw::i2c::RegisterDevice`` usage:
 
 Access an I2C device's registers over RPC
 =========================================
-.. TODO: b/331292234 - Make this content less confusing and more helpful.
-
-:cpp:class:`pw::i2c::I2cService` enables accessing an I2C device's registers
+:cc:`pw::i2c::I2cService` enables accessing an I2C device's registers
 over RPC.
 
 Using :ref:`module-pw_console`, invoke the service to perform an I2C read:
@@ -199,3 +216,25 @@ I2C responders that require multi-byte access may expect a specific endianness.
 The order of bytes specified in the bytes field will match the order of bytes
 sent or received on the bus. The maximum supported value for multi-byte access
 is 4 bytes.
+
+.. note::
+   :cc:`pw::i2c::I2cService` currently only supports 7-bit i2c
+   addressing.
+
+Adding a Responder Backend
+==========================
+To add a new backend for the ``Responder`` API, you must provide a concrete
+subclass of ``pw::i2c::Responder``.
+
+A critical part of creating a new backend is testing. ``pw_i2c`` includes a
+generic test suite in ``pw_i2c/responder_test.cc`` that can be used to validate
+your implementation. To enable this for your backend, you must:
+
+1. **Implement the native test interface:** Create a class named
+   ``NativeResponderTest`` that inherits from
+   ``pw::i2c::test::NativeResponderTestInterface`` (from
+   ``pw_i2c/responder_test_interface.h``).
+
+2. **Configure the test build:** Set the ``pw_i2c_responder_test`` build
+   target to use your new backend. The test suite will then run against your
+   implementation to ensure it conforms to the API contract.

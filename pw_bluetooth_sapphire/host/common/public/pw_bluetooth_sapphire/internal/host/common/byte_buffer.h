@@ -19,6 +19,7 @@
 #include <pw_assert/check.h>
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <limits>
@@ -29,6 +30,9 @@
 #include <type_traits>
 #include <vector>
 
+#include "pw_allocator/allocator.h"
+#include "pw_allocator/libc_allocator.h"
+#include "pw_allocator/unique_ptr.h"
 #include "pw_bluetooth_sapphire/internal/host/common/macros.h"
 #include "pw_span/span.h"
 
@@ -53,6 +57,9 @@ class ByteBuffer {
 
   // Returns the number of bytes contained in this buffer.
   virtual size_t size() const = 0;
+
+  // Returns true if size() == 0, false otherwise
+  bool empty() const { return size() == 0; }
 
   // Returns a BufferView that points to the region of this buffer starting at
   // |pos| of |size| bytes. If |size| is larger than the size of this BufferView
@@ -269,6 +276,9 @@ class ByteBuffer {
     if (size() != other.size()) {
       return false;
     }
+    if (empty()) {
+      return other.empty();
+    }
     return (memcmp(data(), other.data(), size()) == 0);
   }
 
@@ -442,6 +452,9 @@ class StaticByteBuffer : public MutableByteBuffer {
   uint8_t* mutable_data() override { return buffer_.data(); }
   void Fill(uint8_t value) override { buffer_.fill(value); }
 
+  // `constexpr virtual` is a C++20 feature, so no constexpr `size()` yet.
+  constexpr size_t static_size() const { return buffer_.size(); }
+
  private:
   // Value-initialize to 0.
   std::array<uint8_t, BufferSize> buffer_{};
@@ -467,17 +480,25 @@ class DynamicByteBuffer : public MutableByteBuffer {
 
   // Allocates a new buffer with |buffer_size| bytes. The buffer bytes will be
   // initialized to 0x00.
-  explicit DynamicByteBuffer(size_t buffer_size);
+  explicit DynamicByteBuffer(
+      size_t buffer_size,
+      pw::Allocator& allocator = pw::allocator::GetLibCAllocator());
 
   // Copies the contents of |buffer|.
-  DynamicByteBuffer(const DynamicByteBuffer& buffer);
-  explicit DynamicByteBuffer(const ByteBuffer& buffer);
-  explicit DynamicByteBuffer(const std::string& buffer);
+  DynamicByteBuffer(
+      const DynamicByteBuffer& buffer,
+      pw::Allocator& allocator = pw::allocator::GetLibCAllocator());
+  explicit DynamicByteBuffer(
+      const ByteBuffer& buffer,
+      pw::Allocator& allocator = pw::allocator::GetLibCAllocator());
+  explicit DynamicByteBuffer(
+      const std::string& buffer,
+      pw::Allocator& allocator = pw::allocator::GetLibCAllocator());
 
   // Takes ownership of |buffer| and avoids allocating a new buffer. Since this
   // constructor performs a simple assignment, the caller must make sure that
   // the buffer pointed to by |buffer| actually contains |buffer_size| bytes.
-  DynamicByteBuffer(size_t buffer_size, std::unique_ptr<uint8_t[]> buffer);
+  DynamicByteBuffer(size_t buffer_size, pw::UniquePtr<std::byte[]> buffer);
 
   // Move constructor and assignment operator
   DynamicByteBuffer(DynamicByteBuffer&& other);
@@ -500,12 +521,12 @@ class DynamicByteBuffer : public MutableByteBuffer {
   // the new buffer. This method is meant only to grow the underlying buffer to
   // fit in more data. Returns false if the new buffer size is less than the
   // current buffer size.
-  bool expand(size_t new_buffer_size);
+  bool expand(size_t new_buffer_size,
+              pw::Allocator& allocator = pw::allocator::GetLibCAllocator());
 
  private:
   // Pointer to the underlying buffer, which is owned and managed by us.
-  size_t buffer_size_ = 0u;
-  std::unique_ptr<uint8_t[]> buffer_;
+  pw::UniquePtr<std::byte[]> buffer_;
 };
 
 // A ByteBuffer that does not own the memory that it points to but rather

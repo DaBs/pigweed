@@ -28,10 +28,13 @@ import dev.pigweed.pw_rpc.internal.Packet.RpcPacket;
 import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.junit.runners.JUnit4;
 import org.mockito.Mock;
 import org.mockito.junit.MockitoJUnit;
 import org.mockito.junit.MockitoRule;
 
+@RunWith(JUnit4.class)
 public final class StreamObserverMethodClientTest {
   private static final Service SERVICE = new Service("pw.rpc.test1.TheTestService",
       Service.unaryMethod("SomeUnary", SomeMessage.parser(), AnotherMessage.parser()),
@@ -42,6 +45,8 @@ public final class StreamObserverMethodClientTest {
       Service.bidirectionalStreamingMethod(
           "SomeBidirectionalStreaming", SomeMessage.parser(), AnotherMessage.parser()));
 
+  private static final int DEFAULT_CALL_ID = 1;
+
   @Rule public final MockitoRule mockito = MockitoJUnit.rule();
 
   @Mock private StreamObserver<MessageLite> defaultObserver;
@@ -51,15 +56,17 @@ public final class StreamObserverMethodClientTest {
   // Wrap Channel.Output since channelOutput will be null when the channel is initialized.
   private final Channel channel = new Channel(1, bytes -> channelOutput.send(bytes));
 
-  private final PendingRpc unary_rpc = PendingRpc.create(channel, SERVICE.method("SomeUnary"));
+  private final PendingRpc unary_rpc =
+      PendingRpc.create(channel, SERVICE.method("SomeUnary"), DEFAULT_CALL_ID);
   private final PendingRpc server_streaming_rpc =
-      PendingRpc.create(channel, SERVICE.method("SomeServerStreaming"));
+      PendingRpc.create(channel, SERVICE.method("SomeServerStreaming"), DEFAULT_CALL_ID);
   private final PendingRpc client_streaming_rpc =
-      PendingRpc.create(channel, SERVICE.method("SomeClientStreaming"));
+      PendingRpc.create(channel, SERVICE.method("SomeClientStreaming"), DEFAULT_CALL_ID);
   private final PendingRpc bidirectional_streaming_rpc =
-      PendingRpc.create(channel, SERVICE.method("SomeBidirectionalStreaming"));
+      PendingRpc.create(channel, SERVICE.method("SomeBidirectionalStreaming"), DEFAULT_CALL_ID);
 
-  private final Client client = Client.create(ImmutableList.of(channel), ImmutableList.of(SERVICE));
+  private final Client client =
+      Client.createMultiCall(ImmutableList.of(channel), ImmutableList.of(SERVICE));
   private MethodClient unaryMethodClient;
   private MethodClient serverStreamingMethodClient;
   private MethodClient clientStreamingMethodClient;
@@ -242,6 +249,7 @@ public final class StreamObserverMethodClientTest {
   private static byte[] responsePacket(PendingRpc rpc, MessageLite payload) {
     return RpcPacket.newBuilder()
         .setChannelId(1)
+        .setCallId(Endpoint.FIRST_CALL_ID)
         .setServiceId(rpc.service().id())
         .setMethodId(rpc.method().id())
         .setType(PacketType.RESPONSE)

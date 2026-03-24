@@ -16,6 +16,8 @@
 
 #include <pw_assert/check.h>
 
+#include <numeric>
+
 #include "pw_bluetooth/hci_common.emb.h"
 #include "pw_bluetooth/hci_data.emb.h"
 #include "pw_bluetooth_sapphire/internal/host/common/byte_buffer.h"
@@ -32,16 +34,10 @@ namespace android_hci = bt::hci_spec::vendor::android;
 namespace android_emb = pw::bluetooth::vendor::android_hci;
 
 // Generates a blob of data that is unique to the size and starting value
-std::unique_ptr<std::vector<uint8_t>> GenDataBlob(size_t size,
-                                                  uint8_t starting_value) {
-  auto result = std::make_unique<std::vector<uint8_t>>(size);
-  result->resize(size);
-  uint8_t next_value = starting_value;
-  for (auto& elem : *result) {
-    elem = next_value;
-    next_value += 7;
-  }
-  return result;
+std::vector<uint8_t> GenDataBlob(size_t size, uint8_t starting_value) {
+  std::vector<uint8_t> buffer(size);
+  std::iota(buffer.begin(), buffer.end(), starting_value);
+  return buffer;
 }
 
 DynamicByteBuffer AcceptConnectionRequestPacket(DeviceAddress address) {
@@ -84,6 +80,12 @@ DynamicByteBuffer CommandCompletePacket(
       ));
 }
 
+DynamicByteBuffer CommandCompletePacket(
+    pw::bluetooth::emboss::OpCode opcode,
+    pw::bluetooth::emboss::StatusCode status) {
+  return CommandCompletePacket(static_cast<hci_spec::OpCode>(opcode), status);
+}
+
 DynamicByteBuffer CommandStatusPacket(
     hci_spec::OpCode op_code,
     pw::bluetooth::emboss::StatusCode status_code,
@@ -96,6 +98,14 @@ DynamicByteBuffer CommandStatusPacket(
       LowerBits(op_code),  // Command_Opcode
       UpperBits(op_code)   // Command_Opcode
       ));
+}
+
+DynamicByteBuffer CommandStatusPacket(
+    pw::bluetooth::emboss::OpCode op_code,
+    pw::bluetooth::emboss::StatusCode status_code,
+    uint8_t num_packets) {
+  return CommandStatusPacket(
+      static_cast<hci_spec::OpCode>(op_code), status_code, num_packets);
 }
 
 DynamicByteBuffer ConnectionCompletePacket(
@@ -557,6 +567,172 @@ DynamicByteBuffer LERejectCisRequestCommandPacket(
   );
 }
 
+DynamicByteBuffer LESetCIGParametersCommandPacket(
+    uint8_t cig_id,
+    uint32_t sdu_interval_c_to_p,
+    uint32_t sdu_interval_p_to_c,
+    pw::bluetooth::emboss::LESleepClockAccuracyRange worst_case_sca,
+    pw::bluetooth::emboss::LECISPacking packing,
+    pw::bluetooth::emboss::LECISFraming framing,
+    uint16_t max_transport_latency_c_to_p,
+    uint16_t max_transport_latency_p_to_c,
+    pw::span<const bt::iso::CisConfigParams> cis_params) {
+  constexpr size_t kStaticSize = 18;
+  constexpr size_t kSizePerCis = 9;
+  constexpr size_t kCisCountMax = 0xEF;
+
+  constexpr uint8_t kAllPhys = 0b00000111;
+  constexpr uint8_t kRetransmissionCount = 2;
+
+  auto packet_size = kStaticSize + kSizePerCis * cis_params.size();
+  auto params_size =
+      packet_size -
+      pw::bluetooth::emboss::CommandHeader::IntrinsicSizeInBytes();
+
+  PW_CHECK(cis_params.size() <= kCisCountMax);
+  PW_CHECK(params_size <= std::numeric_limits<uint8_t>::max());
+
+  auto sdu_interval_c_to_p_bytes = ToBytes(sdu_interval_c_to_p);
+  auto sdu_interval_p_to_c_bytes = ToBytes(sdu_interval_p_to_c);
+
+  StaticByteBuffer static_part(
+      LowerBits(hci_spec::kLESetCIGParameters),  // Command Code ...
+      UpperBits(hci_spec::kLESetCIGParameters),  //
+      static_cast<uint8_t>(params_size),         // Params size
+      cig_id,                                    // CIG Id
+      sdu_interval_c_to_p_bytes[0],              // SDU interval ...
+      sdu_interval_c_to_p_bytes[1],              // Central -> Peripheral ...
+      sdu_interval_c_to_p_bytes[2],              //
+      sdu_interval_p_to_c_bytes[0],              // SDU Interval ...
+      sdu_interval_p_to_c_bytes[1],              // Peripheral -> Central ...
+      sdu_interval_p_to_c_bytes[2],              //
+      static_cast<uint8_t>(worst_case_sca),      // Worst-case clock accuracy
+      static_cast<uint8_t>(packing),             // CIS packing
+      static_cast<uint8_t>(framing),             // CIS framing
+      LowerBits(max_transport_latency_c_to_p),   // Max latency ...
+      UpperBits(max_transport_latency_c_to_p),   // Central -> Peripheral
+      LowerBits(max_transport_latency_p_to_c),   // Max latency ...
+      UpperBits(max_transport_latency_p_to_c),   // Peripheral -> Central
+      static_cast<uint8_t>(cis_params.size())    // CIS count
+  );
+
+  static_assert(static_part.static_size() == kStaticSize);
+
+  DynamicByteBuffer packet(packet_size);
+
+  size_t next_cis_pos = kStaticSize;
+  static_part.Copy(&packet);
+  for (const auto& cis_param : cis_params) {
+    StaticByteBuffer next_cis(
+        cis_param.cis_id,                     // CIS ID
+        LowerBits(cis_param.max_sdu_c_to_p),  // Max SDU size ...
+        UpperBits(cis_param.max_sdu_c_to_p),  // Central -> Peripheral
+        LowerBits(cis_param.max_sdu_p_to_c),  // Max SDU size ...
+        UpperBits(cis_param.max_sdu_p_to_c),  // Peripheral -> Central
+        kAllPhys,                             // Allow all PHYs C -> P
+        kAllPhys,                             // Allow all PHYs P -> C
+        kRetransmissionCount,                 // Retransmission count C -> P
+        kRetransmissionCount                  // Retransmission count P -> C
+    );
+
+    static_assert(next_cis.static_size() == kSizePerCis);
+    auto dest = packet.mutable_view(next_cis_pos, kSizePerCis);
+    next_cis.Copy(&dest);
+    next_cis_pos += kSizePerCis;
+  }
+
+  PW_CHECK(next_cis_pos == packet.size());
+  return packet;
+}
+
+DynamicByteBuffer LESetCIGParametersCompletePacket(
+    uint8_t cig_id,
+    const std::vector<hci_spec::ConnectionHandle>& cis_handles,
+    pw::bluetooth::emboss::StatusCode status) {
+  constexpr size_t kStaticSize = 8;
+  constexpr size_t kSizePerCis = 2;
+  constexpr size_t kCisCountMax = 0xEF;
+  constexpr uint8_t kNumHciCommandPacketsAllowed = 240;
+
+  auto packet_size = kStaticSize + kSizePerCis * cis_handles.size();
+  auto params_size =
+      packet_size - pw::bluetooth::emboss::EventHeader::IntrinsicSizeInBytes();
+
+  PW_CHECK(cis_handles.size() <= kCisCountMax);
+  PW_CHECK(params_size <= std::numeric_limits<uint8_t>::max());
+  StaticByteBuffer static_part(
+      hci_spec::kCommandCompleteEventCode,       // Event code
+      params_size,                               // Params size
+      kNumHciCommandPacketsAllowed,              // Command packets allowed
+      LowerBits(hci_spec::kLESetCIGParameters),  // Command code ...
+      UpperBits(hci_spec::kLESetCIGParameters),  //
+      status,                                    // Status code
+      cig_id,                                    // CIG ID
+      cis_handles.size()                         // CIS count
+  );
+
+  static_assert(kStaticSize ==
+                pw::bluetooth::emboss::LESetCIGParametersCommandCompleteEvent::
+                    MinSizeInBytes());
+  static_assert(static_part.static_size() == kStaticSize);
+  DynamicByteBuffer packet(packet_size);
+
+  size_t next_cis_pos = kStaticSize;
+  static_part.Copy(&packet, 0, next_cis_pos);
+  for (const auto& cis_handle : cis_handles) {
+    StaticByteBuffer next_cis(LowerBits(cis_handle), UpperBits(cis_handle));
+
+    static_assert(next_cis.static_size() == kSizePerCis);
+    auto dest = packet.mutable_view(next_cis_pos, kSizePerCis);
+    next_cis.Copy(&dest);
+    next_cis_pos += kSizePerCis;
+  }
+
+  return packet;
+}
+
+DynamicByteBuffer LECreateCISCommandPacket(
+    pw::span<const CreateCisHandles> cis_handles) {
+  constexpr size_t kStaticSize = 4;
+  constexpr size_t kSizePerCis = 4;
+  constexpr size_t kCisCountMax = 0xEF;
+
+  auto packet_size = kStaticSize + kSizePerCis * cis_handles.size();
+  auto params_size =
+      packet_size -
+      pw::bluetooth::emboss::CommandHeader::IntrinsicSizeInBytes();
+
+  PW_CHECK(cis_handles.size() <= kCisCountMax);
+  PW_CHECK(params_size <= std::numeric_limits<uint8_t>::max());
+  StaticByteBuffer static_part(
+      LowerBits(hci_spec::kLECreateCIS),        // Command Code ...
+      UpperBits(hci_spec::kLECreateCIS),        //
+      static_cast<uint8_t>(params_size),        // Params size
+      static_cast<uint8_t>(cis_handles.size())  // CIS Count
+  );
+
+  static_assert(kStaticSize ==
+                pw::bluetooth::emboss::LECreateCISCommand::MinSizeInBytes());
+  static_assert(static_part.static_size() == kStaticSize);
+  DynamicByteBuffer packet(packet_size);
+
+  size_t next_cis_pos = kStaticSize;
+  static_part.Copy(&packet, 0, next_cis_pos);
+  for (const auto& handles : cis_handles) {
+    StaticByteBuffer next_cis(LowerBits(handles.cis_handle),   // CIS handle ...
+                              UpperBits(handles.cis_handle),   //
+                              LowerBits(handles.acl_handle),   // ACL handle ...
+                              UpperBits(handles.acl_handle));  //
+
+    static_assert(next_cis.static_size() == kSizePerCis);
+    auto dest = packet.mutable_view(next_cis_pos, kSizePerCis);
+    next_cis.Copy(&dest);
+    next_cis_pos += kSizePerCis;
+  }
+
+  return packet;
+}
+
 DynamicByteBuffer LERequestPeerScaCompletePacket(
     hci_spec::ConnectionHandle conn,
     pw::bluetooth::emboss::LESleepClockAccuracyRange sca) {
@@ -671,6 +847,307 @@ DynamicByteBuffer LERequestPeerScaPacket(hci_spec::ConnectionHandle conn) {
       hci_spec::kLERequestPeerSCA);
   auto view = packet.view_t();
   view.connection_handle().Write(conn);
+  return DynamicByteBuffer(packet.data());
+}
+
+DynamicByteBuffer LEPeriodicAdvertisingCreateSyncPacket(
+    DeviceAddress address,
+    uint8_t sid,
+    uint16_t sync_timeout,
+    bool filter_duplicates,
+    bool use_periodic_advertiser_list) {
+  auto packet = hci::CommandPacket::New<
+      pw::bluetooth::emboss::LEPeriodicAdvertisingCreateSyncCommandWriter>(
+      pw::bluetooth::emboss::OpCode::LE_PERIODIC_ADVERTISING_CREATE_SYNC);
+  auto view = packet.view_t();
+  view.options().use_periodic_advertiser_list().Write(
+      use_periodic_advertiser_list);
+  view.options().enable_duplicate_filtering().Write(filter_duplicates);
+  view.advertising_sid().Write(sid);
+
+  pw::bluetooth::emboss::LEPeerAddressTypeNoAnon address_type =
+      DeviceAddress::DeviceAddrToLePeerAddrNoAnon(address.type());
+
+  view.advertiser_address_type().Write(address_type);
+  view.advertiser_address().CopyFrom(address.value().view());
+  view.skip().Write(0);
+  view.sync_timeout().Write(sync_timeout);
+  view.sync_cte_type().BackingStorage().WriteUInt(0);
+  return DynamicByteBuffer(packet.data());
+}
+
+DynamicByteBuffer LEPeriodicAdvertisingCreateSyncCancelPacket() {
+  auto packet = hci::CommandPacket::New<
+      pw::bluetooth::emboss::
+          LEPeriodicAdvertisingCreateSyncCancelCommandWriter>(
+      pw::bluetooth::emboss::OpCode::
+          LE_PERIODIC_ADVERTISING_CREATE_SYNC_CANCEL);
+  return DynamicByteBuffer(packet.data());
+}
+
+DynamicByteBuffer LEAddDeviceToPeriodicAdvertiserListPacket(
+    DeviceAddress address, uint8_t sid) {
+  auto packet = hci::CommandPacket::New<
+      pw::bluetooth::emboss::LEAddDeviceToPeriodicAdvertiserListCommandWriter>(
+      hci_spec::kLEAddDeviceToPeriodicAdvertiserList);
+  auto view = packet.view_t();
+  pw::bluetooth::emboss::LEPeerAddressTypeNoAnon address_type =
+      DeviceAddress::DeviceAddrToLePeerAddrNoAnon(address.type());
+  view.advertiser_address_type().Write(address_type);
+  view.advertiser_address().CopyFrom(address.value().view());
+  view.advertising_sid().Write(sid);
+  return DynamicByteBuffer(packet.data());
+}
+
+DynamicByteBuffer LERemoveDeviceFromPeriodicAdvertiserListPacket(
+    DeviceAddress address, uint8_t sid) {
+  auto packet = hci::CommandPacket::New<
+      pw::bluetooth::emboss::
+          LERemoveDeviceFromPeriodicAdvertiserListCommandWriter>(
+      hci_spec::kLERemoveDeviceFromPeriodicAdvertiserList);
+  auto view = packet.view_t();
+  pw::bluetooth::emboss::LEPeerAddressTypeNoAnon address_type =
+      DeviceAddress::DeviceAddrToLePeerAddrNoAnon(address.type());
+  view.advertiser_address_type().Write(address_type);
+  view.advertiser_address().CopyFrom(address.value().view());
+  view.advertising_sid().Write(sid);
+  return DynamicByteBuffer(packet.data());
+}
+
+DynamicByteBuffer LEPeriodicAdvertisingSyncEstablishedEventPacketV1(
+    pw::bluetooth::emboss::StatusCode status,
+    hci_spec::SyncHandle sync_handle,
+    uint8_t advertising_sid,
+    DeviceAddress address,
+    pw::bluetooth::emboss::LEPhy phy,
+    uint16_t interval,
+    pw::bluetooth::emboss::LEClockAccuracy clock_accuracy) {
+  auto packet = hci::EventPacket::New<
+      pw::bluetooth::emboss::
+          LEPeriodicAdvertisingSyncEstablishedSubeventV1Writer>(
+      hci_spec::kLEMetaEventCode);
+  auto view = packet.view_t();
+  view.le_meta_event().subevent_code_enum().Write(
+      pw::bluetooth::emboss::LeSubEventCode::
+          PERIODIC_ADVERTISING_SYNC_ESTABLISHED);
+  view.status().Write(status);
+  view.sync_handle().Write(sync_handle);
+  view.advertising_sid().Write(advertising_sid);
+  pw::bluetooth::emboss::LEAddressType address_type =
+      DeviceAddress::DeviceAddrToLeAddr(address.type());
+  view.advertiser_address_type().Write(address_type);
+  view.advertiser_address().CopyFrom(address.value().view());
+  view.advertiser_phy().Write(phy);
+  view.periodic_advertising_interval().Write(interval);
+  view.advertiser_clock_accuracy().Write(clock_accuracy);
+  return DynamicByteBuffer(packet.data());
+}
+
+DynamicByteBuffer LEPeriodicAdvertisingSyncEstablishedEventPacketV2(
+    pw::bluetooth::emboss::StatusCode status,
+    hci_spec::SyncHandle sync_handle,
+    uint8_t advertising_sid,
+    DeviceAddress address,
+    pw::bluetooth::emboss::LEPhy phy,
+    uint16_t interval,
+    pw::bluetooth::emboss::LEClockAccuracy clock_accuracy,
+    uint8_t num_subevents) {
+  auto packet = hci::EventPacket::New<
+      pw::bluetooth::emboss::
+          LEPeriodicAdvertisingSyncEstablishedSubeventV2Writer>(
+      hci_spec::kLEMetaEventCode);
+  auto view = packet.view_t();
+  view.le_meta_event().subevent_code_enum().Write(
+      pw::bluetooth::emboss::LeSubEventCode::
+          PERIODIC_ADVERTISING_SYNC_ESTABLISHED_V2);
+  view.status().Write(status);
+  view.sync_handle().Write(sync_handle);
+  view.advertising_sid().Write(advertising_sid);
+  pw::bluetooth::emboss::LEAddressType address_type =
+      DeviceAddress::DeviceAddrToLeAddr(address.type());
+  view.advertiser_address_type().Write(address_type);
+  view.advertiser_address().CopyFrom(address.value().view());
+  view.advertiser_phy().Write(phy);
+  view.periodic_advertising_interval().Write(interval);
+  view.advertiser_clock_accuracy().Write(clock_accuracy);
+  view.num_subevents().Write(num_subevents);
+  return DynamicByteBuffer(packet.data());
+}
+
+DynamicByteBuffer LEPeriodicAdvertisingReportEventPacketV1(
+    hci_spec::SyncHandle sync_handle,
+    pw::bluetooth::emboss::LEPeriodicAdvertisingDataStatus data_status,
+    const DynamicByteBuffer& data) {
+  const size_t subevent_size =
+      pw::bluetooth::emboss::LEPeriodicAdvertisingReportSubeventV1View::
+          MinSizeInBytes()
+              .Read() +
+      data.size();
+  auto packet = hci::EventPacket::New<
+      pw::bluetooth::emboss::LEPeriodicAdvertisingReportSubeventV1Writer>(
+      hci_spec::kLEMetaEventCode, subevent_size);
+  auto view = packet.view_t();
+  view.le_meta_event().subevent_code_enum().Write(
+      pw::bluetooth::emboss::LeSubEventCode::PERIODIC_ADVERTISING_REPORT);
+  view.sync_handle().Write(sync_handle);
+  view.tx_power().Write(0);
+  view.rssi().Write(0);
+  view.cte_type().Write(pw::bluetooth::emboss::LECteType::AOA_CTE);
+  view.data_status().Write(data_status);
+  view.data_length().Write(data.size());
+  std::memcpy(view.data().BackingStorage().data(), data.data(), data.size());
+  return DynamicByteBuffer(packet.data());
+}
+
+DynamicByteBuffer LEPeriodicAdvertisingReportEventPacketV2(
+    hci_spec::SyncHandle sync_handle,
+    uint16_t event_counter,
+    uint8_t subevent,
+    pw::bluetooth::emboss::LEPeriodicAdvertisingDataStatus data_status,
+    const DynamicByteBuffer& data) {
+  const size_t subevent_size =
+      pw::bluetooth::emboss::LEPeriodicAdvertisingReportSubeventV2View::
+          MinSizeInBytes()
+              .Read() +
+      data.size();
+  auto packet = hci::EventPacket::New<
+      pw::bluetooth::emboss::LEPeriodicAdvertisingReportSubeventV2Writer>(
+      hci_spec::kLEMetaEventCode, subevent_size);
+  auto view = packet.view_t();
+  view.le_meta_event().subevent_code_enum().Write(
+      pw::bluetooth::emboss::LeSubEventCode::PERIODIC_ADVERTISING_REPORT_V2);
+  view.sync_handle().Write(sync_handle);
+  view.tx_power().Write(0);
+  view.rssi().Write(0);
+  view.cte_type().Write(pw::bluetooth::emboss::LECteType::AOA_CTE);
+  view.periodic_event_counter().Write(event_counter);
+  view.subevent().Write(subevent);
+  view.data_status().Write(data_status);
+  view.data_length().Write(data.size());
+  std::memcpy(view.data().BackingStorage().data(), data.data(), data.size());
+  return DynamicByteBuffer(packet.data());
+}
+
+DynamicByteBuffer LESyncLostEventPacket(hci_spec::SyncHandle sync_handle) {
+  auto packet = hci::EventPacket::New<
+      pw::bluetooth::emboss::LEPeriodicAdvertisingSyncLostSubeventWriter>(
+      hci_spec::kLEMetaEventCode);
+  auto view = packet.view_t();
+  view.le_meta_event().subevent_code().Write(
+      hci_spec::kLEPeriodicAdvertisingSyncLostSubeventCode);
+  view.sync_handle().Write(sync_handle);
+  return DynamicByteBuffer(packet.data());
+}
+
+DynamicByteBuffer LEBigInfoAdvertisingReportEventPacket(
+    hci_spec::SyncHandle sync_handle,
+    uint8_t num_bis,
+    uint8_t nse,
+    uint16_t iso_interval,
+    uint8_t bn,
+    uint8_t pto,
+    uint8_t irc,
+    uint16_t max_pdu,
+    uint32_t sdu_interval,
+    uint16_t max_sdu,
+    pw::bluetooth::emboss::IsoPhyType phy,
+    pw::bluetooth::emboss::BigFraming framing,
+    bool encryption) {
+  auto packet = hci::EventPacket::New<
+      pw::bluetooth::emboss::LEBigInfoAdvertisingReportSubeventWriter>(
+      hci_spec::kLEMetaEventCode,
+      pw::bluetooth::emboss::LEBigInfoAdvertisingReportSubeventView::
+          SizeInBytes());
+  auto view = packet.view_t();
+  view.le_meta_event().subevent_code_enum().Write(
+      pw::bluetooth::emboss::LeSubEventCode::BIG_INFO_ADVERTISING_REPORT);
+  view.sync_handle().Write(sync_handle);
+  view.num_bis().Write(num_bis);
+  view.nse().Write(nse);
+  view.iso_interval().Write(iso_interval);
+  view.bn().Write(bn);
+  view.pto().Write(pto);
+  view.irc().Write(irc);
+  view.max_pdu().Write(max_pdu);
+  view.sdu_interval().Write(sdu_interval);
+  view.max_sdu().Write(max_sdu);
+  view.phy().Write(phy);
+  view.framing().Write(framing);
+  view.encryption().Write(encryption ? 0x01 : 0x00);
+  return DynamicByteBuffer(packet.data());
+}
+
+DynamicByteBuffer LEPeriodicAdvertisingSyncTransferReceivedEventPacket(
+    pw::bluetooth::emboss::StatusCode status,
+    hci_spec::ConnectionHandle connection_handle,
+    uint16_t service_data,
+    hci_spec::SyncHandle sync_handle,
+    uint8_t advertising_sid,
+    DeviceAddress address,
+    pw::bluetooth::emboss::LEPhy phy,
+    uint16_t pa_interval,
+    pw::bluetooth::emboss::LEClockAccuracy advertiser_clock_accuracy) {
+  auto packet = hci::EventPacket::New<
+      pw::bluetooth::emboss::
+          LEPeriodicAdvertisingSyncTransferReceivedSubeventV1Writer>(
+      hci_spec::kLEMetaEventCode);
+  auto view = packet.view_t();
+  view.le_meta_event().subevent_code_enum().Write(
+      pw::bluetooth::emboss::LeSubEventCode::
+          PERIODIC_ADVERTISING_SYNC_TRANSFER_RECEIVED);
+  view.status().Write(status);
+  view.connection_handle().Write(connection_handle);
+  view.service_data().Write(service_data);
+  view.sync_handle().Write(sync_handle);
+  view.advertising_sid().Write(advertising_sid);
+  pw::bluetooth::emboss::LEAddressType address_type =
+      DeviceAddress::DeviceAddrToLeAddr(address.type());
+  view.advertiser_address_type().Write(address_type);
+  view.advertiser_address().CopyFrom(address.value().view());
+  view.advertiser_phy().Write(phy);
+  view.periodic_advertising_interval().Write(pa_interval);
+  view.advertiser_clock_accuracy().Write(advertiser_clock_accuracy);
+  return DynamicByteBuffer(packet.data());
+}
+
+DynamicByteBuffer LEPeriodicAdvertisingTerminateSyncPacket(
+    hci_spec::SyncHandle sync_handle) {
+  auto packet = hci::CommandPacket::New<
+      pw::bluetooth::emboss::LEPeriodicAdvertisingTerminateSyncCommandWriter>(
+      pw::bluetooth::emboss::OpCode::LE_PERIODIC_ADVERTISING_TERMINATE_SYNC);
+  packet.view_t().sync_handle().Write(sync_handle);
+  return DynamicByteBuffer(packet.data());
+}
+
+DynamicByteBuffer LESetPeriodicAdvertisingSyncTransferParamsPacket(
+    hci_spec::ConnectionHandle connection_handle,
+    pw::bluetooth::emboss::PeriodicAdvertisingSyncTransferMode mode,
+    uint16_t sync_timeout) {
+  auto packet = hci::CommandPacket::New<
+      pw::bluetooth::emboss::
+          LESetPeriodicAdvertisingSyncTransferParametersCommandWriter>(
+      pw::bluetooth::emboss::OpCode::
+          LE_SET_PERIODIC_ADVERTISING_SYNC_TRANSFER_PARAMETERS);
+  auto view = packet.view_t();
+  view.connection_handle().Write(connection_handle);
+  view.mode().Write(mode);
+  view.skip().Write(0);
+  view.sync_timeout().Write(sync_timeout);
+  view.sync_cte_type().BackingStorage().WriteUInt(0);
+  return DynamicByteBuffer(packet.data());
+}
+
+DynamicByteBuffer LEPeriodicAdvertisingSyncTransferPacket(
+    hci_spec::ConnectionHandle connection_handle,
+    uint16_t service_data,
+    hci_spec::SyncHandle sync_handle) {
+  auto packet = hci::CommandPacket::New<
+      pw::bluetooth::emboss::LEPeriodicAdvertisingSyncTransferCommandWriter>(
+      pw::bluetooth::emboss::OpCode::LE_PERIODIC_ADVERTISING_SYNC_TRANSFER);
+  auto view = packet.view_t();
+  view.connection_handle().Write(connection_handle);
+  view.service_data().Write(service_data);
+  view.sync_handle().Write(sync_handle);
   return DynamicByteBuffer(packet.data());
 }
 
@@ -1342,6 +1819,8 @@ DynamicByteBuffer StartA2dpOffloadRequest(
           const_cast<l2cap::A2dpOffloadManager::Configuration&>(config)
               .ldac_configuration.view());
       break;
+    case android_emb::A2dpCodecType::APTX:
+    case android_emb::A2dpCodecType::APTX_HD:
     default:
       break;
   }

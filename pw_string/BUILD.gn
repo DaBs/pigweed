@@ -17,7 +17,6 @@ import("//build_overrides/pigweed.gni")
 import("$dir_pw_bloat/bloat.gni")
 import("$dir_pw_build/module_config.gni")
 import("$dir_pw_build/target_types.gni")
-import("$dir_pw_docgen/docs.gni")
 import("$dir_pw_unit_test/test.gni")
 
 declare_args() {
@@ -93,7 +92,12 @@ pw_source_set("string") {
     "public/pw_string/internal/string_common_functions.inc",
     "public/pw_string/internal/string_impl.h",
   ]
-  public_deps = [ dir_pw_assert ]
+  public_deps = [
+    "$dir_pw_containers:common",
+    "$dir_pw_containers:iterator",
+    dir_pw_assert,
+    dir_pw_preprocessor,
+  ]
 
   # TODO: b/259746255 - Remove this when everything compiles with -Wconversion.
   configs = [ "$dir_pw_build:conversion_warnings" ]
@@ -110,7 +114,7 @@ pw_source_set("to_string") {
     ":config",
     ":format",
     ":util",
-    "$dir_pw_third_party/fuchsia:stdcompat",
+    "$pw_external_fuchsia:stdcompat",
     dir_pw_result,
     dir_pw_span,
     dir_pw_status,
@@ -146,6 +150,12 @@ pw_source_set("util") {
   ]
 }
 
+pw_source_set("hex") {
+  public_configs = [ ":public_include_path" ]
+  public = [ "public/pw_string/hex.h" ]
+}
+
+# DOCSTAG: [contributing-docs-examples]
 pw_test_group("tests") {
   tests = [
     ":string_test",
@@ -155,11 +165,19 @@ pw_test_group("tests") {
     ":type_to_string_test",
     ":utf_codecs_test",
     ":util_test",
+    "$dir_pw_string/examples:tests",
   ]
   group_deps = [
     "$dir_pw_preprocessor:tests",
     "$dir_pw_status:tests",
   ]
+}
+
+# DOCSTAG: [contributing-docs-examples]
+
+pw_test("hex_test") {
+  deps = [ ":hex" ]
+  sources = [ "hex_test.cc" ]
 }
 
 pw_test("format_test") {
@@ -217,63 +235,4 @@ pw_test("util_test") {
 
   # TODO: b/259746255 - Remove this when everything compiles with -Wconversion.
   configs = [ "$dir_pw_build:conversion_warnings" ]
-}
-
-pw_doc_group("docs") {
-  inputs = [ "Kconfig" ]
-  sources = [
-    "api.rst",
-    "code_size.rst",
-    "design.rst",
-    "docs.rst",
-    "guide.rst",
-  ]
-  report_deps = [
-    ":format_size_report",
-    ":string_builder_size_report",
-  ]
-}
-
-pw_size_diff("format_size_report") {
-  title = "Using pw::string::Format instead of snprintf"
-
-  binaries = [
-    {
-      target = "size_report:single_write_format"
-      base = "size_report:single_write_snprintf"
-      label = "Format instead of snprintf once, return size"
-    },
-    {
-      target = "size_report:multiple_writes_format"
-      base = "size_report:multiple_writes_snprintf"
-      label = "Format instead of snprintf 10 times, handle errors"
-    },
-    {
-      target = "size_report:many_writes_format"
-      base = "size_report:many_writes_snprintf"
-      label = "Format instead of snprintf 50 times, no error handling"
-    },
-  ]
-}
-
-pw_size_diff("string_builder_size_report") {
-  title = "Using pw::StringBuilder instead of snprintf"
-
-  binaries = [
-    {
-      target = "size_report:build_string_with_string_builder"
-      base = "size_report:build_string_with_snprintf"
-      label = "Total StringBuilder cost when used alongside snprintf"
-    },
-    {
-      target = "size_report:build_string_with_string_builder_no_base_snprintf"
-      base = "size_report:build_string_with_snprintf_no_base_snprintf"
-      label = "StringBuilder cost when completely replacing snprintf"
-    },
-    {
-      target = "size_report:build_string_incremental_with_string_builder"
-      base = "size_report:build_string_incremental_with_snprintf"
-      label = "Incremental cost relative to snprintf for 10 strings"
-    },
-  ]
 }

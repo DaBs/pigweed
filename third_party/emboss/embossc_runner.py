@@ -11,6 +11,7 @@
 # WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
 # License for the specific language governing permissions and limitations under
 # the License.
+"""Embossc wrapper used by the GN templates."""
 
 import sys
 import importlib.machinery
@@ -18,7 +19,9 @@ import importlib.util
 
 loader = importlib.machinery.SourceFileLoader("embossc", sys.argv[1])
 spec = importlib.util.spec_from_loader(loader.name, loader)
+assert spec is not None
 main_module = importlib.util.module_from_spec(spec)
+assert spec.loader is not None
 spec.loader.exec_module(main_module)
 
 sys.exit(main_module.main(sys.argv[1:]))

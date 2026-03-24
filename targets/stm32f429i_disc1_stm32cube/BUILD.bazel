@@ -31,7 +31,7 @@ cc_library(
     hdrs = [
         "config/FreeRTOSConfig.h",
     ],
-    includes = ["config/"],
+    strip_include_prefix = "config",
     target_compatible_with = [":freertos_config_cv"],
     deps = ["//third_party/freertos:config_assert"],
 )
@@ -49,7 +49,7 @@ constraint_value(
 )
 
 platform(
-    name = "platform",
+    name = "stm32f429i_freertos",
     constraint_values = [
         ":freertos_config_cv",
         "//pw_build/constraints/rtos:freertos",
@@ -60,7 +60,7 @@ platform(
         "@platforms//cpu:armv7e-m",
         "@platforms//os:none",
         "//pw_build/constraints/arm:cortex-m4",
-        "@rust_crates//:no_std",
+        "//pw_build/constraints/rust:no_std",
     ],
     flags = flags_from_dict(FREERTOS_FLAGS | {
         "@cmsis_core//:cc_defines": ":cc_defines",
@@ -73,6 +73,8 @@ platform(
         "@pigweed//pw_malloc:backend": "//pw_malloc:bucket_block_allocator",
         "@pigweed//pw_sys_io:backend": "//pw_sys_io_stm32cube",
         "@pigweed//pw_system:extra_platform_libs": "//targets/stm32f429i_disc1_stm32cube:extra_platform_libs",
+        "@pigweed//pw_toolchain/arm_gcc:freestanding": "False",
+        "@pigweed//pw_unit_test:backend": "//pw_unit_test:light",
         "@pigweed//pw_unit_test:main": "//targets/stm32f429i_disc1_stm32cube:unit_test_app",
         "@stm32f4xx_hal_driver//:hal_config": "//targets/stm32f429i_disc1_stm32cube:hal_config",
     }),
@@ -91,7 +93,7 @@ cc_library(
     hdrs = [
         "config/stm32f4xx_hal_conf.h",
     ],
-    includes = ["config"],
+    strip_include_prefix = "config",
     tags = ["noclangtidy"],
 )
 
@@ -101,9 +103,12 @@ cc_library(
     srcs = [
         "unit_test_app.cc",
     ],
+    features = ["-conversion_warnings"],
     deps = [
         "//pw_status",
         "//pw_system",
+        "//pw_thread:thread",
+        "//pw_thread_freertos:thread",
         "//pw_unit_test:rpc_service",
     ],
     alwayslink = 1,
@@ -128,7 +133,7 @@ cc_library(
         "//pw_string",
         "//pw_sys_io_stm32cube",
         "//pw_system:init",
-        "//pw_toolchain:infinite_loop",
+        "//pw_toolchain:busy_wait_forever",
         "//third_party/freertos:support",
         "//third_party/stm32cube",
         "@freertos",

@@ -15,30 +15,34 @@
 
 #include <stdint.h>
 
+/// @submodule{pw_log,global_config}
+
 // These configuration options differ from the options in pw_log/options.h in
 // that these should be set at a global level in the build system rather than
 // at a module or compile unit level.
 
-// PW_LOG_LEVEL_DEFAULT controls the default value of PW_LOG_LEVEL.
-//
-// Defaults to PW_LOG_LEVEL_DEBUG.
+/// `PW_LOG_LEVEL_DEFAULT` controls the default value of `PW_LOG_LEVEL`.
+///
+/// Defaults to `PW_LOG_LEVEL_INFO`.
 #ifndef PW_LOG_LEVEL_DEFAULT
-#define PW_LOG_LEVEL_DEFAULT PW_LOG_LEVEL_DEBUG
+#define PW_LOG_LEVEL_DEFAULT PW_LOG_LEVEL_INFO
 #endif  // PW_LOG_LEVEL_DEFAULT
 
-// PW_LOG_FLAGS_DEFAULT controls the default value of PW_LOG_FLAGS.
-//
-// For log statements like LOG_INFO that don't have an explicit argument, this
-// is used for the flags value.
+/// `PW_LOG_FLAGS_DEFAULT` controls the default value of `PW_LOG_FLAGS`.
+///
+/// For log statements like LOG_INFO that don't have an explicit argument, this
+/// is used for the flags value.
 #ifndef PW_LOG_FLAGS_DEFAULT
 #define PW_LOG_FLAGS_DEFAULT 0
 #endif  // PW_LOG_FLAGS_DEFAULT
 
-// PW_LOG_ENABLE_IF controls what logs are enabled
-//
-// This expression determines whether or not the statement is enabled and
-// should be passed to the backend.
+/// `PW_LOG_ENABLE_IF` controls which logs are enabled.
+///
+/// This expression determines whether or not the statement is enabled and
+/// should be passed to the backend. It is evaluated at the log call site.
 #ifndef PW_LOG_ENABLE_IF
 #define PW_LOG_ENABLE_IF(level, verbosity, module, flags) \
   ((int32_t)(level) >= (int32_t)(verbosity))
 #endif  // PW_LOG_ENABLE_IF
+
+/// @}

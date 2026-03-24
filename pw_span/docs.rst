@@ -6,7 +6,7 @@ pw_span
 .. pigweed-module::
    :name: pw_span
 
-* **Standardized**: :cpp:class:`pw::span` matches C++20's `std::span
+* **Standardized**: :cc:`pw::span` matches C++20's `std::span
   <https://en.cppreference.com/w/cpp/container/span>`_ as closely as possible.
 * **Zero-cost**: If ``std::span`` is available, ``pw::span`` is simply an alias
   of it.
@@ -30,7 +30,7 @@ pw_span
 
 .. pw_span-example-end
 
-:cpp:class:`pw::span` is a convenient abstraction that wraps a pointer and a
+``pw::span`` is a convenient abstraction that wraps a pointer and a
 size. It's especially useful in APIs. Spans support implicit conversions from
 C arrays, ``std::array``, or any STL-style container, such as
 ``std::string_view``.
@@ -58,10 +58,6 @@ Get started
              # ...
            ]
          }
-
-      This assumes that your Bazel ``WORKSPACE`` has a `repository
-      <https://bazel.build/concepts/build-ref#repositories>`_ named ``@pigweed``
-      that points to the upstream Pigweed repository.
 
    .. tab-item:: GN
 
@@ -131,7 +127,6 @@ Guides
 
       bool ProcessBuffer(const pw::span<uint8_t>& buffer);
 
-
 Rationale: Since a ``pw::span`` object is essentially a pointer and a size,
 references to ``pw::span`` objects are almost always unnecessary indirection.
 
@@ -169,7 +164,7 @@ spans of binary data. Convert spans to byte spans with ``pw::as_bytes`` or
    void ProcessData(pw::span<const std::byte> data);
 
    void DoStuff() {
-     std::array<AnyType, 7> data = { ... };
+     std::array<AnyType, 7> data = {/*...*/};
      ProcessData(pw::as_bytes(pw::span(data)));
    }
 
@@ -192,9 +187,10 @@ types using ``pw::span_cast<T>``.
    byte array from ``malloc()`` as a span of integers.
 
 
-----------
-References
-----------
+-------------
+API reference
+-------------
+Moved: :cc:`pw_span`
 
 pw_span/span.h
 ==============
@@ -209,9 +205,6 @@ not part of the ``std::span`` interface.
 ..
    TODO: https://pwbug.dev/396493663 - Doxygen thinks the const/non-const
    versions of span_cast are the same function and merges their docs together.
-
-   .. doxygengroup:: pw_span_cast
-      :content-only:
 
 .. cpp:function:: span<T> pw::span_cast(std::span<std::byte> bytes)
 
@@ -250,4 +243,4 @@ this module, see the
 :ref:`module documentation <module-structure-compile-time-configuration>` for
 more details.
 
-.. doxygendefine:: PW_SPAN_ENABLE_ASSERTS
+* :cc:`PW_SPAN_ENABLE_ASSERTS`

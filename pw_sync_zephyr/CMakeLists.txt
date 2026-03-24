@@ -14,6 +14,10 @@
 
 include($ENV{PW_ROOT}/pw_build/pigweed.cmake)
 
+if(NOT CONFIG_ZEPHYR_PIGWEED_MODULE)
+  return()
+endif()
+
 pw_add_library(pw_sync_zephyr.mutex_backend INTERFACE
   HEADERS
     public/pw_sync_zephyr/mutex_inline.h
@@ -24,11 +28,33 @@ pw_add_library(pw_sync_zephyr.mutex_backend INTERFACE
     public
     public_overrides
   PUBLIC_DEPS
+    pw_interrupt.context
     pw_sync.mutex.facade
 )
 pw_zephyrize_libraries_ifdef(
     CONFIG_PIGWEED_SYNC_MUTEX
     pw_sync_zephyr.mutex_backend
+)
+
+pw_add_library(pw_sync_zephyr.timed_mutex_backend STATIC
+  HEADERS
+    public/pw_sync_zephyr/timed_mutex_inline.h
+    public_overrides/pw_sync_backend/timed_mutex_inline.h
+  PUBLIC_INCLUDES
+    public
+    public_overrides
+  PUBLIC_DEPS
+    pw_chrono.system_clock
+    pw_sync.timed_mutex.facade
+  PRIVATE_DEPS
+    pw_assert
+    pw_interrupt.context
+  SOURCES
+    timed_mutex.cc
+)
+pw_zephyrize_libraries_ifdef(
+  CONFIG_PIGWEED_SYNC_TIMED_MUTEX
+    pw_sync_zephyr.timed_mutex_backend
 )
 
 pw_add_library(pw_sync_zephyr.binary_semaphore_backend STATIC
@@ -41,7 +67,9 @@ pw_add_library(pw_sync_zephyr.binary_semaphore_backend STATIC
     public
     public_overrides
   PUBLIC_DEPS
+    pw_assert
     pw_chrono.system_clock
+    pw_interrupt.context
     pw_sync.binary_semaphore.facade
   SOURCES
     binary_semaphore.cc
@@ -49,6 +77,28 @@ pw_add_library(pw_sync_zephyr.binary_semaphore_backend STATIC
 pw_zephyrize_libraries_ifdef(
     CONFIG_PIGWEED_SYNC_BINARY_SEMAPHORE
     pw_sync_zephyr.binary_semaphore_backend
+)
+
+pw_add_library(pw_sync_zephyr.counting_semaphore_backend STATIC
+  HEADERS
+    public/pw_sync_zephyr/counting_semaphore_native.h
+    public/pw_sync_zephyr/counting_semaphore_inline.h
+    public_overrides/pw_sync_backend/counting_semaphore_native.h
+    public_overrides/pw_sync_backend/counting_semaphore_inline.h
+  PUBLIC_INCLUDES
+    public
+    public_overrides
+  PUBLIC_DEPS
+    pw_assert
+    pw_chrono.system_clock
+    pw_interrupt.context
+    pw_sync.counting_semaphore.facade
+  SOURCES
+    counting_semaphore.cc
+)
+pw_zephyrize_libraries_ifdef(
+    CONFIG_PIGWEED_SYNC_COUNTING_SEMAPHORE
+    pw_sync_zephyr.counting_semaphore_backend
 )
 
 pw_add_library(pw_sync_zephyr.interrupt_spin_lock_backend STATIC

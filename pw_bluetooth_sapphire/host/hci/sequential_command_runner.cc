@@ -170,15 +170,19 @@ bool SequentialCommandRunner::SendQueuedCommand(
     return false;
   }
   if (command.is_le_async_command) {
-    return cmd_->SendLeAsyncCommand(std::move(command.packet),
-                                    std::move(callback),
-                                    command.complete_event_code);
+    return cmd_
+        ->SendLeAsyncCommand(std::move(command.packet),
+                             std::move(callback),
+                             command.complete_event_code)
+        .ok();
   }
 
-  return cmd_->SendExclusiveCommand(std::move(command.packet),
-                                    std::move(callback),
-                                    command.complete_event_code,
-                                    std::move(command.exclusions));
+  return cmd_
+      ->SendExclusiveCommand(std::move(command.packet),
+                             std::move(callback),
+                             command.complete_event_code,
+                             std::move(command.exclusions))
+      .ok();
 }
 
 void SequentialCommandRunner::Reset() {

@@ -25,6 +25,7 @@
 #include "pw_containers/intrusive_list.h"
 #include "pw_containers/vector.h"
 #include "pw_span/span.h"
+#include "pw_unit_test/constexpr.h"
 #include "pw_unit_test/framework.h"
 
 namespace {
@@ -97,6 +98,11 @@ TEST_F(NonMutatingTest, FindReturnsCorrectType) {
 }
 
 TEST_F(NonMutatingTest, FindIf) { pw::containers::FindIf(span_, Predicate); }
+
+TEST_F(NonMutatingTest, Contains) {
+  EXPECT_TRUE(pw::containers::Contains(vector_, 3));
+  EXPECT_FALSE(pw::containers::Contains(vector_, 4));
+}
 
 TEST_F(NonMutatingTest, FindIfNot) {
   pw::containers::FindIfNot(span_, Predicate);
@@ -302,3 +308,112 @@ TEST_F(NonMutatingTest, SearchN) { pw::containers::SearchN(span_, 3, 1); }
 TEST_F(NonMutatingTest, SearchNWithPredicate) {
   pw::containers::SearchN(span_, 3, 1, BinPredicate);
 }
+
+static constexpr std::array<int, 5> kConstExprTestAllOfValues = {5, 6, 7, 8, 9};
+PW_CONSTEXPR_TEST(AlgorithmPolyfill, AllOf, {
+  PW_TEST_EXPECT_TRUE(pw::all_of(kConstExprTestAllOfValues.begin(),
+                                 kConstExprTestAllOfValues.end(),
+                                 [](auto v) { return v > 2; }));
+  PW_TEST_EXPECT_TRUE(pw::all_of(kConstExprTestAllOfValues.begin(),
+                                 kConstExprTestAllOfValues.end(),
+                                 [](auto v) { return v < 10; }));
+  PW_TEST_EXPECT_TRUE(!pw::all_of(kConstExprTestAllOfValues.begin(),
+                                  kConstExprTestAllOfValues.end(),
+                                  [](auto v) { return v > 10; }));
+});
+
+static constexpr std::array<int, 5> kConstExprTestAnyOfValues = {1, 2, 3, 4, 5};
+PW_CONSTEXPR_TEST(AlgorithmPolyfill, AnyOf, {
+  PW_TEST_EXPECT_TRUE(pw::any_of(kConstExprTestAnyOfValues.begin(),
+                                 kConstExprTestAnyOfValues.end(),
+                                 [](auto v) { return v > 3; }));
+  PW_TEST_EXPECT_TRUE(pw::any_of(kConstExprTestAnyOfValues.begin(),
+                                 kConstExprTestAnyOfValues.end(),
+                                 [](auto v) { return v == 1; }));
+  PW_TEST_EXPECT_TRUE(!pw::any_of(kConstExprTestAnyOfValues.begin(),
+                                  kConstExprTestAnyOfValues.end(),
+                                  [](auto v) { return v > 10; }));
+});
+
+static constexpr std::array<int, 5> kConstExprTestFindIfValues = {
+    1, 2, 3, 4, 5};
+PW_CONSTEXPR_TEST(AlgorithmPolyfill, FindIf, {
+  constexpr auto it = pw::find_if(kConstExprTestFindIfValues.begin(),
+                                  kConstExprTestFindIfValues.end(),
+                                  [](auto v) { return v > 3; });
+  PW_TEST_EXPECT_EQ(it, kConstExprTestFindIfValues.begin() + 3);
+
+  constexpr auto it2 = pw::find_if(kConstExprTestFindIfValues.begin(),
+                                   kConstExprTestFindIfValues.end(),
+                                   [](auto v) { return v == 1; });
+  PW_TEST_EXPECT_EQ(it2, kConstExprTestFindIfValues.begin());
+
+  constexpr auto it3 = pw::find_if(kConstExprTestFindIfValues.begin(),
+                                   kConstExprTestFindIfValues.end(),
+                                   [](auto v) { return v > 10; });
+  PW_TEST_EXPECT_EQ(it3, kConstExprTestFindIfValues.end());
+});
+
+PW_CONSTEXPR_TEST(AlgorithmPolyfill, Fill, {
+  std::array<int, 5> values = {1, 2, 3, 4, 5};
+  pw::fill(values.begin(), values.end(), 42);
+  PW_TEST_EXPECT_TRUE(
+      pw::all_of(values.begin(), values.end(), [](int v) { return v == 42; }));
+
+  pw::fill(values.begin(), values.begin(), -1);
+  PW_TEST_EXPECT_TRUE(
+      pw::all_of(values.begin(), values.end(), [](int v) { return v == 42; }));
+});
+
+PW_CONSTEXPR_TEST(AlgorithmPolyfill, FillN, {
+  std::array<int, 5> values = {1, 2, 3, 4, 5};
+
+  PW_TEST_EXPECT_EQ(pw::fill_n(values.begin(), 3, 42), values.begin() + 3);
+  PW_TEST_EXPECT_EQ(values[0], 42);
+  PW_TEST_EXPECT_EQ(values[1], 42);
+  PW_TEST_EXPECT_EQ(values[2], 42);
+  PW_TEST_EXPECT_EQ(values[3], 4);
+  PW_TEST_EXPECT_EQ(values[4], 5);
+
+  PW_TEST_EXPECT_EQ(pw::fill_n(values.begin(), 0, -1), values.begin());
+  PW_TEST_EXPECT_EQ(values[0], 42);
+});
+
+PW_CONSTEXPR_TEST(AlgorithmPolyfill, Copy, {
+  constexpr std::array<int, 5> source = {1, 2, 3, 4, 5};
+  std::array<int, 5> dest = {0, 0, 0, 0, 0};
+  auto it = pw::copy(source.begin(), source.end(), dest.begin());
+  PW_TEST_EXPECT_EQ(it, dest.end());
+  PW_TEST_EXPECT_EQ(source[0], dest[0]);
+  PW_TEST_EXPECT_EQ(source[1], dest[1]);
+  PW_TEST_EXPECT_EQ(source[2], dest[2]);
+  PW_TEST_EXPECT_EQ(source[3], dest[3]);
+  PW_TEST_EXPECT_EQ(source[4], dest[4]);
+
+  // Test empty range
+  std::array<int, 5> dest2 = {0, 0, 0, 0, 0};
+  auto it2 = pw::copy(source.begin(), source.begin(), dest2.begin());
+  PW_TEST_EXPECT_EQ(it2, dest2.begin());
+  PW_TEST_EXPECT_EQ(dest2[0], 0);
+});
+
+PW_CONSTEXPR_TEST(AlgorithmPolyfill, CopyIf, {
+  constexpr std::array<int, 5> source = {1, 2, 3, 4, 5};
+  std::array<int, 5> dest = {0, 0, 0, 0, 0};
+  auto it = pw::copy_if(source.begin(), source.end(), dest.begin(), [](int x) {
+    return x % 2 == 0;
+  });
+  PW_TEST_EXPECT_EQ(it, dest.begin() + 2);
+  PW_TEST_EXPECT_EQ(dest[0], 2);
+  PW_TEST_EXPECT_EQ(dest[1], 4);
+  PW_TEST_EXPECT_EQ(dest[2], 0);
+
+  // Test with no elements matching
+  std::array<int, 5> dest2 = {0, 0, 0, 0, 0};
+  auto it2 =
+      pw::copy_if(source.begin(), source.end(), dest2.begin(), [](int x) {
+        return x > 10;
+      });
+  PW_TEST_EXPECT_EQ(it2, dest2.begin());
+  PW_TEST_EXPECT_EQ(dest2[0], 0);
+});

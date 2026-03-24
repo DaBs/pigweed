@@ -73,6 +73,7 @@ class AdapterTest : public TestingBase {
                                transport()->GetWeakPtr(),
                                gatt_->GetWeakPtr(),
                                config,
+                               lease_provider_,
                                std::move(l2cap));
   }
 
@@ -111,6 +112,7 @@ class AdapterTest : public TestingBase {
 
  private:
   bool transport_closed_called_;
+  pw::bluetooth_sapphire::testing::FakeLeaseProvider lease_provider_;
   std::unique_ptr<gatt::testing::FakeLayer> gatt_;
   std::unique_ptr<Adapter> adapter_;
 
@@ -571,6 +573,7 @@ TEST_F(AdapterTest, LeAutoConnect) {
       BondingData{.identifier = kPeerId,
                   .address = kTestAddr,
                   .name = std::nullopt,
+                  .device_class = {},
                   .le_pairing_data = pdata,
                   .bredr_link_key = std::nullopt,
                   .bredr_services = {}});
@@ -625,6 +628,7 @@ TEST_F(AdapterTest, LeSkipAutoConnectBehavior) {
       BondingData{.identifier = kPeerId,
                   .address = kTestAddr,
                   .name = std::nullopt,
+                  .device_class = {},
                   .le_pairing_data = pdata,
                   .bredr_link_key = std::nullopt,
                   .bredr_services = {}});
@@ -1312,6 +1316,103 @@ TEST_F(AdapterTest,
   conn_result.reset();
 }
 
+TEST_F(AdapterTest, CreateAdvertiserExtendedAdvertisingSupported) {
+  FakeController::Settings settings;
+  settings.ApplyExtendedLEConfig();
+  test_device()->set_settings(settings);
+  InitializeAdapter([](bool) {});
+
+  adapter()->le()->StartAdvertising(AdvertisingData(),
+                                    AdvertisingData(),
+                                    AdvertisingInterval::FAST1,
+                                    /*extended_pdu=*/false,
+                                    /*anonymous=*/false,
+                                    /*include_tx_power_level=*/false,
+                                    /*connectable=*/std::nullopt,
+                                    /*address_type=*/std::nullopt,
+                                    [&](AdvertisementInstance, auto status) {
+                                      ASSERT_EQ(fit::ok(), status);
+                                    });
+  RunUntilIdle();
+  EXPECT_EQ(bt::testing::FakeController::ExtendedOperationType::kExtended,
+            test_device()->advertising_procedure());
+}
+
+TEST_F(AdapterTest,
+       CreateAdvertiserVendorAdvertisingSupportedExtendedSupported) {
+  TearDown();
+  SetUp(FeaturesBits::kAndroidVendorExtensions);
+
+  FakeController::Settings settings;
+  settings.ApplyExtendedLEConfig();
+  test_device()->set_settings(settings);
+  InitializeAdapter([](bool) {});
+
+  adapter()->le()->StartAdvertising(AdvertisingData(),
+                                    AdvertisingData(),
+                                    AdvertisingInterval::FAST1,
+                                    /*extended_pdu=*/false,
+                                    /*anonymous=*/false,
+                                    /*include_tx_power_level=*/false,
+                                    /*connectable=*/std::nullopt,
+                                    /*address_type=*/std::nullopt,
+                                    [&](AdvertisementInstance, auto status) {
+                                      ASSERT_EQ(fit::ok(), status);
+                                    });
+  RunUntilIdle();
+  EXPECT_EQ(bt::testing::FakeController::ExtendedOperationType::kExtended,
+            test_device()->advertising_procedure());
+}
+
+TEST_F(AdapterTest,
+       CreateAdvertiserVendorAdvertisingSupportedExtendedUnsupported) {
+  TearDown();
+  SetUp(FeaturesBits::kAndroidVendorExtensions);
+
+  FakeController::Settings settings;
+  settings.ApplyLegacyLEConfig();
+  settings.ApplyAndroidVendorExtensionDefaults();
+  test_device()->set_settings(settings);
+  InitializeAdapter([](bool) {});
+
+  adapter()->le()->StartAdvertising(AdvertisingData(),
+                                    AdvertisingData(),
+                                    AdvertisingInterval::FAST1,
+                                    /*extended_pdu=*/false,
+                                    /*anonymous=*/false,
+                                    /*include_tx_power_level=*/false,
+                                    /*connectable=*/std::nullopt,
+                                    /*address_type=*/std::nullopt,
+                                    [&](AdvertisementInstance, auto status) {
+                                      ASSERT_EQ(fit::ok(), status);
+                                    });
+  RunUntilIdle();
+  EXPECT_EQ(bt::testing::FakeController::ExtendedOperationType::kVendor,
+            test_device()->advertising_procedure());
+}
+
+TEST_F(AdapterTest, CreateAdvertiserLegacyAdvertisingSupported) {
+  FakeController::Settings settings;
+  settings.ApplyLegacyLEConfig();
+  test_device()->set_settings(settings);
+  InitializeAdapter([](bool) {});
+
+  adapter()->le()->StartAdvertising(AdvertisingData(),
+                                    AdvertisingData(),
+                                    AdvertisingInterval::FAST1,
+                                    /*extended_pdu=*/false,
+                                    /*anonymous=*/false,
+                                    /*include_tx_power_level=*/false,
+                                    /*connectable=*/std::nullopt,
+                                    /*address_type=*/std::nullopt,
+                                    [&](AdvertisementInstance, auto status) {
+                                      ASSERT_EQ(fit::ok(), status);
+                                    });
+  RunUntilIdle();
+  EXPECT_EQ(bt::testing::FakeController::ExtendedOperationType::kLegacy,
+            test_device()->advertising_procedure());
+}
+
 // Tests where the constructor must run in the test, rather than Setup.
 
 class AdapterConstructorTest : public TestingBase {
@@ -1332,7 +1433,12 @@ class AdapterConstructorTest : public TestingBase {
     TestingBase::TearDown();
   }
 
+  pw::bluetooth_sapphire::testing::FakeLeaseProvider& lease_provider() {
+    return lease_provider_;
+  }
+
  protected:
+  pw::bluetooth_sapphire::testing::FakeLeaseProvider lease_provider_;
   std::unique_ptr<l2cap::testing::FakeL2cap> l2cap_;
   std::unique_ptr<gatt::testing::FakeLayer> gatt_;
 };
@@ -1368,6 +1474,7 @@ TEST_F(AdapterConstructorTest, GattCallbacks) {
                                  transport()->GetWeakPtr(),
                                  gatt_->GetWeakPtr(),
                                  config,
+                                 lease_provider(),
                                  std::move(l2cap_));
 
   EXPECT_EQ(set_persist_cb_count, 1);
@@ -1519,6 +1626,8 @@ TEST_F(AdapterTest, LEConnectedIsochronousStreamSupported) {
       hci_spec::LESupportedFeature::kConnectedIsochronousStreamPeripheral);
   settings.le_acl_data_packet_length = 0x1B;
   settings.le_total_num_acl_data_packets = 2;
+  settings.iso_data_packet_length = 0xc0;
+  settings.total_num_iso_data_packets = 8;
 
   test_device()->set_settings(settings);
 
@@ -1633,6 +1742,8 @@ TEST_F(AdapterScoAndIsoDisabledTest,
 TEST_F(AdapterTest, IsoDataChannelInitializedSuccessfully) {
   FakeController::Settings settings;
   settings.ApplyDualModeDefaults();
+  settings.le_features |= static_cast<uint64_t>(
+      hci_spec::LESupportedFeature::kConnectedIsochronousStreamPeripheral);
   test_device()->set_settings(settings);
 
   bool success = false;
@@ -1721,8 +1832,8 @@ void AdapterTest::GetSupportedDelayRangeHelper(
   InitializeAdapter([&](bool success) { init_success = success; });
   ASSERT_TRUE(init_success);
 
-  pw::Status cb_status = static_cast<pw::Status::Code>(
-      200);  // Error code that should never be returned
+  // Error code that should never be returned
+  pw::Status cb_status = static_cast<pw::Status::Code>(PW_STATUS_LAST + 1);
   uint32_t min_delay_us = -1;
   uint32_t max_delay_us = -1;
   Adapter::GetSupportedDelayRangeCallback cb =
@@ -1795,6 +1906,164 @@ TEST_F(AdapterTest, RemotePublicKeyValidationNotSupported) {
   EXPECT_TRUE(EnsureInitialized());
   EXPECT_FALSE(
       adapter()->state().IsControllerRemotePublicKeyValidationSupported());
+}
+
+struct PeriodicAdvertisingSyncDelegate
+    : public Adapter::LowEnergy::PeriodicAdvertisingSyncDelegate {
+ public:
+  void OnSyncEstablished(
+      hci::SyncId, PeriodicAdvertisingSyncManager::SyncParameters) override {}
+  void OnSyncLost(hci::SyncId, hci::Error) override {}
+  void OnAdvertisingReport(hci::SyncId,
+                           const PeriodicAdvertisingReport&) override {}
+  void OnBigInfoReport(
+      hci::SyncId, const hci_spec::BroadcastIsochronousGroupInfo&) override {}
+};
+
+TEST_F(AdapterTest, PeriodicAdvertisingSynchronizationSupported) {
+  FakeController::Settings settings;
+  settings.ApplyDualModeDefaults();
+  settings.le_features |= static_cast<uint64_t>(
+      hci_spec::LESupportedFeature::kSynchronizedReceiver);
+  test_device()->set_settings(settings);
+  EXPECT_TRUE(EnsureInitialized());
+  EXPECT_TRUE(adapter()->state().low_energy_state.IsFeatureSupported(
+      hci_spec::LESupportedFeature::kSynchronizedReceiver));
+
+  Peer* le_peer =
+      adapter()->peer_cache()->NewPeer(kTestAddr, /*connectable=*/true);
+  uint8_t adv_sid = 8;
+  Adapter::LowEnergy::SyncOptions options{.filter_duplicates = true};
+  PeriodicAdvertisingSyncDelegate delegate;
+
+  hci::Result<PeriodicAdvertisingSyncHandle> result =
+      adapter()->le()->SyncToPeriodicAdvertisement(
+          le_peer->identifier(), adv_sid, options, delegate);
+  EXPECT_TRUE(result.is_ok());
+}
+
+TEST_F(AdapterTest, PeriodicAdvertisingSynchronizationNotSupported) {
+  FakeController::Settings settings;
+  settings.ApplyDualModeDefaults();
+  settings.le_features &= ~static_cast<uint64_t>(
+      hci_spec::LESupportedFeature::kSynchronizedReceiver);
+  test_device()->set_settings(settings);
+  EXPECT_TRUE(EnsureInitialized());
+  EXPECT_FALSE(adapter()->state().low_energy_state.IsFeatureSupported(
+      hci_spec::LESupportedFeature::kSynchronizedReceiver));
+
+  Peer* le_peer =
+      adapter()->peer_cache()->NewPeer(kTestAddr, /*connectable=*/true);
+  uint8_t adv_sid = 8;
+  Adapter::LowEnergy::SyncOptions options{.filter_duplicates = true};
+  PeriodicAdvertisingSyncDelegate delegate;
+
+  hci::Result<PeriodicAdvertisingSyncHandle> result =
+      adapter()->le()->SyncToPeriodicAdvertisement(
+          le_peer->identifier(), adv_sid, options, delegate);
+  ASSERT_TRUE(result.is_error());
+  EXPECT_EQ(result.error_value(), Error(HostError::kNotSupported));
+}
+
+TEST_F(AdapterTest,
+       TransferSyncWhenPeriodicAdvertisingSynchronizationSupported) {
+  FakeController::Settings settings;
+  settings.ApplyExtendedLEConfig();
+  settings.le_features |= static_cast<uint64_t>(
+      hci_spec::LESupportedFeature::kSynchronizedReceiver);
+  test_device()->set_settings(settings);
+  EXPECT_TRUE(EnsureInitialized());
+  EXPECT_TRUE(adapter()->state().low_energy_state.IsFeatureSupported(
+      hci_spec::LESupportedFeature::kSynchronizedReceiver));
+
+  auto fake_peer_0 = std::make_unique<FakePeer>(kTestAddr, dispatcher());
+  const uint8_t kAdvSid = 8;
+  fake_peer_0->AddPeriodicAdvertisement(
+      kAdvSid, DynamicByteBuffer(StaticByteBuffer(0x02, 0x01, 0x03)));
+  test_device()->AddPeer(std::move(fake_peer_0));
+  Peer* peer_0 =
+      adapter()->peer_cache()->NewPeer(kTestAddr, /*connectable=*/true);
+
+  auto fake_peer_1 = std::make_unique<FakePeer>(kTestAddr2, dispatcher());
+  FakePeer* fake_peer_1_ptr = fake_peer_1.get();
+  test_device()->AddPeer(std::move(fake_peer_1));
+  Peer* peer_1 =
+      adapter()->peer_cache()->NewPeer(kTestAddr2, /*connectable=*/true);
+
+  Adapter::LowEnergy::SyncOptions options{.filter_duplicates = true};
+  PeriodicAdvertisingSyncDelegate delegate;
+
+  // 1. Sync to peer 0's periodic advertisement
+  hci::Result<PeriodicAdvertisingSyncHandle> sync_handle_result =
+      adapter()->le()->SyncToPeriodicAdvertisement(
+          peer_0->identifier(), kAdvSid, options, delegate);
+  ASSERT_TRUE(sync_handle_result.is_ok());
+
+  std::unique_ptr<bt::gap::LowEnergyConnectionHandle> conn_ref;
+  auto connect_cb = [&conn_ref](auto result) {
+    ASSERT_EQ(fit::ok(), result);
+    conn_ref = std::move(result).value();
+  };
+
+  // 2. Connect to peer 1
+  adapter()->le()->Connect(
+      peer_1->identifier(), connect_cb, LowEnergyConnectionOptions());
+  RunUntilIdle();
+  ASSERT_TRUE(conn_ref);
+
+  // 3. Transfer sync to peer 1
+  std::optional<hci::Result<>> transfer_result;
+  auto callback = [&transfer_result](hci::Result<> result) {
+    transfer_result = result;
+  };
+  const uint16_t kServiceData = 0x0908;
+  conn_ref->TransferPeriodicAdvertisingSync(
+      sync_handle_result->id(), kServiceData, std::move(callback));
+  RunUntilIdle();
+  ASSERT_TRUE(transfer_result.has_value());
+  EXPECT_TRUE(transfer_result->is_ok());
+  std::optional<FakePeer::PeriodicAdvertisingSyncTransfer> transfer =
+      fake_peer_1_ptr->FindPeriodicAdvertisingSyncTransfer(kTestAddr, kAdvSid);
+  ASSERT_TRUE(transfer.has_value());
+  EXPECT_EQ(transfer->service_data, kServiceData);
+}
+
+TEST_F(AdapterTest,
+       TransferSyncWhenPeriodicAdvertisingSynchronizationNotSupported) {
+  FakeController::Settings settings;
+  settings.ApplyExtendedLEConfig();
+  settings.le_features &= ~static_cast<uint64_t>(
+      hci_spec::LESupportedFeature::kSynchronizedReceiver);
+  test_device()->set_settings(settings);
+  EXPECT_TRUE(EnsureInitialized());
+
+  auto fake_peer_1 = std::make_unique<FakePeer>(kTestAddr2, dispatcher());
+  test_device()->AddPeer(std::move(fake_peer_1));
+  Peer* peer_1 =
+      adapter()->peer_cache()->NewPeer(kTestAddr2, /*connectable=*/true);
+
+  std::unique_ptr<bt::gap::LowEnergyConnectionHandle> conn_ref;
+  auto connect_cb = [&conn_ref](auto result) {
+    ASSERT_EQ(fit::ok(), result);
+    conn_ref = std::move(result).value();
+  };
+
+  adapter()->le()->Connect(
+      peer_1->identifier(), connect_cb, LowEnergyConnectionOptions());
+  RunUntilIdle();
+  ASSERT_TRUE(conn_ref);
+
+  std::optional<hci::Result<>> transfer_result;
+  auto callback = [&transfer_result](hci::Result<> result) {
+    transfer_result = result;
+  };
+  const uint16_t kServiceData = 0x0908;
+  conn_ref->TransferPeriodicAdvertisingSync(
+      hci::SyncId(1), kServiceData, std::move(callback));
+  RunUntilIdle();
+  ASSERT_TRUE(transfer_result.has_value());
+  EXPECT_FALSE(transfer_result->is_ok());
+  EXPECT_TRUE(transfer_result->error_value().is(HostError::kNotSupported));
 }
 
 }  // namespace

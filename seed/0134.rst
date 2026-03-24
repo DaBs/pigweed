@@ -1,0 +1,541 @@
+.. _seed-0134:
+
+==================================================================
+0134: Unify pw_build, pw_presubmit, and the pw tool with Workflows
+==================================================================
+.. seed::
+   :number: 134
+   :name: Unify pw_build, the pw tool, and pw_presubmit
+   :status: Accepted
+   :proposal_date: 2025-06-09
+   :cl: 296755
+   :authors: Armando Montanez
+   :facilitator: Kayce Basques
+
+-------
+Summary
+-------
+Over the years, ``pw_build`` and ``pw_presubmit`` have lived in relative
+isolation despite offering similar functionality. Additionally, the ``pw`` entry
+point has lacked significant integration with these systems, requiring a
+multi-layer integration that is intrinsically bound to Python and GN.
+
+This SEED proposes to unify how projects define project-wide builds, launchable
+tools, and presubmit programs under a single config file in a more
+user-friendly and language-agnostic way.
+
+----------
+Motivation
+----------
+
+* :ref:`seed-0134-motivation-unify-existing-systems`
+* :ref:`seed-0134-motivation-untie-pw_presubmit-from-gn`
+* :ref:`seed-0134-motivation-offer-pw-experience-for-bazel`
+* :ref:`seed-0134-motivation-simplify-project-customization`
+
+.. _seed-0134-motivation-unify-existing-systems:
+
+Unify existing systems
+======================
+The ``pw_build`` project builder and ``pw_presubmit`` traditionally have had
+limited overlap despite serving similar goals. Providing a clear,
+forward-looking path for unifying these was a key motivation for this SEED.
+
+.. _seed-0134-motivation-untie-pw_presubmit-from-gn:
+
+Untie ``pw_presubmit`` experiences from GN/bootstrap
+====================================================
+Bazel-only projects lack a high-quality local presubmit experience. This is due
+in part to deep ties between ``pw_presubmit``, ``pw_env_setup``, and GN. Rather
+than figuring out how to untie the two experiences, Pigweed wanted to
+investigate the possibility of reimagining the approach based on how the tooling
+has evolved over the years.
+
+.. _seed-0134-motivation-offer-pw-experience-for-bazel:
+
+Offer a ``pw``-like experience for Bazel-based projects
+=======================================================
+Pigweed has gotten a lot of feedback expressing appreciation for easy-to-use
+shortcuts like ``pw format``. Providing a similar experience for projects that
+aren't using GN is important to Pigweed's commitment to Bazel as our primary
+build system recommendation.
+
+.. _seed-0134-motivation-simplify-project-customization:
+
+Simplify project setup/customization
+====================================
+Finding the source-of-truth for ``pw`` tools, presubmit steps/programs, and
+supported project build configurations has not been intuitive and easily
+accessible for most users. Additionally, the overhead of correctly configuring
+the boilerplate for a new project in GN has been wrought with many arcane,
+subtle details that are easy to miss. This SEED aims to consolidate more
+of these pieces in a single file.
+
+--------
+Proposal
+--------
+Pigweed will introduce a new configuration schema that allows projects to
+describe three key things:
+
+#. A project's supported build variations.
+#. Shortcuts for launching tools.
+#. Batched tasks. These are assortments of builds or executable tools that
+   perform code-quality checks (``pw format --check``, banned word checking,
+   etc.).
+
+Additionally, an associated tool that acts as a launcher for these experiences
+will be introduced.
+
+---------------
+Detailed design
+---------------
+
+New workflows launcher
+======================
+A new tool derived from the ``pw`` tool will load a config file, and launch
+tooling, builds, and workflows of grouped tasks. The vision is to provide an
+experience similar to the ``pw`` shortcut hub that has been successful in
+GN-based projects. For example:
+
+.. code-block:: console
+
+   $ pw format --full
+
+.. code-block:: console
+
+   $ pw build rp2040
+
+.. code-block:: console
+
+   $ pw watch python.lint
+
+Similar to the well-established ``pw`` tool, the entry point forwards arguments
+to underlying commands. Unlike the previous ``pw`` tool, the new tool has
+the ability to launch builds to ensure tooling is updated/rebuilt before it
+is launched.
+
+When running a command through the launcher, the tool will surface the
+underlying commands used to execute the request to empower users to directly
+run the commands themselves:
+
+.. code-block:: console
+
+   $ pw format --check
+
+   ▒█████▄   █▓  ▄███▒  ▒█    ▒█ ░▓████▒ ░▓████▒ ▒▓████▄
+    ▒█░  █░ ░█▒ ██▒ ▀█▒ ▒█░ █ ▒█  ▒█   ▀  ▒█   ▀  ▒█  ▀█▌
+    ▒█▄▄▄█░ ░█▒ █▓░ ▄▄░ ▒█░ █ ▒█  ▒███    ▒███    ░█   █▌
+    ▒█▀     ░█░ ▓█   █▓ ░█░ █ ▒█  ▒█   ▄  ▒█   ▄  ░█  ▄█▌
+    ▒█      ░█░ ░▓███▀   ▒█▓▀▓█░ ░▓████▒ ░▓████▒ ▒▓████▀
+
+   20250624 13:29:02 INF Launching tool
+   20250624 13:29:02 INF  ╔════════════════════════════════════
+   20250624 13:29:02 INF  ║
+   20250624 13:29:02 INF  ║   ...   format
+   20250624 13:29:02 INF  ║
+   20250624 13:29:02 INF  ╚════════════════════════════════════
+   20250624 13:29:02 INF [1/1] Starting ==> Recipe: format Targets: @pigweed//:format
+   20250624 13:29:02 INF [1/1] Run ==> bazelisk canonicalize-flags
+   20250624 13:29:03 INF [1/1] Run ==> bazelisk run @pigweed//:format -- --check
+
+   INFO: Analyzed target //:format (24 packages loaded, 2391 targets configured).
+   INFO: Found 1 target...
+   Target //pw_presubmit/py:format up-to-date:
+     bazel-bin/pw_presubmit/py/format
+   INFO: Elapsed time: 20.691s, Critical Path: 0.55s
+   INFO: 5 processes: 10 action cache hit, 5 internal.
+   INFO: Build completed successfully, 5 total actions
+   INFO: Running command line: bazel-bin/pw_presubmit/py/format <args omitted>
+   20250624 13:29:24 WRN Failed to determine the tracking branch, using --base HEAD~1 instead of listing all files
+   20250624 13:29:24 INF Formatting files in the pigweed repo that have changed since HEAD~1
+   20250624 13:29:24 INF Checking formatting for 10 files
+   ./         2 files (1 .json, 1 other)
+   pw_build/  8 files (4 .py, 2 .bazel, 1 .proto, 1 other)
+   20250624 13:29:26 WRN Found 3 files with formatting issues:
+   --- /Users/amontanez/development/projects/pigweed/pigweed/pw_build/py/pw_build/workflows/bazel_driver.py  (original)
+   +++ /Users/amontanez/development/projects/pigweed/pigweed/pw_build/py/pw_build/workflows/bazel_driver.py  (reformatted)
+   @@ -23,6 +23,7 @@
+
+    from pw_build.proto import build_driver_pb2, workflows_pb2
+    from pw_build.workflows.build_driver import BuildDriver
+   +
+
+    class BazelBuildDriver(BuildDriver):
+        def generate_action_sequence(
+   --- /Users/amontanez/development/projects/pigweed/pigweed/pw_build/py/pw_build/workflows/build_driver.py  (original)
+   +++ /Users/amontanez/development/projects/pigweed/pigweed/pw_build/py/pw_build/workflows/build_driver.py  (reformatted)
+   @@ -19,6 +19,7 @@
+
+    from google.protobuf import json_format, text_format
+    from pw_build.proto import build_driver_pb2, workflows_pb2
+   +
+
+    class BuildDriver(abc.ABC):
+        @abc.abstractmethod
+   --- /Users/amontanez/development/projects/pigweed/pigweed/pw_build/py/pw_build/workflows/manager.py  (original)
+   +++ /Users/amontanez/development/projects/pigweed/pigweed/pw_build/py/pw_build/workflows/manager.py  (reformatted)
+   @@ -170,7 +170,9 @@
+                    "USER_ARGS": lambda: forwarded_args,
+                },
+            )
+   -        return project_builder.run_builds(project_builder.ProjectBuilder([recipe]))
+   +        return project_builder.run_builds(
+   +            project_builder.ProjectBuilder([recipe])
+   +        )
+
+        def launch_build(self, build_name: str) -> None:
+            self.launch_builds([build_name])
+   20250624 13:29:26 WRN To fix formatting, run:
+
+     bazel run @pigweed//pw_presubmit/py:format -- pw_build/py/pw_build/workflows/bazel_driver.py pw_build/py/pw_build/workflows/build_driver.py pw_build/py/pw_build/workflows/manager.py
+
+   20250624 13:29:26 ERR Formatting errors found
+
+
+Configuration schema
+====================
+The schema for the configuration will be written in Protobuf, and initially
+loadable through ProtoJSON. Eventually, formats other than ProtoJSON (e.g. TOML)
+may be loadable via this tool for increased flexibility.
+
+Some highlights motivating the decision to use Protobuf:
+
+#. **Implicit schema.** Keeping documentation up-to-date is always challenging.
+   By defining the configuration format in a schema, it's much easier to enforce
+   proper documentation of any format changes. Additionally, ProtoJSON implies
+   schema enforcement.
+#. **Flexibility for format migrations.** Projects may prefer TOML, YAML,
+   Jsonet, or generating a configuration from a Python script. Picking protobuf
+   as the source-of-truth paves a clear path for supporting
+   additional/alternative formats.
+#. **Standardized data types.** By declaring the configuration in Protobuf,
+   fragments can be exported, shared, and loaded as standardized data types
+   that are offered through language-specific codegen. This makes it easier
+   to build supporting tooling in languages other than Python without needing
+   to re-implement many data types and loaders.
+
+All ``name`` fields in this schema are expected to be unique, and validation
+will ensure there are no collisions.
+
+.. code-block:: proto
+
+   // A distinct build configuration.
+   //
+   // Build configurations are expected to be hermetic, meaning that if the
+   // same build configuration is reused across multiple builds it should be
+   // safe to reuse the same build directory or combine builds.
+   message BuildConfig {
+     // Descriptive name for this build configuration. This is used as an ID and
+     // must be unique across a workflow configuration.
+     string name = 1;
+
+     // The name of the driver that should be used for this build configuration.
+     // By default, this is one of:
+     //   - bazel
+     //   - cmake
+     //   - gn
+     string build_type = 2;
+
+     // Arguments that should be passed to underlying build system.
+     repeated string args = 3;
+
+     // Environment variables unique to this build configuration.
+     map<string, string> env = 4;
+
+     // A proto message to forward to the driver.
+     // For driver-specific options, see the proto schema prescribed by
+     // the selected build_type.
+     Any driver_config = 5;
+   }
+
+   // A discrete build.
+   message Build {
+     // A human-readable name for this build. This is used as an ID and
+     // must be unique across a workflow configuration.
+     string name = 1;
+
+     // The configuration that should be used when building the targets
+     // specified by this build.
+     oneof {
+       // The ID/name of a shared BuildConfig.
+       string use_config = 2;
+       // A unique one-off config to use for this build.
+       BuildConfig build_config = 3;
+     }
+
+     // Target patterns that should be built/tested by this configuration.
+     repeated string targets = 4;
+   }
+
+   // A runnable tool.
+   message Tool {
+     // The name that is used to launch this tool. This is used as an ID and
+     // must be unique across a workflow configuration.
+     string name = 1;
+
+     // The configuration that this tool will be built under.
+     oneof {
+       // The ID/name of a shared BuildConfig.
+       string use_config = 2;
+       // A unique one-off config to use when building this tool.
+       BuildConfig build_config = 3;
+     }
+
+     // Target to build and launch.
+     string target = 4;
+
+     enum Type {
+       // A tool that may produce output, mutate the world, require realtime
+       // user interaction, or have side-effects that affect hermeticity of
+       // subsequent actions.
+       // By default, all tools are assumed to be of this kind.
+       INTERACTIVE = 0;
+
+       // A runnable tool that exists *purely* to surface information.
+       // e.g. linters, code style checks, etc.
+       // Theses tools may NOT:
+       //   - Modify files.
+       //   - Upload/download arbitrary files.
+       //   - Modify local system state.
+       //   - Interact with attached devices.
+       ANALYZER = 1;
+     }
+
+     // The type of tool.
+     Type type = 5;
+
+     // For INTERACTIVE tools that can run as an analyzer, the flags
+     // (e.g. --check) that are required to flip the tool into a no-modify
+     // mode that only surfaces warnings/errors.
+     // These flags are not added when directly launching this tool.
+     repeated analyzer_friendly_args = 6;
+   }
+
+   // A series of builds and analyzers that are launchable as a group to
+   // accelerate workflows.
+   //
+   // The builds and analyzers listed in this workflow *may* be ran in order,
+   // but no guarantee is provided. Builds and analyzers listed here should
+   // behave predictably and deterministically when run out-of-order.
+   // Having order-based dependencies in a workflow is considered an
+   // antipattern.
+   message TaskGroup {
+     // The name used to launch this workflow. This is used as an ID and
+     // must be unique across a workflow configuration.
+     string name = 1;
+
+     // The name of builds that should be performed as part of this workflow.
+     repeated string builds = 2;
+
+     // The name of analyzers that should be run as part of this workflow.
+     //
+     // Note: A tool must either be an ``ANALYZER``, or offer
+     // ``analyzer_friendly_args`` for it to be considered safe to run in a
+     // group. This is to protect against things like running ``pw_console`` in
+     // a group.
+     repeated string analyzers = 3;
+   }
+
+   // These options are used when loading ProtoJSON files since JSON doesn't
+   // have any inherent mechanism for sharing/reusing snippets from other files.
+   message ConfigLoaderOptions {
+     message ImportedConfigFragment {
+       // The file to import entries from.
+       // This path is the result of strip/import_prefix of any dependent
+       // configurations.
+       string config_path = 1;
+
+       // The `name`s that should be imported into the current config.
+       // Note that all transitive requirements are also imported. i.e.
+       // importing a TaskGroup will import all referenced builds,
+       // analyzers, build configs, etc.
+       repeated string imported_ids = 1;
+     }
+
+     // Config fragments that should be imported from another
+     // externally-provided file.
+     repeated ImportedConfigFragment imports = 1;
+   }
+
+   // A project The launcher config.
+   message WorkflowSuite {
+     ConfigLoaderOptions loader_options = 1;
+     repeated BuildConfig shared_configs = 2;
+     repeated Build builds = 3;
+     repeated Tool tools = 4;
+     repeated TaskGroup groups = 5;
+   }
+
+Example config
+--------------
+.. code-block:: json
+
+   {
+     "configs": [
+       {
+         "name": "bazel_default",
+         "description": "Default bazel build configuration (usually host)",
+         "build_type": "bazel",
+         "args": [],
+         "env": {}
+       }
+     ],
+     "builds": [
+       {
+         "name": "all_host",
+         "use_config": "bazel_default",
+         "targets": [
+           "//..."
+         ]
+       },
+       {
+         "name": "all_host_cpp20",
+         "build_config": {
+           "name": "bazel_default_cpp20",
+           "description": "Host C++20 build",
+           "build_type": "bazel",
+           "args": [
+             "--//pw_toolchain/cc:cxx_standard=20"
+           ]
+         },
+         "targets": [
+           "//..."
+         ]
+       },
+       {
+         "name": "docs",
+         "use_config": "bazel_default",
+         "targets": [
+           "//docs"
+         ]
+       },
+       {
+         "name": "build_rp2040_tests",
+         "build_config":{
+           "name": "pico_rp2040",
+           "description": "Default Pi Pico build (rp2040)",
+           "build_type": "bazel",
+           "args": [
+             "--config=rp2040",
+             "--build_tests_only"
+           ]
+         },
+         "targets": [
+           "//..."
+         ]
+       },
+       {
+         "name": "build_rp2350_tests",
+         "build_config": {
+           "name": "pico_rp2350",
+           "description": "Default Pi Pico build (rp2350)",
+           "build_type": "bazel",
+           "args": [
+             "--config=rp2350",
+             "--build_tests_only"
+           ]
+         },
+         "targets": [
+           "//..."
+         ]
+       }
+     ],
+     "tools": [
+       {
+         "name": "format",
+         "description": "Find and fix code formatting issues",
+         "type": "INTERACTIVE",
+         "use_config": "bazel_default",
+         "analyzer_friendly_args": ["--check"],
+         "target": "@pigweed//:format"
+       }
+     ],
+     "groups": [
+       {
+         "name": "presubmit",
+         "builds": [
+           "all_host",
+           "docs",
+           "rp2040",
+           "rp2350"
+         ],
+         "analyzers": [
+           "format"
+         ]
+       }
+     ]
+   }
+
+Support for arbitrary build systems
+-----------------------------------
+The schema is intentionally simple, and abstracts complexity behind the
+``build_type`` and ``driver_options`` fields. The ``build_type`` field tells
+the launcher entry point which library/tool is responsible for translating a
+build/run request into a sequence of actions. ``driver_options`` contains
+any special configuration options supported by the library that translates the
+request into a sequence of actions.
+
+The motivations for this structure are:
+
+#. Things that can't be scalably controlled via adding additional build system
+   flags (e.g. disabling RBE across a specific build) can be expressed in
+   simple, well-documented ways.
+#. Projects will be able to define custom build types, and how they translate
+   into a sequence of actions for bespoke multistage builds.
+
+The philosophy is that any builds with the same ``BuildConfig`` are configured
+identically, and any differences between different ``BuildConfig`` definitions
+must be succinctly surfaced at this level of configuration. Beyond that,
+it's up to the build-specific driver to decide how to properly expand that into
+a sequence of shell commands.
+
+----
+FAQs
+----
+
+What will this replace?
+=======================
+* This will eventually replace the ``bazel`` entries in ``pigweed.json``.
+* The legacy ``pw`` plugin system will continue to be supported for the
+  foreseeable future.
+* The ``pw_build`` project builder will be adapted to the needs for this system,
+  though it will not be replaced.
+* ``pw_presubmit`` will continue to be supported as-is for the foreseeable
+  future.
+* ``pw_env_setup`` is unaffected by any of this.
+
+Pigweed may move upstream presubmit, build, and plugin flows to the new system
+over time.
+
+Why a config file rather than libraries?
+========================================
+Pigweed has traditionally served these experiences through library-based
+interfaces rather than forcing projects to define builds through configuration
+files. Unfortunately, the Pigweed team has consistently seen unfortunate
+patterns of unnecessary complexity, fragmentation, and indirection that make it
+harder for developers to understand (or even locate) a project's presubmit/build
+configuration.
+
+Pigweed will continue to offer libraries for these use cases, but a key
+motivation for this proposal is promoting more accessible formats for these
+critical experiences. Projects may elect not to use this tooling, but doing so
+will be a deliberate choice rather than an unintentional divergence.
+
+--------------
+Open questions
+--------------
+
+Build experience
+================
+``pw build`` has traditionally pushed user experience design into the hands of
+downstream projects. This will continue to be supported, but Pigweed will
+provide a better tailored out-of-the-box experience as part of this work. This
+means adjusting the interaction paradigms to be more user friendly.
+
+For example, the ``pw watch`` experience focuses on slim build wrapping to
+offer more control to end users, while ``pw build`` has traditionally biased
+towards more pre-baked configurations with custom arguments that adjust change
+how builds are configured/launched.
+
+Finding the right balance for the Workflows launcher will take iteration beyond
+the scope of this initial proposal.

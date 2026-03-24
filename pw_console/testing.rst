@@ -16,10 +16,32 @@ Run in Test Mode
 
 Begin each section below by running the console in test mode:
 
-.. code-block:: shell
+.. tab-set::
 
-   touch /tmp/empty.yaml
-   env PW_CONSOLE_CONFIG_FILE='/tmp/empty.yaml' pw console --test-mode
+   .. tab-item:: Bazel
+      :sync: bazel
+
+      .. code-block:: shell
+
+         bazelisk run //pw_console/py:pw_console_test_mode
+
+   .. tab-item:: GN
+      :sync: gn
+
+      .. code-block:: shell
+
+         touch /tmp/empty.yaml
+         env PW_CONSOLE_CONFIG_FILE='/tmp/empty.yaml' pw-console --test-mode
+
+Add note to the commit message
+==============================
+
+Add a ``Testing:`` line to your commit message and mention the steps
+executed. For example:
+
+.. code-block:: text
+
+   Testing: Log Pane Steps 1-6
 
 Test Sections
 =============
@@ -314,6 +336,41 @@ Log Pane: Search and Filtering
        | Only logs with Modules other than ``BAT`` appear.
      - |checkbox|
 
+Log Pane: Column Visibility
+^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+.. list-table::
+   :widths: 5 45 45 5
+   :header-rows: 1
+
+   * - #
+     - Test Action
+     - Expected Result
+     - ✅
+
+   * - 1
+     - ``Ctrl-p``
+     - The :guilabel:`Menu Items` command runner dialog appears.
+     - |checkbox|
+
+   * - 2
+     - Type :kbd:`fake device duplicate ` and press :kbd:`enter`.
+     - The ``Fake Device`` is duplicated.
+       hidden.
+     - |checkbox|
+
+   * - 3
+     - Type :kbd:`fake device log show time` and press :kbd:`enter`.
+     - The ``Time`` column on the top left window titled ``Fake Device`` is
+       hidden. ``Time`` should still be visible in the second ``Fake Device``
+       window.
+     - |checkbox|
+
+   * - 4
+     - Type :kbd:`fake device log show time` and press :kbd:`enter`.
+     - The ``Time`` column in the first ``Fake Device`` is visible again.
+     - |checkbox|
+
 Help Windows
 ^^^^^^^^^^^^
 
@@ -483,14 +540,14 @@ Window Management
      - |checkbox|
 
    * - 13
-     - Click the :guilabel:`View > Move Window Right`
+     - Click the :guilabel:`View > Move Window to Next Group`
      - | 3 panes are visible:
        | 1 Log panes on the left
        | 1 Log and Repl pane on the right
      - |checkbox|
 
    * - 14
-     - | Click the menu :guilabel:`Windows > Column 2 View Modes`
+     - | Click the menu :guilabel:`Windows > Group 2 View Modes`
        | Then click :guilabel:`[ ] Tabbed Windows`
      - | 2 panes are visible:
        | 1 Log panes on the left
@@ -541,7 +598,7 @@ Mouse Window Resizing
      - |checkbox|
 
    * - 4
-     - Click the :guilabel:`View > Move Window Right`
+     - Click the :guilabel:`View > Move Window to Next Group`
      - :guilabel:`Fake Device` should appear in a right side split
      - |checkbox|
 
@@ -558,7 +615,7 @@ Mouse Window Resizing
 
    * - 7
      - | Focus on the :guilabel:`Python Repl` window
-       | Click the :guilabel:`View > Move Window Left`
+       | Click the :guilabel:`View > Move Window to Previous Group`
      - | :guilabel:`Python Repl` should appear in a left side split
        | There should be 3 vertical splits in total
      - |checkbox|
@@ -912,16 +969,6 @@ Quit Confirmation Dialog
        | Press :kbd:`Ctrl-d`
      - | The quit dialog appears.
      - |checkbox|
-
-Add note to the commit message
-==============================
-
-Add a ``Testing:`` line to your commit message and mention the steps
-executed. For example:
-
-.. code-block:: text
-
-   Testing: Log Pane Steps 1-6
 
 .. |checkbox| raw:: html
 

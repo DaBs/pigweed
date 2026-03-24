@@ -15,6 +15,7 @@
 load("@rules_python//sphinxdocs:sphinx_docs_library.bzl", "sphinx_docs_library")
 load("//pw_build:compatibility.bzl", "incompatible_with_mcu")
 load("//pw_build:pw_cc_binary.bzl", "pw_cc_binary")
+load("//pw_build:python.bzl", "pw_py_binary")
 
 package(features = ["-layering_check"])
 
@@ -24,6 +25,7 @@ pw_cc_binary(
         "hdlc_rpc_server.cc",
         "main.cc",
     ],
+    features = ["-conversion_warnings"],
     deps = [
         "//pw_assert:check",
         "//pw_hdlc",
@@ -42,4 +44,14 @@ sphinx_docs_library(
     ],
     target_compatible_with = incompatible_with_mcu(),
     visibility = ["//visibility:public"],
+)
+
+pw_py_binary(
+    name = "example_script",
+    srcs = ["example_script.py"],
+    deps = [
+        "//pw_hdlc/py:pw_hdlc",
+        "//pw_rpc/py:pw_rpc",
+        "@pigweed_python_packages//pyserial",
+    ],
 )

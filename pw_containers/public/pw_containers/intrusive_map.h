@@ -18,6 +18,14 @@
 
 namespace pw {
 
+template <typename Key, typename Value>
+class DynamicMap;
+
+/// @module{pw_containers}
+
+/// @defgroup pw_containers_maps Maps
+/// @{
+
 /// A `std::map<Key, T, Compare>`-like class that uses intrusive items.
 ///
 /// Since the map structure is stored in the items themselves, each item must
@@ -87,16 +95,6 @@ class IntrusiveMap {
   using const_pointer = const value_type*;
 
  public:
-  class iterator : public containers::internal::AATreeIterator<T> {
-   public:
-    constexpr iterator() = default;
-
-   private:
-    friend IntrusiveMap;
-    constexpr explicit iterator(GenericIterator iter)
-        : containers::internal::AATreeIterator<T>(iter) {}
-  };
-
   class const_iterator
       : public containers::internal::AATreeIterator<std::add_const_t<T>> {
    public:
@@ -106,6 +104,22 @@ class IntrusiveMap {
     friend IntrusiveMap;
     constexpr explicit const_iterator(GenericIterator iter)
         : containers::internal::AATreeIterator<std::add_const_t<T>>(iter) {}
+  };
+
+  class iterator : public containers::internal::AATreeIterator<T> {
+   public:
+    constexpr iterator() = default;
+
+   private:
+    friend IntrusiveMap;
+    template <typename, typename>
+    friend class DynamicMap;
+
+    constexpr explicit iterator(GenericIterator iter)
+        : containers::internal::AATreeIterator<T>(iter) {}
+
+    constexpr explicit iterator(const_iterator other)
+        : containers::internal::AATreeIterator<T>(other) {}
   };
 
   using reverse_iterator = std::reverse_iterator<iterator>;
@@ -122,9 +136,8 @@ class IntrusiveMap {
   /// @param  compare   Function with the signature `bool(Key, Key)` that is
   ///                   used to order items.
   template <typename Comparator>
-  constexpr explicit IntrusiveMap(Comparator&& compare)
-      : IntrusiveMap(std::forward<Comparator>(compare),
-                     [](const T& t) { return t.key(); }) {}
+  constexpr explicit IntrusiveMap(Comparator compare)
+      : IntrusiveMap(std::move(compare), [](const T& t) { return t.key(); }) {}
 
   /// Constructs an empty map of items.
   ///
@@ -253,7 +266,7 @@ class IntrusiveMap {
   iterator erase(iterator pos) { return iterator(tree_.erase_one(*pos)); }
 
   iterator erase(iterator first, iterator last) {
-    return iterator(tree_.erase_range(*first, *last));
+    return iterator(tree_.erase_range(first, last));
   }
 
   size_t erase(const key_type& key) { return tree_.erase_all(key); }

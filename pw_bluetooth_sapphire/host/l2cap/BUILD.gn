@@ -38,6 +38,7 @@ pw_source_set("definitions") {
 pw_source_set("l2cap") {
   sources = [
     "a2dp_offload_manager.cc",
+    "autosniff.cc",
     "basic_mode_rx_engine.cc",
     "basic_mode_tx_engine.cc",
     "bredr_command_handler.cc",
@@ -68,6 +69,7 @@ pw_source_set("l2cap") {
   ]
   public = [
     "public/pw_bluetooth_sapphire/internal/host/l2cap/a2dp_offload_manager.h",
+    "public/pw_bluetooth_sapphire/internal/host/l2cap/autosniff.h",
     "public/pw_bluetooth_sapphire/internal/host/l2cap/basic_mode_rx_engine.h",
     "public/pw_bluetooth_sapphire/internal/host/l2cap/basic_mode_tx_engine.h",
     "public/pw_bluetooth_sapphire/internal/host/l2cap/bredr_command_handler.h",
@@ -102,11 +104,12 @@ pw_source_set("l2cap") {
   public_deps = [
     ":definitions",
     "$dir_pw_bluetooth:emboss_hci_android",
+    "$dir_pw_bluetooth_sapphire:lease",
     "$dir_pw_bluetooth_sapphire/host/common",
     "$dir_pw_bluetooth_sapphire/host/hci",
     "$dir_pw_bluetooth_sapphire/host/sm:definitions",
     "$dir_pw_bluetooth_sapphire/host/transport",
-    "$dir_pw_third_party/fuchsia:fit",
+    "$pw_external_fuchsia:fit",
     dir_pw_bluetooth,
     dir_pw_string,
   ]
@@ -155,16 +158,16 @@ pw_source_set("testing") {
     "$dir_pw_async:heap_dispatcher",
     "$dir_pw_bluetooth_sapphire/host/common",
     "$dir_pw_bluetooth_sapphire/host/hci-spec",
-    "$dir_pw_third_party/fuchsia:fit",
+    "$pw_external_fuchsia:fit",
   ]
   deps = [
+    "$dir_pw_bluetooth_sapphire/host/testing:gtest_helpers",
     "$dir_pw_bluetooth_sapphire/host/testing:test_helpers",
     dir_pw_unit_test,
   ]
 }
 
 pw_test("l2cap_tests") {
-  enable_if = pw_unit_test_BACKEND == "$dir_pw_unit_test:googletest"
   sources = [
     "a2dp_offload_manager_test.cc",
     "basic_mode_rx_engine_test.cc",
@@ -201,6 +204,7 @@ pw_test("l2cap_tests") {
     ":l2cap",
     ":testing",
     "$dir_pw_async:fake_dispatcher_fixture",
+    "$dir_pw_bluetooth_sapphire:null_lease_provider",
     "$dir_pw_bluetooth_sapphire/host/hci",
     "$dir_pw_bluetooth_sapphire/host/hci:testing",
     "$dir_pw_bluetooth_sapphire/host/testing",
@@ -231,6 +235,7 @@ pw_fuzzer("bredr_dynamic_channel_registry_fuzzer") {
   deps = [
     ":l2cap",
     ":testing",
+    "$dir_pw_bluetooth_sapphire:null_lease_provider",
     "$dir_pw_random:fuzzer_generator",
   ]
 }

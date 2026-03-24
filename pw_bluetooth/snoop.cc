@@ -21,6 +21,9 @@
 
 #include "pw_assert/check.h"
 #include "pw_bluetooth/emboss_util.h"
+#include "pw_bluetooth/hci_common.emb.h"
+#include "pw_bluetooth/hci_data.emb.h"
+#include "pw_bluetooth/hci_events.emb.h"
 #include "pw_bluetooth/snoop.emb.h"
 #include "pw_bluetooth_proxy/h4_packet.h"
 #include "pw_bytes/span.h"
@@ -31,9 +34,260 @@
 #include "pw_result/result.h"
 #include "pw_span/span.h"
 #include "pw_status/status.h"
+#include "pw_stream/stream.h"
+#include "pw_string/string.h"
+#include "pw_string/string_builder.h"
 #include "pw_sync/mutex.h"
+#include "pw_trace/trace.h"
 
 namespace pw::bluetooth {
+
+namespace {
+
+/// Copies as many items from src into dest as possible,
+/// returning the number of items copied.
+/// Note: The spans must not overlap.
+template <typename T>
+size_t CopyMax(span<const T> src, span<T> dest) {
+  size_t n = std::min(src.size(), dest.size());
+  std::copy_n(src.begin(), n, dest.begin());
+  return n;
+}
+
+constexpr uint32_t kEmbossFileVersion = 1;
+constexpr size_t kHeaderSize = 16;
+// BtSnoopEpoch starts at 12am Jan 1st 0AD this is the delta in micro seconds
+// with respect to the unix epoch, see:
+// https://repository.root-me.org/R%C3%A9seau/EN%20-%20fte.com%20-%20BT%20Snoop%20File%20Format.pdf
+// Also see the wireshark implementation:
+// https://github.com/wireshark/wireshark/blob/e1033766e925762fb9b07788c2f1a90e4c04ba93/wiretap/btsnoop.c#L65
+// and
+// https://github.com/wireshark/wireshark/blob/e1033766e925762fb9b07788c2f1a90e4c04ba93/wiretap/btsnoop.c#L203
+constexpr auto kBtSnoopEpochDelta =
+    std::chrono::microseconds(0x00dcddb30f2f8000ULL);
+
+// Generates the snoop log file header
+//
+// @returns the file header
+Result<std::array<uint8_t, kHeaderSize>> GetSnoopLogFileHeader() {
+  std::array<uint8_t, kHeaderSize> file_header_data;
+  pw::Result<emboss::snoop_log::FileHeaderWriter> result =
+      MakeEmbossWriter<emboss::snoop_log::FileHeaderWriter>(file_header_data);
+  if (!result.ok()) {
+    return result.status();
+  }
+  emboss::snoop_log::FileHeaderWriter writer = result.value();
+  constexpr std::array<uint8_t, 8> kBtSnoopIdentificationPatternData = {
+      0x62, 0x74, 0x73, 0x6E, 0x6F, 0x6F, 0x70, 0x00};
+
+  auto identification_pattern_storage =
+      writer.identification_pattern().BackingStorage();
+  PW_CHECK(kBtSnoopIdentificationPatternData.size() ==
+           identification_pattern_storage.SizeInBytes());
+  std::copy(kBtSnoopIdentificationPatternData.begin(),
+            kBtSnoopIdentificationPatternData.end(),
+            identification_pattern_storage.begin());
+  writer.version_number().Write(kEmbossFileVersion);
+  writer.datalink_type().Write(emboss::snoop_log::DataLinkType::HCI_UART_H4);
+  return file_header_data;
+}
+
+void AddTrace(emboss::snoop_log::PacketFlags emboss_packet_flag,
+              const proxy::H4PacketInterface& hci_packet) {
+  pw::InlineString<32> trace_tag;
+  pw::StringBuilder trace_tag_builder(trace_tag);
+
+  uint8_t type = static_cast<uint8_t>(hci_packet.GetH4Type());
+  // Direction uses 0 for incoming, 1 for outcomming packet to match android
+  // BTSL traces.
+  uint8_t direction;
+  switch (emboss_packet_flag) {
+    case emboss::snoop_log::PacketFlags::RECEIVED:
+      direction = 0;
+      break;
+    case emboss::snoop_log::PacketFlags::SENT:
+      direction = 1;
+      break;
+    default:
+      PW_UNREACHABLE;
+      direction = -1;
+  }
+  size_t size = hci_packet.GetHciSpan().size();
+  trace_tag_builder << type << "/" << direction << "/" << size;
+  switch (hci_packet.GetH4Type()) {
+    case emboss::H4PacketType::EVENT: {
+      const auto header =
+          emboss::MakeEventHeaderView(hci_packet.GetHciSpan().data(),
+                                      emboss::EventHeaderView::SizeInBytes());
+      if (!header.IsComplete()) {
+        break;
+      }
+      trace_tag_builder.Format("/%02x", header.event_code_uint().Read());
+      const emboss::EventCode event_code = header.event_code().Read();
+      if (event_code == emboss::EventCode::LE_META_EVENT) {
+        const auto le_meta_event =
+            emboss::MakeLEMetaEventView(hci_packet.GetHciSpan().data(),
+                                        emboss::LEMetaEventView::SizeInBytes());
+        if (!le_meta_event.IsComplete()) {
+          break;
+        }
+        trace_tag_builder.Format("/%02x", le_meta_event.subevent_code().Read());
+      } else if (event_code == emboss::EventCode::VENDOR_DEBUG) {
+        const auto vendor_debug_event = emboss::MakeVendorDebugEventView(
+            hci_packet.GetHciSpan().data(),
+            emboss::VendorDebugEventView::SizeInBytes());
+        if (!vendor_debug_event.IsComplete()) {
+          break;
+        }
+        trace_tag_builder.Format("/%02x",
+                                 vendor_debug_event.subevent_code().Read());
+      }
+    } break;
+    case emboss::H4PacketType::COMMAND: {
+      const auto header = emboss::MakeCommandHeaderView(
+          hci_packet.GetHciSpan().data(),
+          emboss::CommandHeaderView::SizeInBytes());
+      if (!header.IsComplete()) {
+        break;
+      }
+      trace_tag_builder.Format("/%02x",
+                               static_cast<uint8_t>(header.opcode().Read()));
+    } break;
+    case emboss::H4PacketType::ACL_DATA: {
+      const auto header = emboss::MakeAclDataFrameHeaderView(
+          hci_packet.GetHciSpan().data(),
+          emboss::AclDataFrameHeaderView::SizeInBytes());
+      if (!header.IsComplete()) {
+        break;
+      }
+      trace_tag_builder.Format("/%03x/", header.handle().Read());
+      trace_tag_builder << header.packet_boundary_flag().Read();
+    } break;
+    case emboss::H4PacketType::UNKNOWN:
+    case emboss::H4PacketType::SYNC_DATA:
+    case emboss::H4PacketType::ISO_DATA:
+      break;
+  }
+  PW_TRACE_INSTANT_DATA("BTSL",
+                        "Bluetooth",
+                        "@pw_arg_label=%s",
+                        trace_tag_builder.c_str(),
+                        trace_tag_builder.size());
+}
+
+}  // namespace
+
+Snoop::Reader::Reader(Snoop& snoop)
+    : snoop_(&snoop),
+      entry_iterator_(snoop_->queue_.begin()),
+      offset_in_entry_(0),
+      header_offset_(0),
+      was_enabled_(snoop_->Disable()) {}
+
+Snoop::Reader::Reader(Snoop::Reader&& other)
+    : snoop_(other.snoop_),
+      entry_iterator_(std::move(other.entry_iterator_)),
+      offset_in_entry_(other.offset_in_entry_),
+      header_offset_(other.header_offset_),
+      was_enabled_(other.was_enabled_) {
+  other.snoop_ = nullptr;
+}
+
+Snoop::Reader& Snoop::Reader::operator=(Snoop::Reader&& other) {
+  if (this == &other) {
+    return *this;
+  }
+
+  // Not supported due to one Reader policy.
+  PW_CHECK(!snoop_);
+
+  snoop_ = other.snoop_;
+  other.snoop_ = nullptr;
+  entry_iterator_ = std::move(other.entry_iterator_);
+  offset_in_entry_ = other.offset_in_entry_;
+  header_offset_ = other.header_offset_;
+  was_enabled_ = other.was_enabled_;
+  return *this;
+}
+
+Snoop::Reader::~Reader() {
+  if (snoop_ && was_enabled_) {
+    snoop_->ClearReader();
+    snoop_->Enable();
+  }
+}
+
+StatusWithSize Snoop::Reader::DoRead(ByteSpan dest) {
+  size_t bytes_written = 0;
+
+  // Header
+
+  if (header_offset_ < kHeaderSize) {
+    Result<std::array<uint8_t, kHeaderSize>> header = GetSnoopLogFileHeader();
+    if (!header.ok()) {
+      return StatusWithSize::Internal();
+    }
+
+    const size_t num_copied =
+        CopyMax(as_bytes(span(*header)).subspan(header_offset_), dest);
+    header_offset_ += num_copied;
+    bytes_written += num_copied;
+    dest = dest.subspan(num_copied);
+  }
+
+  if (dest.empty()) {
+    return StatusWithSize(bytes_written);
+  }
+
+  std::lock_guard lock(snoop_->queue_lock_);
+
+  // Queue
+  while (!dest.empty() && entry_iterator_ != snoop_->queue_.end()) {
+    const auto& entry = *entry_iterator_;
+    const auto data_parts = entry.contiguous_data();
+
+    ConstByteSpan src;
+    if (offset_in_entry_ < data_parts.first.size()) {
+      src = data_parts.first.subspan(offset_in_entry_);
+    } else {
+      const size_t offset_in_part2 = offset_in_entry_ - data_parts.first.size();
+      src = data_parts.second.subspan(offset_in_part2);
+    }
+
+    const size_t num_copied = CopyMax(src, dest);
+    offset_in_entry_ += num_copied;
+    bytes_written += num_copied;
+    dest = dest.subspan(num_copied);
+
+    if (offset_in_entry_ == entry.size()) {
+      ++entry_iterator_;
+      offset_in_entry_ = 0;
+    }
+  }
+
+  if (bytes_written == 0) {
+    return StatusWithSize::OutOfRange();
+  } else {
+    return StatusWithSize(bytes_written);
+  }
+}
+
+Result<Snoop::Reader> Snoop::GetReader() {
+  {
+    std::lock_guard lock(queue_lock_);
+    if (reader_active_) {
+      return Status::FailedPrecondition();
+    }
+    reader_active_ = true;
+  }
+
+  return Snoop::Reader(*this);
+}
+
+void Snoop::ClearReader() {
+  std::lock_guard lock(queue_lock_);
+  reader_active_ = false;
+}
 
 // Dump the snoop log to the log as a hex string
 Status Snoop::DumpToLog() {
@@ -76,7 +330,11 @@ Status Snoop::DumpToLog() {
 /// @param callback callback to invoke
 Status Snoop::DumpUnlocked(
     const Function<Status(ConstByteSpan data)>& callback) {
-  Status status = DumpSnoopLogFileHeader(callback);
+  Result<std::array<uint8_t, 16>> result = GetSnoopLogFileHeader();
+  if (!result.ok()) {
+    return result.status();
+  }
+  Status status = callback(as_bytes(span(result.value())));
   if (!status.ok()) {
     return status;
   }
@@ -98,8 +356,15 @@ Status Snoop::DumpUnlocked(
 }
 
 void Snoop::AddEntry(emboss::snoop_log::PacketFlags emboss_packet_flag,
-                     proxy::H4PacketInterface& hci_packet) {
+                     const proxy::H4PacketInterface& hci_packet) {
   std::lock_guard lock(queue_lock_);
+  if (!is_enabled_) {
+    return;
+  }
+
+  if (PW_TRACE_ENABLE) {
+    AddTrace(emboss_packet_flag, hci_packet);
+  }
 
   size_t hci_packet_length_to_include = std::min(
       hci_packet.GetHciSpan().size(),
@@ -122,8 +387,9 @@ void Snoop::AddEntry(emboss::snoop_log::PacketFlags emboss_packet_flag,
   writer.header().packet_flags().Write(emboss_packet_flag);
   writer.header().cumulative_drops().Write(0);
   writer.header().timestamp_us().Write(static_cast<int64_t>(
-      std::chrono::time_point_cast<std::chrono::microseconds>(
-          system_clock_.now())
+      (std::chrono::time_point_cast<std::chrono::microseconds>(
+           system_clock_.now()) +
+       kBtSnoopEpochDelta)
           .time_since_epoch()
           .count()));
 
@@ -131,41 +397,14 @@ void Snoop::AddEntry(emboss::snoop_log::PacketFlags emboss_packet_flag,
   writer.packet_h4_type().Write(static_cast<uint8_t>(hci_packet.GetH4Type()));
 
   // write hci packet
-  pw::span<uint8_t> hci_packet_trimmed{hci_packet.GetHciSpan().data(),
-                                       hci_packet_length_to_include};
+  pw::span<const uint8_t> hci_packet_trimmed =
+      hci_packet.GetHciSpan().first(hci_packet_length_to_include);
   PW_CHECK(TryToCopyToEmbossStruct(/*emboss_dest=*/writer.packet_hci_data(),
                                    /*src=*/hci_packet_trimmed));
 
   // save the entry!
   queue_.push_overwrite(
       as_bytes(span{scratch_buffer_.data(), total_entry_size}));
-}
-
-/// Generates the snoop log file header
-///
-/// @returns the file header
-Status Snoop::DumpSnoopLogFileHeader(
-    const Function<Status(ConstByteSpan data)>& callback) {
-  std::array<uint8_t, 16> file_header_data;
-  pw::Result<emboss::snoop_log::FileHeaderWriter> result =
-      MakeEmbossWriter<emboss::snoop_log::FileHeaderWriter>(file_header_data);
-  if (!result.ok()) {
-    return result.status();
-  }
-  emboss::snoop_log::FileHeaderWriter writer = result.value();
-  constexpr std::array<uint8_t, 8> kBtSnoopIdentificationPatternData = {
-      0x62, 0x74, 0x73, 0x6E, 0x6F, 0x6F, 0x70, 0x00};
-
-  auto identification_pattern_storage =
-      writer.identification_pattern().BackingStorage();
-  PW_ASSERT(kBtSnoopIdentificationPatternData.size() ==
-            identification_pattern_storage.SizeInBytes());
-  std::copy(kBtSnoopIdentificationPatternData.begin(),
-            kBtSnoopIdentificationPatternData.end(),
-            identification_pattern_storage.begin());
-  writer.version_number().Write(kEmbossFileVersion);
-  writer.datalink_type().Write(emboss::snoop_log::DataLinkType::HCI_UART_H4);
-  return callback(as_bytes(span(file_header_data)));
 }
 
 }  // namespace pw::bluetooth

@@ -18,97 +18,55 @@
 
 namespace bt::hci {
 
-std::optional<hci_spec::AdvertisingHandle> AdvertisingHandleMap::MapHandle(
-    const DeviceAddress& address, bool extended_pdu) {
-  if (auto it = addr_to_handle_.find({address, extended_pdu});
-      it != addr_to_handle_.end()) {
-    return it->second;
-  }
+AdvertisingHandleMap::AdvertisingHandleMap(uint8_t capacity) {
+  constexpr uint8_t max_capacity =
+      hci_spec::kMaxAdvertisingHandle - hci_spec::kMinAdvertisingHandle + 1;
+  capacity_ = std::min(capacity, max_capacity);
+}
 
-  if (Size() >= capacity_) {
+std::optional<AdvertisementId> AdvertisingHandleMap::Insert(
+    const DeviceAddress& address) {
+  auto next_handle = NextHandle();
+  if (!next_handle) {
     return std::nullopt;
   }
 
-  std::optional<hci_spec::AdvertisingHandle> handle = NextHandle();
-  PW_CHECK(handle);
+  AdvertisementId next_id = AdvertisementId(next_advertisement_id_++);
 
-  addr_to_handle_[{address, extended_pdu}] = handle.value();
-  handle_to_addr_[handle.value()] = {address, extended_pdu};
-  return handle;
+  Value value;
+  value.handle = next_handle.value();
+  value.address = address;
+  value.node = node_.CreateChild(node_.UniqueName("advertising_set_"));
+  value.node.RecordString("address", address.ToString());
+  value.node.RecordUint("handle", next_handle.value());
+  value.node.RecordString("id", next_id.ToString());
+
+  PW_CHECK(map_.try_emplace(next_id, std::move(value)).second);
+  PW_CHECK(handle_to_id_.try_emplace(next_handle.value(), next_id).second);
+
+  return next_id;
 }
 
-// Convert a DeviceAddress to an AdvertisingHandle. The conversion may fail if
-// there is no AdvertisingHandle currently mapping to the provided device
-// address.
-std::optional<hci_spec::AdvertisingHandle> AdvertisingHandleMap::GetHandle(
-    const DeviceAddress& address, bool extended_pdu) const {
-  if (auto it = addr_to_handle_.find({address, extended_pdu});
-      it != addr_to_handle_.end()) {
-    return it->second;
-  }
-
-  return std::nullopt;
+hci_spec::AdvertisingHandle AdvertisingHandleMap::GetHandle(
+    AdvertisementId id) const {
+  auto iter = map_.find(id);
+  PW_CHECK(iter != map_.end());
+  return iter->second.handle;
 }
 
-std::optional<DeviceAddress> AdvertisingHandleMap::GetAddress(
+DeviceAddress AdvertisingHandleMap::GetAddress(AdvertisementId id) const {
+  auto iter = map_.find(id);
+  PW_CHECK(iter != map_.end());
+  return iter->second.address;
+}
+
+std::optional<AdvertisementId> AdvertisingHandleMap::GetId(
     hci_spec::AdvertisingHandle handle) const {
-  if (handle_to_addr_.count(handle) != 0) {
-    const auto& [address, extended] = handle_to_addr_.at(handle);
-    return address;
-  }
-
-  return std::nullopt;
-}
-
-void AdvertisingHandleMap::RemoveHandle(hci_spec::AdvertisingHandle handle) {
-  if (handle_to_addr_.count(handle) == 0) {
-    return;
-  }
-
-  const auto& [address, extended] = handle_to_addr_[handle];
-  addr_to_handle_.erase({address, extended});
-  handle_to_addr_.erase(handle);
-}
-
-void AdvertisingHandleMap::RemoveAddress(const DeviceAddress& address,
-                                         bool extended) {
-  auto node = addr_to_handle_.extract({address, extended});
-  if (node.empty()) {
-    return;
-  }
-
-  hci_spec::AdvertisingHandle handle = node.mapped();
-  handle_to_addr_.erase(handle);
-}
-
-std::size_t AdvertisingHandleMap::Size() const {
-  PW_CHECK(addr_to_handle_.size() == handle_to_addr_.size());
-  return addr_to_handle_.size();
-}
-
-bool AdvertisingHandleMap::Empty() const {
-  PW_CHECK(addr_to_handle_.empty() == handle_to_addr_.empty());
-  return addr_to_handle_.empty();
-}
-
-void AdvertisingHandleMap::Clear() {
-  last_handle_ = kStartHandle;
-  addr_to_handle_.clear();
-  handle_to_addr_.clear();
-}
-
-std::optional<hci_spec::AdvertisingHandle> AdvertisingHandleMap::NextHandle() {
-  if (Size() >= capacity_) {
+  auto iter = handle_to_id_.find(handle);
+  if (iter == handle_to_id_.end()) {
     return std::nullopt;
   }
-
-  hci_spec::AdvertisingHandle handle = last_handle_;
-  do {
-    handle = static_cast<uint8_t>(handle + 1) % capacity_;
-  } while (handle_to_addr_.count(handle) != 0);
-
-  last_handle_ = handle;
-  return handle;
+  return iter->second;
 }
 
 std::optional<hci_spec::AdvertisingHandle>
@@ -119,4 +77,34 @@ AdvertisingHandleMap::LastUsedHandleForTesting() const {
 
   return last_handle_;
 }
+
+std::optional<hci_spec::AdvertisingHandle> AdvertisingHandleMap::NextHandle() {
+  if (Size() >= capacity_) {
+    return std::nullopt;
+  }
+
+  // We avoid selecting an advertising handle with value 0 because some
+  // Controllers reserve advertising handle 0 for the legacy HCI LE command use.
+  hci_spec::AdvertisingHandle handle = last_handle_;
+  do {
+    handle = static_cast<uint8_t>(handle + 1) % (capacity_ + 1);
+  } while (handle == 0 || handle_to_id_.count(handle) != 0);
+
+  last_handle_ = handle;
+  return handle;
+}
+
+void AdvertisingHandleMap::Erase(AdvertisementId id) {
+  auto iter = map_.find(id);
+  if (iter == map_.end()) {
+    return;
+  }
+  handle_to_id_.erase(iter->second.handle);
+  map_.erase(iter);
+}
+
+void AdvertisingHandleMap::AttachInspect(inspect::Node& parent) {
+  node_ = parent.CreateChild("advertising_handle_map");
+}
+
 }  // namespace bt::hci

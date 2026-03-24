@@ -15,7 +15,6 @@
 import("//build_overrides/pigweed.gni")
 
 import("$dir_pw_build/target_types.gni")
-import("$dir_pw_docgen/docs.gni")
 import("$dir_pw_unit_test/test.gni")
 
 config("public_include_path") {
@@ -43,10 +42,7 @@ pw_source_set("standard_library") {
   remove_public_deps = [ "*" ]
   public =
       [ "standard_library_public/pw_polyfill/standard_library/namespace.h" ]
-  visibility = [
-    ":*",
-    "$dir_pw_minimal_cpp_stdlib:*",
-  ]
+  visibility = [ ":*" ]
 }
 
 pw_test_group("tests") {
@@ -62,13 +58,5 @@ pw_test("test") {
   sources = [
     "c_test.c",
     "test.cc",
-  ]
-}
-
-pw_doc_group("docs") {
-  sources = [ "docs.rst" ]
-  inputs = [
-    "Kconfig",
-    "c_test.c",
   ]
 }

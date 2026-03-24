@@ -14,8 +14,6 @@
 
 #pragma once
 
-/// Provides basic helpers for reading and writing UTF-8 encoded strings.
-
 #include <array>
 #include <cstdint>
 #include <string_view>
@@ -25,7 +23,12 @@
 #include "pw_string/string_builder.h"
 
 namespace pw {
+
+/// Provides basic helpers for reading and writing UTF-8-encoded strings.
 namespace utf {
+
+/// @submodule{pw_string,utf8}
+
 /// Checks if the code point is in a valid range.
 ///
 /// Excludes the surrogate code points (`[0xD800, 0xDFFF]`) and
@@ -80,9 +83,15 @@ class CodePointAndSize final {
   static constexpr size_t kSizeShift = sizeof(uint32_t) * 8 - kSizeBits;
   uint32_t code_point_;
 };
+
+/// @}
+
 }  // namespace utf
 
 namespace utf8 {
+
+/// @submodule{pw_string,utf8}
+
 /// @brief Reads the first code point from a UTF-8 encoded `str`.
 ///
 /// This is a very basic decoder without much thought for performance and very
@@ -90,17 +99,10 @@ namespace utf8 {
 /// each byte of a multibyte sequence has a continuation character. See
 /// `pw::utf8::EncodeCharacter()` for encoding details.
 ///
-/// @return @rst
-///
-/// .. pw-status-codes::
-///
-///    OK: The decoded code point and the number of bytes read.
-///
-///    INVALID_ARGUMENT: The string was empty or malformed.
-///
-///    OUT_OF_RANGE: The decoded code point was not in the valid range.
-///
-/// @endrst
+/// @returns @Result{the decoded code point and the number of bytes read}
+/// * @OK: The decoded code point and the number of bytes read.
+/// * @INVALID_ARGUMENT: The string was empty or malformed.
+/// * @OUT_OF_RANGE: The decoded code point was not in the valid range.
 constexpr pw::Result<utf::CodePointAndSize> ReadCodePoint(
     std::string_view str) {
   if (str.empty()) {
@@ -208,16 +210,9 @@ class EncodedCodePoint {
 /// [0x10000, 0x10FFFF] 4-bytes: b1111 0xxx 10xx xxxx 10xx xxxx 10xx xxxx
 /// @endcode
 ///
-/// @return @rst
-///
-/// .. pw-status-codes::
-///
-///    OK: The codepoint encoded as UTF-8.
-///
-///    OUT_OF_RANGE: The code point was not in the valid range for UTF-8
-///    encoding.
-///
-/// @endrst
+/// @returns @Result{the codepoint encoded as UTF-8}
+/// * @OUT_OF_RANGE: The code point was not in the valid range for UTF-8
+///   encoding.
 constexpr Result<EncodedCodePoint> EncodeCodePoint(uint32_t code_point) {
   if (code_point <= 0x7F) {
     return EncodedCodePoint{1, {static_cast<char>(code_point)}};
@@ -248,6 +243,8 @@ constexpr Result<EncodedCodePoint> EncodeCodePoint(uint32_t code_point) {
 
 /// Helper that writes a code point to the provided `pw::StringBuilder`.
 Status WriteCodePoint(uint32_t code_point, pw::StringBuilder& output);
+
+/// @}
 
 }  // namespace utf8
 

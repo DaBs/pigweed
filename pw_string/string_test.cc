@@ -83,8 +83,6 @@ class EvenNumberIterator {
   value_type value_;
 };
 
-#ifdef __cpp_deduction_guides
-
 TEST(InlineString, DeduceBasicString_Char) {
   InlineBasicString string_10("1234567890");
   static_assert(std::is_same_v<decltype(string_10), InlineString<10>>);
@@ -107,7 +105,9 @@ TEST(InlineString, DeduceBasicString_Int) {
 }
 
 // Test CTAD on the InlineString alias, if supported.
-#if __cpp_deduction_guides >= 201907L
+// GCC 12 selects the protected size_type constructor instead of the char array
+// reference constructor, so exclude GCC for now.
+#if __cpp_deduction_guides >= 201907L && defined(__clang__)
 
 TEST(InlineString, DeduceString) {
   InlineString string("123456789");
@@ -116,8 +116,7 @@ TEST(InlineString, DeduceString) {
   EXPECT_STREQ("123456789", string.c_str());
 }
 
-#endif  // __cpp_deduction_guides >= 201907L
-#endif  // __cpp_deduction_guides
+#endif  // __cpp_deduction_guides >= 201907L  && defined(__clang__)
 
 template <typename T, size_t kExpectedSize>
 constexpr bool TestEqual(const T* string, const T (&expected)[kExpectedSize]) {

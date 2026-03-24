@@ -14,47 +14,23 @@
 
 """Bazel transitions for the host device simulator."""
 
-def _host_device_simulator_transition_impl(settings, attr):
-    # buildifier: disable=unused-variable
-    _ignore = settings, attr
-    return {
-        str(Label("//pw_log:backend")): str(Label("//pw_log_string")),
-        str(Label("//pw_log:backend_impl")): str(Label("//pw_log_string:impl")),
-        str(Label("//pw_log_string:handler_backend")): str(Label("//pw_system:log_backend")),
-        str(Label("//pw_sys_io:backend")): str(Label("//pw_sys_io_stdio")),
-        str(Label("//pw_system:io_backend")): str(Label("//pw_system:socket_target_io")),
-    }
+load("@rules_platform//platform_data:defs.bzl", "platform_data")
 
-_host_device_simulator_transition = transition(
-    implementation = _host_device_simulator_transition_impl,
-    inputs = [],
-    outputs = [
-        str(Label("//pw_log:backend")),
-        str(Label("//pw_log:backend_impl")),
-        str(Label("//pw_log_string:handler_backend")),
-        str(Label("//pw_sys_io:backend")),
-        str(Label("//pw_system:io_backend")),
-    ],
-)
+def _host_device_simulator_binary_impl(name, binary, **kwargs):
+    platform_data(
+        name = name,
+        target = binary,
+        platform = Label("//targets/host_device_simulator"),
+        **kwargs
+    )
 
-def _host_device_simulator_binary_impl(ctx):
-    out = ctx.actions.declare_file(ctx.label.name)
-    ctx.actions.symlink(output = out, is_executable = True, target_file = ctx.executable.binary)
-    return [DefaultInfo(files = depset([out]), executable = out)]
-
-host_device_simulator_binary = rule(
-    _host_device_simulator_binary_impl,
+host_device_simulator_binary = macro(
+    implementation = _host_device_simulator_binary_impl,
+    inherit_attrs = "common",
     attrs = {
         "binary": attr.label(
             doc = "cc_binary build for the host_device_simulator",
-            cfg = _host_device_simulator_transition,
-            executable = True,
             mandatory = True,
         ),
-        "_allowlist_function_transition": attr.label(
-            default = "@bazel_tools//tools/allowlists/function_transition_allowlist",
-        ),
     },
-    doc = "Builds the specified binary for the host_device_simulator platform",
-    executable = True,
 )

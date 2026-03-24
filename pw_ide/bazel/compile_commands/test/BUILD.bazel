@@ -1,0 +1,170 @@
+# Copyright 2025 The Pigweed Authors
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may not
+# use this file except in compliance with the License. You may obtain a copy of
+# the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations under
+# the License.
+
+load("@rules_cc//cc:cc_binary.bzl", "cc_binary")
+load("@rules_cc//cc:cc_library.bzl", "cc_library")
+load("@rules_platform//platform_data:defs.bzl", "platform_data")
+load("//pw_ide/bazel/compile_commands:pw_cc_compile_commands_aspect.bzl", "pw_cc_compile_commands_fragments")
+load("//pw_ide/bazel/compile_commands:pw_compile_commands_generator.bzl", "pw_compile_commands_generator")
+
+package(
+    default_testonly = True,
+)
+
+# All the build targets in this directory are in service of the
+# compile_commands_test suite that ensures various edge cases are properly
+# captured in collected compile commands. For this reason, they're all tagged
+# as "manual" so they're only picked up when building the integration test.
+
+# Basic coverage of a library with virtual includes.
+cc_library(
+    name = "basic_library_virtual_includes",
+    srcs = ["basic_source_virt_test.cc"],
+    hdrs = ["public/virtual_included_header.h"],
+    # Virtual include path.
+    strip_include_prefix = "public",
+    tags = ["manual"],
+)
+
+# Basic coverage of a library with headers/cc files.
+cc_library(
+    name = "basic_library_direct_includes",
+    srcs = ["basic_source_test.cc"],
+    hdrs = ["public/real_included_header.h"],
+    additional_compiler_inputs = ["uncompiled_cc_test.cc"],
+    includes = ["public"],
+    tags = ["manual"],
+)
+
+# Coverage of a library that has deps, but no headers/includes/srcs.
+cc_library(
+    name = "shim_library",
+    implementation_deps = [":basic_library_virtual_includes"],
+    tags = ["manual"],
+)
+
+# Coverage of a library with assembly files.
+cc_library(
+    name = "asm_library",
+    srcs = ["asm_src_test.S"],
+    hdrs = ["public/asm_hdr.S"],
+    strip_include_prefix = "public",
+    tags = ["manual"],
+)
+
+# Coverage of a binary's transitive dependencies.
+cc_binary(
+    name = "basic_binary",
+    srcs = ["basic_binary_test.cc"],
+    tags = ["manual"],
+    deps = [
+        ":asm_library",
+        ":basic_library_direct_includes",
+        # We should still get compile commands for the transitive dependencies.
+        ":shim_library",
+    ],
+)
+
+# A library that depends on an external repository.
+cc_library(
+    name = "external_dep_library",
+    srcs = ["external_dep_source.cc"],
+    tags = ["manual"],
+    deps = ["@pw_cc_compile_commands_test_external//:external_lib"],
+)
+
+cc_library(
+    name = "non_cpp_deps",
+    # This is nonsense, but shouldn't break anything.
+    data = [
+        "@pigweed_python_packages//sphinx",
+    ],
+    tags = ["manual"],
+)
+
+# Coverage of platform_data.
+platform_data(
+    name = "mcu_transition",
+    platform = "//targets/rp2040",
+    tags = ["manual"],
+    target = ":basic_binary",
+)
+
+# This ensures that things like module map files are generated before
+# we integration test against clangd.
+filegroup(
+    name = "test_compile_commands_outputs",
+    srcs = [
+        ":basic_library_direct_includes",
+        ":basic_library_virtual_includes",
+        ":external_dep_library",
+        ":mcu_transition",
+        ":non_cpp_deps",
+    ],
+    tags = ["manual"],
+    visibility = ["//pw_ide/py:__subpackages__"],
+)
+
+pw_cc_compile_commands_fragments(
+    name = "test_compile_commands",
+    tags = ["manual"],
+    targets = [
+        ":test_compile_commands_outputs",
+    ],
+    visibility = ["//pw_ide/py:__subpackages__"],
+)
+
+pw_compile_commands_generator(
+    name = "test_compile_commands_generator",
+    tags = ["manual"],
+    visibility = ["//pw_ide/py:__subpackages__"],
+    deps = [
+        ":test_device_compile_commands",
+        ":test_host_compile_commands",
+    ],
+)
+
+pw_compile_commands_generator(
+    name = "test_host_compile_commands",
+    platform = "@bazel_tools//tools:host_platform",
+    tags = ["manual"],
+    target_patterns = [
+        "//pw_ide/bazel/compile_commands/test/...",
+        "//pw_ide/bazel/compile_commands/test:test_compile_commands_outputs",
+        "//pw_ide/bazel/compile_commands/test:external_dep_library",
+    ],
+)
+
+pw_compile_commands_generator(
+    name = "test_device_compile_commands",
+    platform = "//targets/rp2040",
+    tags = ["manual"],
+    target_patterns = [
+        "//pw_ide/bazel/compile_commands/test/...",
+        "...",
+        ":test_compile_commands_outputs",
+        ":external_dep_library",
+    ],
+)
+
+pw_compile_commands_generator(
+    name = "test_prefix_compile_commands_generator",
+    platform = "@bazel_tools//tools:host_platform",
+    symlink_prefix = "custom_out/",
+    tags = ["manual"],
+    target_patterns = [
+        "//pw_ide/bazel/compile_commands/test:basic_binary",
+    ],
+    visibility = ["//pw_ide/py:__subpackages__"],
+)

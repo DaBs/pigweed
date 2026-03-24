@@ -16,9 +16,9 @@
 #include <algorithm>
 #include <array>
 #include <cstddef>
-#include <cstdint>
 #include <iterator>
 #include <type_traits>
+#include <utility>
 
 #include "pw_assert/assert.h"
 
@@ -42,16 +42,12 @@ struct Pair {
 template <typename T1, typename T2>
 Pair(T1, T2) -> Pair<T1, T2>;
 
+/// @module{pw_containers}
+
+/// @addtogroup pw_containers_maps
+/// @{
+
 /// A simple, fixed-size associative array with lookup by key or value.
-///
-/// FlatMaps can be initialized by:
-/// @rst
-/// .. literalinclude:: examples/flat_map.cc
-///    :language: cpp
-///    :linenos:
-///    :start-after: [pw_containers-flat_map]
-///    :end-before: [pw_containers-flat_map]
-/// @endrst
 ///
 /// The keys do not need to be sorted as the constructor will sort the items
 /// if need be.
@@ -133,6 +129,11 @@ class FlatMap {
 
   constexpr FlatMap(const std::array<value_type, kArraySize>& items)
       : items_(items) {
+    ConstexprSort(items_.begin(), kArraySize);
+  }
+
+  constexpr FlatMap(std::array<value_type, kArraySize>&& items)
+      : items_(std::move(items)) {
     ConstexprSort(items_.begin(), kArraySize);
   }
 

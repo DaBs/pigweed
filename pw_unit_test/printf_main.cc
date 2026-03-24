@@ -15,7 +15,10 @@
 #include "pw_unit_test/framework.h"
 #include "pw_unit_test/printf_event_handler.h"
 
-int main() {
+int main(int argc, char** argv) {
+  // Make the binary compatible with pw_unit_test:googletest. Has no effect
+  // when using pw_unit_test:light.
+  testing::InitGoogleTest(&argc, argv);
   pw::unit_test::PrintfEventHandler handler;
   pw::unit_test::RegisterEventHandler(&handler);
   return RUN_ALL_TESTS();

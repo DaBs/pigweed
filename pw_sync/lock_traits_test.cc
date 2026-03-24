@@ -14,10 +14,20 @@
 
 #include "pw_sync/lock_traits.h"
 
-#include "pw_sync/lock_testing.h"
+#include "pw_sync/test/lock_testing.h"
 #include "pw_unit_test/framework.h"
 
-namespace pw::sync::test {
+using pw::sync::is_basic_lockable_v;
+using pw::sync::is_lockable_for_v;
+using pw::sync::is_lockable_until_v;
+using pw::sync::is_lockable_v;
+using pw::sync::is_timed_lockable_v;
+using pw::sync::test::FakeBasicLockable;
+using pw::sync::test::FakeClock;
+using pw::sync::test::FakeLockable;
+using pw::sync::test::FakeTimedLockable;
+using pw::sync::test::NotAClock;
+
 namespace {
 
 struct NotALock {};
@@ -61,4 +71,3 @@ TEST(LockTraitsTest, IsTimedLockable) {
 }
 
 }  // namespace
-}  // namespace pw::sync::test

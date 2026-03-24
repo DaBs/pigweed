@@ -432,6 +432,13 @@ TEST(DataElementTest, SetAndGetUrl) {
   EXPECT_EQ(std::string("https://foobar.dev"), *elem.GetUrl());
 }
 
+TEST(DataElementTest, SetEmptyUrlIgnored) {
+  DataElement url_elem;
+  url_elem.SetUrl(std::string(""));
+  std::optional<std::string> url = url_elem.GetUrl();
+  EXPECT_FALSE(url);
+}
+
 TEST(DataElementTest, SetAndGetAlt) {
   std::vector<DataElement> alternatives;
   DataElement elem1;

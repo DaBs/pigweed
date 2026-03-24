@@ -113,8 +113,13 @@ void FakeChannel::SignalLinkError() {
 bool FakeChannel::Send(ByteBufferPtr sdu) {
   PW_DCHECK(sdu);
 
-  if (!send_cb_)
+  if (!send_cb_) {
+    bt_log(
+        DEBUG,
+        "l2cap",
+        "Dropping SDU and returning error because no send callback configured");
     return false;
+  }
 
   if (sdu->size() > max_tx_sdu_size()) {
     bt_log(ERROR,
@@ -168,6 +173,10 @@ void FakeChannel::RequestAclPriority(
 void FakeChannel::SetBrEdrAutomaticFlushTimeout(
     pw::chrono::SystemClock::duration flush_timeout,
     hci::ResultCallback<> callback) {
+  if (flush_timeout_cb_) {
+    flush_timeout_cb_(flush_timeout, std::move(callback));
+    return;
+  }
   if (!flush_timeout_succeeds_) {
     callback(ToResult(pw::bluetooth::emboss::StatusCode::UNSPECIFIED_ERROR));
     return;

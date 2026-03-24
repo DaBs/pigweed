@@ -39,16 +39,7 @@ Result<Client::Handle> Client::Read(
   }
 
   if (!has_read_stream_) {
-    rpc::RawClientReaderWriter read_stream =
-        client_.Read(nullptr,  // on_next will be set by the transfer_thread.
-                     [this](Status status) {
-                       OnRpcError(status, internal::TransferType::kReceive);
-                     });
-    transfer_thread_.SetClientReadStream(
-        read_stream, [this](ConstByteSpan chunk) {
-          transfer_thread_.ProcessClientChunk(chunk);
-        });
-    has_read_stream_ = true;
+    OpenReadStream(internal::SetStreamBehavior::kNewClient);
   }
 
   Handle handle = AssignHandle();
@@ -86,16 +77,7 @@ Result<Client::Handle> Client::Write(
   }
 
   if (!has_write_stream_) {
-    rpc::RawClientReaderWriter write_stream =
-        client_.Write(nullptr,  // on_next will be set by the transfer thread.
-                      [this](Status status) {
-                        OnRpcError(status, internal::TransferType::kTransmit);
-                      });
-    transfer_thread_.SetClientWriteStream(
-        write_stream, [this](ConstByteSpan chunk) {
-          transfer_thread_.ProcessClientChunk(chunk);
-        });
-    has_write_stream_ = true;
+    OpenWriteStream(internal::SetStreamBehavior::kNewClient);
   }
 
   Handle handle = AssignHandle();
@@ -132,11 +114,65 @@ void Client::OnRpcError(Status status, internal::TransferType type) {
                is_write_error ? "Write()" : "Read()",
                status.code());
 
-  if (is_write_error) {
-    has_write_stream_ = false;
+  if (status == Status::FailedPrecondition()) {
+    if (is_write_error) {
+      has_write_stream_ = false;
+      OpenWriteStream(internal::SetStreamBehavior::kReopen);
+    } else {
+      has_read_stream_ = false;
+      OpenReadStream(internal::SetStreamBehavior::kReopen);
+    }
   } else {
-    has_read_stream_ = false;
+    if (is_write_error) {
+      has_write_stream_ = false;
+      transfer_thread_.CloseClientWriteStream(this);
+    } else {
+      has_read_stream_ = false;
+      transfer_thread_.CloseClientReadStream(this);
+    }
   }
+}
+
+void Client::OpenReadStream(internal::SetStreamBehavior behavior) {
+  if (has_read_stream_) {
+    return;
+  }
+  auto on_read_error = [this](Status status) {
+    OnRpcError(status, internal::TransferType::kReceive);
+  };
+  // on_next will be set by the transfer thread
+  rpc::RawClientReaderWriter read_stream =
+      client_.Read(nullptr, on_read_error, on_read_error);
+
+  transfer_thread_.SetClientReadStream(
+      read_stream,
+      this,
+      [this](ConstByteSpan chunk) {
+        transfer_thread_.ProcessClientChunk(chunk);
+      },
+      behavior);
+  has_read_stream_ = true;
+}
+
+void Client::OpenWriteStream(internal::SetStreamBehavior behavior) {
+  if (has_write_stream_) {
+    return;
+  }
+  auto on_write_error = [this](Status status) {
+    OnRpcError(status, internal::TransferType::kTransmit);
+  };
+  // on_next will be set by the transfer thread
+  rpc::RawClientReaderWriter write_stream =
+      client_.Write(nullptr, on_write_error, on_write_error);
+
+  transfer_thread_.SetClientWriteStream(
+      write_stream,
+      this,
+      [this](ConstByteSpan chunk) {
+        transfer_thread_.ProcessClientChunk(chunk);
+      },
+      behavior);
+  has_write_stream_ = true;
 }
 
 }  // namespace pw::transfer

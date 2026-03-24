@@ -30,8 +30,15 @@ elseif(pw_third_party_nanopb_ADD_SUBDIRECTORY)
   add_subdirectory("${dir_pw_third_party_nanopb}" third_party/nanopb)
 endif()
 
+if(CONFIG_ZEPHYR_PIGWEED_MODULE)
+# The nanopb Zephyr module adds nanopb to the Zephyr interface
+# Use this target, as the native nanopb target is not aware of Zephyr-provided
+# build flags
+set(nanopb_main_library zephyr_interface)
+else()
 set(nanopb_main_library
     $<IF:$<TARGET_EXISTS:protobuf-nanopb-static>,protobuf-nanopb-static,protobuf-nanopb>)
+endif()
 
 add_library(pw_third_party.nanopb INTERFACE)
 target_link_libraries(pw_third_party.nanopb INTERFACE "${nanopb_main_library}")
@@ -53,6 +60,7 @@ add_custom_command(
     python3
     "${CMAKE_CURRENT_LIST_DIR}/generate_nanopb_proto.py"
     --nanopb-root "${dir_pw_third_party_nanopb}"
+    --nanopb-pb2-dir "${_pw_protobuf_compiler_NANOPB_PB2_DIR}"
     --protoc-binary "$ENV{PW_PIGWEED_CIPD_INSTALL_DIR}/bin/protoc"
   DEPENDS
     "${CMAKE_CURRENT_LIST_DIR}/generate_nanopb_proto.py"
@@ -70,8 +78,6 @@ add_custom_command(
     "${dir_pw_third_party_nanopb}/generator/proto/nanopb.proto"
     "${dir_pw_third_party_nanopb}/generator/proto/_utils.py"
     "${dir_pw_third_party_nanopb}/generator/protoc-gen-nanopb"
-    "${dir_pw_third_party_nanopb}/generator/nanopb_generator.py2"
-    "${dir_pw_third_party_nanopb}/generator/protoc-gen-nanopb-py2"
     "${dir_pw_third_party_nanopb}/generator/protoc"
     "${dir_pw_third_party_nanopb}/generator/protoc-gen-nanopb.bat"
     "${dir_pw_third_party_nanopb}/generator/protoc.bat"

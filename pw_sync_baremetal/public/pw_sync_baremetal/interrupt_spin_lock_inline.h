@@ -15,7 +15,6 @@
 
 #include "pw_assert/assert.h"
 #include "pw_sync/interrupt_spin_lock.h"
-#include "pw_sync/yield_core.h"
 
 namespace pw::sync {
 

@@ -35,10 +35,6 @@ Depend on the library:
            ]
          }
 
-      This assumes that your Bazel ``WORKSPACE`` has a `repository
-      <https://bazel.build/concepts/build-ref#repositories>`_ named ``@pigweed``
-      that points to the upstream Pigweed repository.
-
    .. tab-item:: GN
       :sync: gn
 
@@ -120,8 +116,8 @@ Allocating buffers when encoding
 
          #include "pw_assert/check.h"
          #include "pw_bytes/span.h"
-         #include "pw_hdlc/encoder"
          #include "pw_hdlc/encoded_size.h"
+         #include "pw_hdlc/encoder"
          #include "pw_status/status.h"
 
          // The max on-the-wire size in bytes of a single HDLC frame after encoding.
@@ -131,9 +127,7 @@ Allocating buffers when encoding
 
          // Any data encoded to this buffer is guaranteed to fit in the MTU after
          // HDLC encoding.
-         pw::ConstByteSpan GetRpcEncodeBuffer() {
-           return rpc_encode_buffer;
-         }
+         pw::ConstByteSpan GetRpcEncodeBuffer() { return rpc_encode_buffer; }
 
 .. _module-pw_hdlc-guide-decode:
 

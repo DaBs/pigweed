@@ -16,7 +16,7 @@ load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("@rules_python//sphinxdocs:sphinx_docs_library.bzl", "sphinx_docs_library")
 load("//pw_build:compatibility.bzl", "incompatible_with_mcu")
 load("//pw_build:merge_flags.bzl", "flags_from_dict")
-load("//pw_build:pigweed.bzl", "pw_linker_script")
+load("//pw_build:pw_linker_script.bzl", "pw_linker_script")
 
 package(default_visibility = ["//visibility:public"])
 
@@ -30,7 +30,7 @@ platform(
         "//pw_build/constraints/arm:cortex-m33",
         "@platforms//cpu:armv8-m",
         "@platforms//os:none",
-        "@rust_crates//:no_std",
+        "//pw_build/constraints/rust:no_std",
     ],
     flags = flags_from_dict({
         "@mcuxpresso//:user_config": "//targets/mimxrt595_evk:mcuxpresso_sdk_lib_config",
@@ -144,7 +144,7 @@ cc_library(
         "//pw_malloc",
         "//pw_preprocessor",
         "//pw_sys_io_mcuxpresso",
-        "//pw_toolchain:infinite_loop",
+        "//pw_toolchain:busy_wait_forever",
         "//targets:mcuxpresso_sdk",
         "//targets/mimxrt595_evk/config",
     ],

@@ -41,37 +41,36 @@ underlying buffer.
 
      class MutilSink {
       public:
-      ...
+       // ...
 
-        class Drain {
-           ...
+       class Drain {
+         // ...
 
-           // Both two APIs beturn size in bytes of the valid data in the
-           // underlying buffer that has not been read by this drain.
+         // Both two APIs beturn size in bytes of the valid data in the
+         // underlying buffer that has not been read by this drain.
 
-           // This is a thread unsafe version. It requires the `lock` of
-           // `multisink` being held. For example, it can be used inside
-           // Listeners' methods, where lock already held, to check size
-           // on handling each new entry.
-           size_t UnsafeGetUnreadEntriesSize() PW_NO_LOCK_SAFETY_ANALYSIS;
+         // This is a thread unsafe version. It requires the `lock` of
+         // `multisink` being held. For example, it can be used inside
+         // Listeners' methods, where lock already held, to check size
+         // on handling each new entry.
+         size_t UnsafeGetUnreadEntriesSize() PW_NO_LOCK_SAFETY_ANALYSIS;
 
-           // A thread-safe verson.
-           size_t GetUnreadEntriesSize() PW_LOCKS_EXCLUDED(multisink_->lock_);
+         // A thread-safe verson.
+         size_t GetUnreadEntriesSize() PW_LOCKS_EXCLUDED(multisink_->lock_);
 
-           ...
+         // ...
 
-         protected:
-           friend class MultiSink;
+        protected:
+         friend class MultiSink;
 
-           MultiSink* multisink_;
-        };
+         MultiSink* multisink_;
+       };
 
-      ...
+       // ...
 
       private:
-        LockType lock_;
+       LockType lock_;
      };
-
 
 ---------------------
 Problem investigation
@@ -102,42 +101,37 @@ Assuming the proposed interface is avaible, the imagined use case looks like:
 
   .. code-block:: cpp
 
-     class DrainThread: public pw::thread::ThreadCore,
-                        public pw::multisink::MultiSink::Listener {
+     class DrainThread : public pw::thread::ThreadCore,
+                         public pw::multisink::MultiSink::Listener {
       public:
+       // ... initialize with drain
 
-        ... // initialize with drain
+       bool NeedFlush(size_t unread_entries_size) {
+         // ...
+       }
 
-        bool NeedFlush(size_t unread_entries_size) {
-           ...
-        }
+       void Flush(pw::multisink::MultiSink::Drain& drain) { /* ... */ }
 
-        void Flush(pw::multisink::MultiSink::Drain& drain) {
-          ...
-        }
+       void OnNewEntryAvailable() override {
+         if (NeedFlush(drain_.UnsafeGetUnreadEntriesSize())) {
+           flush_threshold_reached_notification_.release();
+         }
+       }
 
-        void OnNewEntryAvailable() override {
-           if (NeedFlush(drain_.UnsafeGetUnreadEntriesSize())) {
-              flush_threshold_reached_notification_.release();
-           }
-        }
+       void Run() override {
+         multisink_.AttachListener(*this);
 
-        void Run() override {
-           multisink_.AttachListner(*this);
-
-           while (true) {
-              flush_threshold_reached_notification_.acquire();
-              Flush(drain_);
-           }
-        }
-
+         while (true) {
+           flush_threshold_reached_notification_.acquire();
+           Flush(drain_);
+         }
+       }
 
       private:
-        pw::multisink::MultiSink& multisink_;
-        pw::multisink::MultiSink::Drain& drain_;
-        pw::ThreadNotification flush_threshold_reached_notification_;
+       pw::multisink::MultiSink& multisink_;
+       pw::multisink::MultiSink::Drain& drain_;
+       pw::ThreadNotification flush_threshold_reached_notification_;
      };
-
 
 ---------------
 Detailed design
@@ -152,7 +146,6 @@ of bytes between its reader pointer and ring buffer's writer pointer.
      class PrefixedEntryRingBufferMulti {
        class Reader : public IntrusiveList<Reader>::Item {
         public:
-
          // Get the size of the unread entries currently in the ring buffer.
          // Return value:
          // Number of bytes
@@ -184,7 +177,6 @@ of bytes between its reader pointer and ring buffer's writer pointer.
        size_t buffer_bytes_;
      };
 
-
 The unread data size of ``Drain`` is directly fetched from ring buffer's
 ``Reader``. Because ``pw_multisink`` uses ``lock_`` to protect accesses to all
 listeners' methods already, in order to support calling the proposed interfaces
@@ -199,41 +191,39 @@ version requires that ``lock_`` of ``pw_multisink`` being held when invoking.
 
      class MutilSink {
       public:
-       ...
+       // ...
 
-        class Drain {
-         public:
+       class Drain {
+        public:
+         // Both two APIs beturn size in bytes of the valid data in the
+         // underlying buffer that has not been read by this drain.
 
-           // Both two APIs beturn size in bytes of the valid data in the
-           // underlying buffer that has not been read by this drain.
+         // Ideally it should use annotation
+         //     PW_EXCLUSIVE_LOCKS_REQUIRED(multisink_->lock_)
+         // however, Listener interfaces, where it is intended to be called,
+         // cannot be annotated using multisink's lock. Static analysis is not
+         // doable.
+         size_t UnsafeGetUnreadEntriesSize() PW_NO_LOCK_SAFETY_ANALYSIS {
+           return reader_.EntriesSize();
+         }
 
-           // Ideally it should use annotation
-           //     PW_EXCLUSIVE_LOCKS_REQUIRED(multisink_->lock_)
-           // however, Listener interfaces, where it is intended to be called,
-           // cannot be annotated using multisink's lock. Static analysis is not
-           // doable.
-           size_t UnsafeGetUnreadEntriesSize() PW_NO_LOCK_SAFETY_ANALYSIS {
-              return reader_.EntriesSize();
-           }
+         size_t GetUnreadEntriesSize() PW_LOCKS_EXCLUDED(multisink_->lock_) {
+           std::lock_guard lock(multisink_->lock_);
+           return UnsafeGetUnreadEntriesSize();
+         }
 
-           size_t GetUnreadEntriesSize() PW_LOCKS_EXCLUDED(multisink_->lock_) {
-              std::lock_guard lock(multisink_->lock_);
-              return UnsafeGetUnreadEntriesSize();
-           }
+        protected:
+         friend class MultiSink;
 
-         protected:
-           friend class MultiSink;
+         MultiSink* multisink_;
+         ring_buffer::PrefixedEntryRingBufferMulti::Reader reader_;
+       };
 
-           MultiSink* multisink_;
-           ring_buffer::PrefixedEntryRingBufferMulti::Reader reader_;
-        };
-
-      ...
+       // ...
 
       private:
-        LockType lock_;
-        ring_buffer::PrefixedEntryRingBufferMulti ring_buffer_
-           PW_GUARDED_BY(lock_);
+       LockType lock_;
+       ring_buffer::PrefixedEntryRingBufferMulti ring_buffer_ PW_GUARDED_BY(lock_);
      };
 
      }  // namespace multisink
@@ -257,17 +247,15 @@ Interface example:
       public:
        class Listener {
         public:
-
-         ...
+         // ...
 
          virtual void OnNewEntryAvailable() = 0;
 
          virtual void OnBufferSizeChange(size_t total_size, size_t used_sized);
        };
 
-       ...
+       // ...
      }
-
 
 Imagined implementation of ``OnBufferSizeChange`` being invoked after an entry
 push or pop. It uses existing interfaces of the underlying
@@ -278,19 +266,18 @@ explained in the **problems** sections below.
 
      void MutilSink::HandleEntry(ConstByteSpan entry) {
        std::lock_guard lock(lock_);
-       ...
+       // ...
        ring_buffer_.PushBack(entry);
-       NotifyListenersBufferSizeChanged(
-         ring_buffer_.TotalSizeBytes(),
-         ring_buffer_.TotalUsedBytes());
-       ...
+       NotifyListenersBufferSizeChanged(ring_buffer_.TotalSizeBytes(),
+                                        ring_buffer_.TotalUsedBytes());
+       // ...
      }
 
   .. code-block:: cpp
 
     void MutilSink::PopEntry(Drain& drain, ConstByteSpan entry) {
       std::lock_guard lock(lock_);
-      ...
+      // ...
       const size_t used_size_before_pop = ring_buffer_.TotalUsedBytes();
       drain.reader_.PopFront();
       const size_t used_size_after_pop = ring_buffer_.TotalUsedBytes();
@@ -299,7 +286,7 @@ explained in the **problems** sections below.
           ring_buffer_.TotalSizeBytes(),
           used_size_after_pop);
       }
-      ...
+      // ...
     }
 
 

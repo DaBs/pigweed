@@ -145,6 +145,9 @@ class FakeLayer final : public GATT {
   using WeakPtr = WeakSelf<FakeLayer>::WeakPtr;
   FakeLayer::WeakPtr GetFakePtr() { return weak_fake_.GetWeakPtr(); }
 
+  void AttachInspect(inspect::Node& /*parent*/, std::string /*name*/) override {
+  }
+
  private:
   IdType next_local_service_id_ =
       100;  // Start at a random large ID to help catch bugs (e.g.

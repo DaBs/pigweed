@@ -14,9 +14,11 @@
 
 #pragma once
 
+#include <cstdint>
+
 namespace pw::bluetooth::proxy {
 
-enum class AclTransportType {
+enum class AclTransportType : uint8_t {
   kBrEdr,
   kLe,
 };

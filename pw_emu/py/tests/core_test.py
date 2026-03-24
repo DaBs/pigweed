@@ -318,13 +318,11 @@ class TestTargetFragments(unittest.TestCase):
     _tf2_config: dict[str, Any] = {'targets': {'test-target2': {}}}
 
     def setUp(self) -> None:
-        with tempfile.NamedTemporaryFile(
-            'wt', delete=False
-        ) as config_file, tempfile.NamedTemporaryFile(
-            'wt', delete=False
-        ) as targets1_file, tempfile.NamedTemporaryFile(
-            'wt', delete=False
-        ) as targets2_file:
+        with (
+            tempfile.NamedTemporaryFile('wt', delete=False) as config_file,
+            tempfile.NamedTemporaryFile('wt', delete=False) as targets1_file,
+            tempfile.NamedTemporaryFile('wt', delete=False) as targets2_file,
+        ):
             self._config_path = config_file.name
             self._targets1_path = targets1_file.name
             self._targets2_path = targets2_file.name

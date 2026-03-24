@@ -51,6 +51,7 @@ def _test_case(raw_test_case: unit_test_pb2.TestCaseDescriptor) -> TestCase:
 class TestExpectation:
     expression: str
     evaluated_expression: str
+    file_name: str
     line_number: int
     success: bool
 
@@ -124,11 +125,11 @@ class LoggingEventHandler(EventHandler):
         _LOG.info('Skipping disabled test %s', test_case)
 
     def test_case_expect(
-        self, test_case: TestCase, expectation: TestExpectation
+        self, unused_test_case: TestCase, expectation: TestExpectation
     ) -> None:
         result = 'Success' if expectation.success else 'Failure'
         log = _LOG.info if expectation.success else _LOG.error
-        log('%s:%d: %s', test_case.file_name, expectation.line_number, result)
+        log('%s:%d: %s', expectation.file_name, expectation.line_number, result)
         log('      Expected: %s', expectation.expression)
         log('        Actual: %s', expectation.evaluated_expression)
 
@@ -233,9 +234,11 @@ def run_tests(
             expectation = TestExpectation(
                 raw_expectation.expression,
                 raw_expectation.evaluated_expression,
+                raw_expectation.file_name,
                 raw_expectation.line_number,
                 raw_expectation.success,
             )
             for event_handler in event_handlers:
                 event_handler.test_case_expect(current_test_case, expectation)
+    # pylint: disable=used-before-assignment
     return test_record

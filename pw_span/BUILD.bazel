@@ -53,12 +53,16 @@ cc_library(
     ],
     strip_include_prefix = "public",
     visibility = ["//visibility:private"],
-    deps = ["//pw_assert:assert"],
+    # TODO: b/243851191 - pw_assert causes a circular dependency.
+    # Correct to comment out, as there's currently no way to enable
+    # PW_SPAN_ENABLE_ASSERTS in the bazel build.
+    # deps = ["//pw_assert:assert"],
 )
 
 pw_cc_test(
     name = "pw_span_test",
     srcs = ["span_test.cc"],
+    features = ["-conversion_warnings"],
     deps = [
         ":pw_span",
         "//pw_polyfill",
@@ -89,6 +93,7 @@ filegroup(
     srcs = [
         "public/pw_span/cast.h",
         "public/pw_span/internal/config.h",
+        "public/pw_span/internal/span_impl.h",
     ],
 )
 

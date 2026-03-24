@@ -25,7 +25,10 @@
 #include "pw_status/status_with_size.h"
 #include "pw_uart/uart_base.h"
 
+/// Core UART interfaces
 namespace pw::uart {
+
+/// @module{pw_uart}
 
 /// Represents an abstract UART interface.
 ///
@@ -43,15 +46,9 @@ class Uart : public UartBase {
   /// @param rx_buffer  The buffer to read data into.
   /// @param min_bytes  The minimum number of bytes to read before returning.
   ///
-  /// @returns @rst
-  ///
-  /// .. pw-status-codes::
-  ///
-  ///    OK: The operation was successful.
-  ///
-  /// May return other implementation-specific status codes.
-  ///
-  /// @endrst
+  /// @returns
+  /// * @OK: The operation was successful.
+  /// * May return other implementation-specific status codes.
   StatusWithSize ReadAtLeast(ByteSpan rx_buffer, size_t min_bytes) {
     return DoTryReadFor(rx_buffer, min_bytes, std::nullopt);
   }
@@ -62,15 +59,9 @@ class Uart : public UartBase {
   ///
   /// @param rx_buffer  The buffer to read data into.
   ///
-  /// @returns @rst
-  ///
-  /// .. pw-status-codes::
-  ///
-  ///    OK: The operation was successful.
-  ///
-  /// May return other implementation-specific status codes.
-  ///
-  /// @endrst
+  /// @returns
+  /// * @OK: The operation was successful.
+  /// * May return other implementation-specific status codes.
   StatusWithSize ReadExactly(ByteSpan rx_buffer) {
     return DoTryReadFor(rx_buffer, rx_buffer.size(), std::nullopt);
   }
@@ -83,15 +74,9 @@ class Uart : public UartBase {
   ///
   /// @param rx_buffer  The buffer to read data into.
   ///
-  /// @returns @rst
-  ///
-  /// .. pw-status-codes::
-  ///
-  ///    OK: The operation was successful.
-  ///
-  /// May return other implementation-specific status codes.
-  ///
-  /// @endrst
+  /// @returns
+  /// * @OK: The operation was successful.
+  /// * May return other implementation-specific status codes.
   // TODO: https://pwbug.dev/368149122 - Remove after transition
   Status Read(ByteSpan rx_buffer) {
     return DoTryReadFor(rx_buffer, std::nullopt).status();
@@ -108,19 +93,12 @@ class Uart : public UartBase {
   ///                   the function will immediately return with at least one
   ///                   hardware read operation attempt.
   ///
-  /// @returns @rst
-  ///
-  /// .. pw-status-codes::
-  ///
-  ///    OK: The operation was successful and the entire buffer has been filled
-  ///    with data.
-  ///
-  ///    DEADLINE_EXCEEDED: The operation timed out before the entire buffer
-  ///    could be filled.
-  ///
-  /// May return other implementation-specific status codes.
-  ///
-  /// @endrst
+  /// @returns
+  /// * @OK: The operation was successful and the entire buffer has been filled
+  ///   with data.
+  /// * @DEADLINE_EXCEEDED: The operation timed out before the entire buffer
+  ///   could be filled.
+  /// * May return other implementation-specific status codes.
   StatusWithSize TryReadAtLeastFor(ByteSpan rx_buffer,
                                    size_t min_bytes,
                                    chrono::SystemClock::duration timeout) {
@@ -137,19 +115,12 @@ class Uart : public UartBase {
   ///                   the function will immediately return with at least one
   ///                   hardware read operation attempt.
   ///
-  /// @returns @rst
-  ///
-  /// .. pw-status-codes::
-  ///
-  ///    OK: The operation was successful and the entire buffer has been filled
-  ///    with data.
-  ///
-  ///    DEADLINE_EXCEEDED: The operation timed out before the entire buffer
-  ///    could be filled.
-  ///
-  /// May return other implementation-specific status codes.
-  ///
-  /// @endrst
+  /// @returns
+  /// * @OK: The operation was successful and the entire buffer has been filled
+  ///   with data.
+  /// * @DEADLINE_EXCEEDED: The operation timed out before the entire buffer
+  ///   could be filled.
+  /// * May return other implementation-specific status codes.
   StatusWithSize TryReadExactlyFor(ByteSpan rx_buffer,
                                    chrono::SystemClock::duration timeout) {
     return DoTryReadFor(rx_buffer, rx_buffer.size(), timeout);
@@ -166,19 +137,12 @@ class Uart : public UartBase {
   ///                   the function will immediately return with at least one
   ///                   hardware read operation attempt.
   ///
-  /// @returns @rst
-  ///
-  /// .. pw-status-codes::
-  ///
-  ///    OK: The operation was successful and the entire buffer has been filled
-  ///    with data.
-  ///
-  ///    DEADLINE_EXCEEDED: The operation timed out before the entire buffer
-  ///    could be filled.
-  ///
-  /// May return other implementation-specific status codes.
-  ///
-  /// @endrst
+  /// @returns
+  /// * @OK: The operation was successful and the entire buffer has been filled
+  ///   with data.
+  /// * @DEADLINE_EXCEEDED: The operation timed out before the entire buffer
+  ///   could be filled.
+  /// * May return other implementation-specific status codes.
   StatusWithSize TryReadFor(ByteSpan rx_buffer,
                             chrono::SystemClock::duration timeout) {
     // TODO: https://pwbug.dev/368149122 - Remove after transition
@@ -190,15 +154,9 @@ class Uart : public UartBase {
   ///
   /// @param tx_buffer - The buffer to write data from.
   ///
-  /// @returns @rst
-  ///
-  /// .. pw-status-codes::
-  ///
-  ///    OK: The operation was successful.
-  ///
-  /// May return other implementation-specific status codes.
-  ///
-  /// @endrst
+  /// @returns
+  /// * @OK: The operation was successful.
+  /// * May return other implementation-specific status codes.
   Status Write(ConstByteSpan tx_buffer) {
     return DoTryWriteFor(tx_buffer, std::nullopt).status();
   }
@@ -212,19 +170,12 @@ class Uart : public UartBase {
   ///                   If zero, the function will immediately return with at
   ///                   least one hardware write operation attempt.
   ///
-  /// @returns @rst
-  ///
-  /// .. pw-status-codes::
-  ///
-  ///    OK: The operation was successful and the entire buffer has been
-  ///    written.
-  ///
-  ///    DEADLINE_EXCEEDED: The operation timed out before the entire buffer
-  ///    could be written.
-  ///
-  /// May return other implementation-specific status codes.
-  ///
-  /// @endrst
+  /// @returns
+  /// * @OK: The operation was successful and the entire buffer has been
+  ///   written.
+  /// * @DEADLINE_EXCEEDED: The operation timed out before the entire buffer
+  ///   could be written.
+  /// * May return other implementation-specific status codes.
   StatusWithSize TryWriteFor(ConstByteSpan tx_buffer,
                              chrono::SystemClock::duration timeout) {
     return DoTryWriteFor(tx_buffer, timeout);
@@ -237,15 +188,9 @@ class Uart : public UartBase {
   /// has been transmitted. Any data enqueued after calling this function will
   /// be transmitted immediately.
   ///
-  /// @returns @rst
-  ///
-  /// .. pw-status-codes::
-  ///
-  ///    OK: The operation was successful.
-  ///
-  /// May return other implementation-specific status codes.
-  ///
-  /// @endrst
+  /// @returns
+  /// * @OK: The operation was successful.
+  /// * May return other implementation-specific status codes.
   Status FlushOutput() { return DoFlushOutput(); }
 
  private:
@@ -263,19 +208,12 @@ class Uart : public UartBase {
   ///                   hardware read operation attempt. If not specified, the
   ///                   function blocks until the buffer is full.
   ///
-  /// @returns @rst
-  ///
-  /// .. pw-status-codes::
-  ///
-  ///    OK: The operation was successful and the entire buffer has been
-  ///    filled with data.
-  ///
-  ///    DEADLINE_EXCEEDED: The operation timed out before the entire buffer
-  ///    could be filled.
-  ///
-  /// May return other implementation-specific status codes.
-  ///
-  /// @endrst
+  /// @returns
+  /// * @OK: The operation was successful and the entire buffer has been
+  ///   filled with data.
+  /// * @DEADLINE_EXCEEDED: The operation timed out before the entire buffer
+  ///   could be filled.
+  /// * May return other implementation-specific status codes.
   // TODO: https://pwbug.dev/368149122 - Remove after transition.
   virtual StatusWithSize DoTryReadFor(
       ByteSpan rx_buffer,
@@ -299,19 +237,12 @@ class Uart : public UartBase {
   ///                   hardware read operation attempt. If not specified, the
   ///                   function blocks until the buffer is full.
   ///
-  /// @returns @rst
-  ///
-  /// .. pw-status-codes::
-  ///
-  ///    OK: The operation was successful and the entire buffer has been
-  ///    filled with data.
-  ///
-  ///    DEADLINE_EXCEEDED: The operation timed out before the entire buffer
-  ///    could be filled.
-  ///
-  /// May return other implementation-specific status codes.
-  ///
-  /// @endrst
+  /// @returns
+  /// * @OK: The operation was successful and the entire buffer has been
+  ///   filled with data.
+  /// * @DEADLINE_EXCEEDED: The operation timed out before the entire buffer
+  ///   could be filled.
+  /// * May return other implementation-specific status codes.
   // TODO: https://pwbug.dev/368149122 - Make pure virtual after transition.
   virtual StatusWithSize DoTryReadFor(
       ByteSpan /*rx_buffer*/,
@@ -335,19 +266,12 @@ class Uart : public UartBase {
   ///                   hardware write operation attempt. If not specified, the
   ///                   function blocks until the buffer is empty.
   ///
-  /// @returns @rst
-  ///
-  /// .. pw-status-codes::
-  ///
-  ///    OK: The operation was successful and the entire buffer has been
-  ///    written.
-  ///
-  ///    DEADLINE_EXCEEDED: The operation timed out before the entire buffer
-  ///    could be written.
-  ///
-  /// May return other implementation-specific status codes.
-  ///
-  /// @endrst
+  /// @returns
+  /// * @OK: The operation was successful and the entire buffer has been
+  ///   written.
+  /// * @DEADLINE_EXCEEDED: The operation timed out before the entire buffer
+  ///   could be written.
+  /// * May return other implementation-specific status codes.
   virtual StatusWithSize DoTryWriteFor(
       ConstByteSpan tx_buffer,
       std::optional<chrono::SystemClock::duration> timeout) = 0;

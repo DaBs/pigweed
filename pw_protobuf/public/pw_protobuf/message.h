@@ -30,6 +30,8 @@
 
 namespace pw::protobuf {
 
+/// @module{pw_protobuf}
+
 // The following defines classes that represent various parsed proto integer
 // types or an error code to indicate parsing failure.
 //
@@ -110,7 +112,7 @@ class Bytes {
  public:
   Bytes() = default;
   Bytes(Status status) : reader_(status) {}
-  Bytes(stream::IntervalReader reader) : reader_(reader) {}
+  Bytes(stream::IntervalReader reader) : reader_(std::move(reader)) {}
   stream::IntervalReader GetBytesReader() { return reader_; }
 
   bool ok() { return reader_.ok(); }
@@ -283,7 +285,7 @@ class Message {
     Field() = default;
     Field(Status status) : field_reader_(status), field_number_(0) {}
     Field(stream::IntervalReader reader, uint32_t field_number)
-        : field_reader_(reader), field_number_(field_number) {}
+        : field_reader_(std::move(reader)), field_number_(field_number) {}
 
     stream::IntervalReader field_reader_;
     uint32_t field_number_;
@@ -317,7 +319,8 @@ class Message {
     Field current_;
     Status status_ = OkStatus();
 
-    iterator(stream::IntervalReader reader) : reader_(reader) {
+    iterator(stream::IntervalReader reader)
+        : reader_(std::move(reader)), status_(reader_.status()) {
       this->operator++();
     }
 
@@ -326,7 +329,7 @@ class Message {
 
   Message() = default;
   Message(Status status) : reader_(status) {}
-  Message(stream::IntervalReader reader) : reader_(reader) {}
+  Message(stream::IntervalReader reader) : reader_(std::move(reader)) {}
   Message(stream::SeekableReader& proto_source, size_t size)
       : reader_(proto_source, 0, size) {}
 
@@ -521,7 +524,9 @@ class RepeatedFieldParser {
     FieldType current_ = FieldType(Status::Unavailable());
 
     iterator(RepeatedFieldParser& host, Message::iterator init_iter)
-        : host_(host), iter_(init_iter), current_(Status::Unavailable()) {
+        : host_(host),
+          iter_(std::move(init_iter)),
+          current_(Status::Unavailable()) {
       // Move to the first element of the target field number.
       MoveToNext();
     }
@@ -615,5 +620,7 @@ class StringMapParser
     return ValueParser(Status::NotFound());
   }
 };
+
+/// @}
 
 }  // namespace pw::protobuf

@@ -16,24 +16,41 @@ package {
     default_applicable_licenses: ["external_pigweed_license"],
 }
 
+cc_library_headers {
+    name: "pw_containers_headers",
+    defaults: [
+        "pw_android_common_target_support",
+    ],
+    export_include_dirs: [
+        "public"
+    ],
+}
+
 cc_library_static {
     name: "pw_containers",
-    cpp_std: "c++20",
-    vendor_available: true,
-    export_include_dirs: ["public"],
     defaults: [
         "pw_android_common_backends",
+        "pw_android_common_target_support",
     ],
+    export_include_dirs: ["public"],
     header_libs: [
         "pw_assert",
         "pw_log",
     ],
     static_libs: [
-        "pw_preprocessor",
+        "pw_bytes",
+        "pw_numeric",
         "pw_polyfill",
+        "pw_preprocessor",
+        "pw_span",
+        "pw_varint",
     ],
-    host_supported: true,
     srcs: [
+        "aa_tree_item.cc",
+        "aa_tree.cc",
+        "inline_var_len_entry_queue.cc",
         "intrusive_item.cc",
+        "var_len_entry.cc",
+        "var_len_entry_queue_iterator.cc",
     ],
 }

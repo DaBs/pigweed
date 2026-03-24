@@ -13,11 +13,11 @@
 // the License.
 #pragma once
 
-#include "pw_async2/dispatcher_base.h"
+#include "pw_async2/dispatcher.h"
 #include "pw_channel/channel.h"
 #include "pw_multibuf/allocator.h"
-#include "pw_multibuf/allocator_async.h"
 #include "pw_multibuf/multibuf.h"
+#include "pw_multibuf/v1/allocator_async.h"
 #include "pw_status/status.h"
 #include "pw_stream/stream.h"
 #include "pw_sync/interrupt_spin_lock.h"
@@ -47,8 +47,7 @@ class StreamChannelReadState {
   ///
   /// If no data is available, schedules a wakeup of the task in `cx` when
   /// new data arrives.
-  async2::Poll<Result<multibuf::MultiBuf>> PendFilledBuffer(
-      async2::Context& cx);
+  async2::PollResult<multibuf::MultiBuf> PendFilledBuffer(async2::Context& cx);
 
   /// A loop which reads data from `reader` into buffers provided by
   /// `ProvideBufferToFill` and then makes them available via
@@ -99,7 +98,9 @@ class StreamChannelWriteState {
 
 }  // namespace internal
 
-/// @defgroup pw_channel_stream_channel
+/// @module{pw_channel}
+
+/// @defgroup pw_channel_stream_channel Stream channel
 /// @{
 
 /// A channel which delegates to an underlying reader and writer stream.
@@ -148,14 +149,18 @@ class StreamChannel final
   // threads.
   ~StreamChannel() final = default;
 
+  // Even though the destructor is never called, classes with private
+  // destructors must friend `pw::NoDestructor`.
+  friend class pw::NoDestructor<StreamChannel>;
+
   Status ProvideBufferIfAvailable(async2::Context& cx);
 
-  async2::Poll<Result<multibuf::MultiBuf>> DoPendRead(
+  async2::PollResult<multibuf::MultiBuf> DoPendRead(
       async2::Context& cx) override;
 
   async2::Poll<Status> DoPendReadyToWrite(async2::Context& cx) override;
 
-  async2::Poll<std::optional<multibuf::MultiBuf>> DoPendAllocateWriteBuffer(
+  async2::PollOptional<multibuf::MultiBuf> DoPendAllocateWriteBuffer(
       async2::Context& cx, size_t min_bytes) override {
     write_allocation_future_.SetDesiredSize(min_bytes);
     return write_allocation_future_.Pend(cx);
@@ -175,8 +180,8 @@ class StreamChannel final
   stream::Writer& writer_;
   internal::StreamChannelReadState read_state_;
   internal::StreamChannelWriteState write_state_;
-  multibuf::MultiBufAllocationFuture read_allocation_future_;
-  multibuf::MultiBufAllocationFuture write_allocation_future_;
+  multibuf::v1::MultiBufAllocationFuture read_allocation_future_;
+  multibuf::v1::MultiBufAllocationFuture write_allocation_future_;
 };
 
 /// @}

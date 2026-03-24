@@ -11,7 +11,6 @@
 // WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
 // License for the specific language governing permissions and limitations under
 // the License.
-#![cfg_attr(feature = "nightly", feature(type_alias_impl_trait))]
 
 mod backend_tests;
 
@@ -21,7 +20,7 @@ fn flush_stdout() {
     // Safety: Test only.  Calling into a libc function w/o any dependency on
     // data from the Rust side.
     unsafe {
-        extern "C" {
+        unsafe extern "C" {
             static stdout: *mut libc::FILE;
         }
         libc::fflush(stdout);
@@ -34,7 +33,7 @@ fn flush_stdout() {
     // Safety: Test only.  Calling into a libc function w/o any dependency on
     // data from the Rust side.
     unsafe {
-        extern "C" {
+        unsafe extern "C" {
             // MacOS uses a #define to declare stdout so we need to expand that
             // manually.
             static __stdoutp: *mut libc::FILE;
@@ -48,10 +47,11 @@ fn flush_stdout() {
 fn run_with_capture<F: FnOnce()>(action: F) -> String {
     // Use statements here instead of at the module level to scope them to the
     // above #[cfg(test)]
-    use nix::unistd::{dup, dup2, pipe};
     use std::fs::File;
-    use std::io::{stdout, Read};
+    use std::io::{Read, stdout};
     use std::os::fd::AsRawFd;
+
+    use nix::unistd::{dup, dup2, pipe};
 
     // Capture the output of printf by creating a pipe and replacing
     // `STDOUT_FILENO` with the write side of the pipe.  This only works on

@@ -23,6 +23,7 @@
 #include "pw_bluetooth_sapphire/internal/host/common/macros.h"
 #include "pw_bluetooth_sapphire/internal/host/gap/bredr_connection_manager.h"
 #include "pw_bluetooth_sapphire/internal/host/sdp/server.h"
+#include "pw_bluetooth_sapphire/lease.h"
 #include "pw_intrusive_ptr/intrusive_ptr.h"
 
 namespace bthost {
@@ -30,8 +31,12 @@ namespace bthost {
 // Implements the bredr::Profile FIDL interface.
 class ProfileServer : public ServerBase<fuchsia::bluetooth::bredr::Profile> {
  public:
+  static constexpr uint16_t kMaxUnackedSearchResults = 8;
+
   ProfileServer(
       bt::gap::Adapter::WeakPtr adapter,
+      pw::bluetooth_sapphire::LeaseProvider& wake_lease_provider,
+      uint8_t sco_offload_index,
       fidl::InterfaceRequest<fuchsia::bluetooth::bredr::Profile> request);
   ~ProfileServer() override;
 
@@ -145,6 +150,10 @@ class ProfileServer : public ServerBase<fuchsia::bluetooth::bredr::Profile> {
             request,
         ProfileServer* profile_server);
     ~ScoConnectionServer() override;
+
+    // TODO: https://fxbug.dev/447629864 - Implement this.
+    void RequestDisconnect() override {}
+
     // Call bt::gap::ScoConnection::Activate with the appropriate callbacks. On
     // error, destroys this server.
     void Activate();
@@ -218,6 +227,10 @@ class ProfileServer : public ServerBase<fuchsia::bluetooth::bredr::Profile> {
     WeakSelf<ScoConnectionServer> weak_self_;
   };
 
+  using ConnectionReceiverVariant = std::variant<
+      fidl::InterfacePtr<fuchsia::bluetooth::bredr::ConnectionReceiver>,
+      fidl::InterfacePtr<fuchsia::bluetooth::bredr::ConnectionReceiver2>>;
+
   // fuchsia::bluetooth::bredr::Profile overrides:
   void Advertise(fuchsia::bluetooth::bredr::ProfileAdvertiseRequest request,
                  AdvertiseCallback callback) override;
@@ -247,6 +260,8 @@ class ProfileServer : public ServerBase<fuchsia::bluetooth::bredr::Profile> {
       uint64_t search_id,
       bt::PeerId peer_id,
       const std::map<bt::sdp::AttributeId, bt::sdp::DataElement>& attributes);
+  void OnServiceFoundComplete(
+      bt::gap::BrEdrConnectionManager::SearchId search_id);
 
   // Callback for SCO connections requests.
   static void OnScoConnectionResult(
@@ -294,18 +309,33 @@ class ProfileServer : public ServerBase<fuchsia::bluetooth::bredr::Profile> {
 
   // Advertised Services
   struct AdvertisedService {
-    AdvertisedService(
-        fidl::InterfacePtr<fuchsia::bluetooth::bredr::ConnectionReceiver>
-            receiver,
-        bt::sdp::Server::RegistrationHandle registration_handle)
+    AdvertisedService(ConnectionReceiverVariant receiver,
+                      bt::sdp::Server::RegistrationHandle registration_handle)
         : receiver(std::move(receiver)),
           registration_handle(registration_handle) {}
-    fidl::InterfacePtr<fuchsia::bluetooth::bredr::ConnectionReceiver> receiver;
+    ConnectionReceiverVariant receiver;
     bt::sdp::Server::RegistrationHandle registration_handle;
   };
 
   uint64_t advertised_total_;
   std::map<uint64_t, AdvertisedService> current_advertised_;
+
+  // Search results pending
+  struct PendingSearchResult {
+    PendingSearchResult(
+        fuchsia::bluetooth::PeerId peer_id,
+        fidl::VectorPtr<fuchsia::bluetooth::bredr::ProtocolDescriptor>
+            descriptor_list,
+        std::vector<fuchsia::bluetooth::bredr::Attribute> attributes)
+        : peer_id(peer_id),
+          descriptor_list(std::move(descriptor_list)),
+          attributes(std::move(attributes)) {}
+
+    fuchsia::bluetooth::PeerId peer_id;
+    fidl::VectorPtr<fuchsia::bluetooth::bredr::ProtocolDescriptor>
+        descriptor_list;
+    std::vector<fuchsia::bluetooth::bredr::Attribute> attributes;
+  };
 
   // Searches registered
   struct RegisteredSearch {
@@ -315,7 +345,13 @@ class ProfileServer : public ServerBase<fuchsia::bluetooth::bredr::Profile> {
         : results(std::move(results)), search_id(search_id) {}
     fidl::InterfacePtr<fuchsia::bluetooth::bredr::SearchResults> results;
     bt::gap::BrEdrConnectionManager::SearchId search_id;
+    uint16_t unacknowledged_search_results_count = 0;
+    std::optional<pw::bluetooth_sapphire::Lease> wake_lease;
+    std::deque<PendingSearchResult> pending_search_results;
   };
+
+  // Send or queue for sending a service found.
+  void SendServiceFound(RegisteredSearch& search, PendingSearchResult result);
 
   uint64_t searches_total_;
   std::map<uint64_t, RegisteredSearch> searches_;
@@ -359,6 +395,11 @@ class ProfileServer : public ServerBase<fuchsia::bluetooth::bredr::Profile> {
   std::unique_ptr<AudioOffloadController> audio_offload_controller_server_;
 
   bt::gap::Adapter::WeakPtr adapter_;
+
+  pw::bluetooth_sapphire::LeaseProvider& wake_lease_provider_;
+
+  // The index to use when SCO is set to the OFFLOAD data path.
+  uint8_t sco_offload_index_;
 
   // If true, use Channel.socket. If false, use Channel.connection.
   bool use_sockets_ = true;

@@ -12,16 +12,27 @@ to make it easier to design robust, feature-rich toolchains.
 ---------------------------
 Upstream Pigweed toolchains
 ---------------------------
-Pigweed's C/C++ toolchains are automatically registered when using Pigweed from
-a Bzlmod Bazel project. Legacy WORKSPACE-based projects can use Pigweed's
-upstream toolchains by calling ``register_pigweed_cxx_toolchains()``:
+Pigweed's C/C++ toolchains can be registered from a bzlmod project by adding
+the following to your ``MODULE.bazel``:
 
 .. code-block:: py
 
-   load("@pigweed//pw_toolchain:register_toolchains.bzl", "register_pigweed_cxx_toolchains")
+   register_toolchains(
+       "@pigweed//pw_toolchain:cc_toolchain_cortex-m0",
+       "@pigweed//pw_toolchain:cc_toolchain_cortex-m0plus",
+       "@pigweed//pw_toolchain:cc_toolchain_cortex-m33",
+       "@pigweed//pw_toolchain/arm_gcc:arm_gcc_cc_toolchain_cortex-m3",
+       "@pigweed//pw_toolchain/arm_gcc:arm_gcc_cc_toolchain_cortex-m4",
+       "@pigweed//pw_toolchain/host_clang:host_cc_toolchain_linux",
+       "@pigweed//pw_toolchain/host_clang:host_cc_toolchain_macos",
+       "@pigweed//pw_toolchain/riscv_clang:riscv_clang_cc_toolchain_rv32imc",
+       "@pigweed//pw_toolchain/riscv_clang:riscv_clang_cc_toolchain_rv32imac",
+       dev_dependency = True,
+   )
 
-   register_pigweed_cxx_toolchains()
-
+If you create custom ARM or RISC-V toolchains, you may want to remove
+Pigweed's device-specific toolchains to avoid them accidentally getting selected
+for your device build.
 
 .. admonition:: Note
    :class: warning
@@ -29,6 +40,16 @@ upstream toolchains by calling ``register_pigweed_cxx_toolchains()``:
    Pigweed's upstream toolchains are subject to change without notice. If you
    would prefer more stability in toolchain configurations, consider declaring
    custom toolchains in your project.
+
+Injecting custom flags
+======================
+If you wish to add extra arguments to Pigweed's toolchains, you can set
+the ``--@pigweed//pw_toolchain/cc/args:extra_toolchain_args`` label flag
+to point at a ``cc_args`` or ``cc_args_list`` rule that contains the flags
+you'd like to add.
+
+For platform-specific flags, you can set this flag in your ``platform`` flags
+rather than in a ``.bazelrc`` file.
 
 .. _module-pw_toolchain-bazel-layering-check:
 
@@ -116,9 +137,8 @@ To integrate Pigweed's toolchain with `bazel_clang_tidy
 <https://github.com/erenon/bazel_clang_tidy>`_:
 
 #. Add a ``.clang-tidy`` file at the root of your repository listing the checks
-   you wish to enable. `Pigweed's own .clang-tidy file
-   <https://cs.opensource.google/pigweed/pigweed/+/main:.clang-tidy>`__ shows
-   some checks we recommend.
+   you wish to enable. :cs:`Pigweed's own .clang-tidy file <main:.clang-tidy>`
+   shows some checks we recommend.
 
 #. Create a ``filegroup`` target containing that file in ``BUILD.bazel`` at
    the root of your repo.
@@ -167,6 +187,106 @@ To integrate Pigweed's toolchain with `bazel_clang_tidy
 
 Now ``bazelisk build --config=clang-tidy //...`` will run clang-tidy for all
 ``cc_library`` targets in your repo!
+
+As an example of this setup, see `the CL that added clang-tidy support to our
+Quickstart repo <http://pwrev.dev/266934>`__.
+
+Conversion warnings
+===================
+By default, upstream Pigweed is built with `-Wconversion
+<https://clang.llvm.org/docs/DiagnosticsReference.html#wconversion>`__ enabled.
+However, this was not always the case, and many Pigweed targets contain
+``-Wconversion`` violations. (:bug:`259746255` tracks fixing all of these.)
+
+Upstream allowlist
+------------------
+Do not add new ``-Wconversion`` violations to the Pigweed codebase.
+
+If you write new code that fails to build because it includes a header with a
+pre-existing ``-Wconversion`` violation, try to fix the pre-existing violation.
+
+As a last resort, you may add the ``features = ["-conversion_warnings"]`` (note
+the ``-``!) attribute to your ``cc_library`` or other build target:
+
+.. code-block:: py
+
+   cc_library(
+      name = "…",
+      features = ["-conversion_warnings"],
+   )
+
+This will disable ``-Wconversion`` for this target.
+
+Downstream use
+--------------
+If you would like to enable ``-Wconversion`` in a downstream project that uses
+Pigweed's toolchains, add a `REPO.bazel
+<https://bazel.build/external/overview#repo.bazel>`__ file at the root of
+your project, with the following content:
+
+.. code-block:: py
+
+   repo(
+       features = ["conversion_warnings"],
+   )
+
+This will enable ``-Wconversion`` for all code in your project, but not for
+code coming from any external dependencies also built with Bazel.
+
+.. _module-pw_toolchain-bazel-running-tools:
+
+-----------------------
+Running toolchain tools
+-----------------------
+Pigweed provides a set of runnable targets that expose the active toolchain's
+tools for interactive use. These are essential for debugging and inspecting
+build artifacts, as local system tools often lack support for the target
+architecture of a cross-compiled build. Furthermore, since Pigweed's compilers
+are typically hermetic and managed by Bazel, their binaries are stored within
+Bazel's internal directories and are not easily accessible through the shell.
+
+Available tools include ``cc``, ``c++``, ``ld``, ``ar``, ``objdump``, ``nm``,
+``readelf``, ``size``, ``strip``, and ``cov``.
+
+These targets are dynamically resolved from the active toolchain's action
+mapping. This ensures that when you run a tool via these targets, you are using
+the *exact same* binary and configuration that Bazel uses during the build
+for that specific target platform.
+
+.. note::
+
+   Tool availability varies by suite (e.g., LLVM vs. GCC vs. Zephyr) and
+   configuration. While common tools like ``objdump`` and ``nm`` are present
+   across all supported suites (including ARM GCC and Zephyr), others like
+   ``cov`` or ``gcov`` may be missing. Attempting to run a missing tool
+   will result in a "tool not found" error or fail with a clear error
+   message during analysis or execution.
+
+   Additionally, compiler drivers that are symlinks to a multicall binary
+   (like ``llvm``) may behave as a generic driver if invoked without
+   arguments.
+
+.. code-block:: console
+
+   # Disassemble a binary using the objdump provided by the toolchain
+   $ bazel run //pw_toolchain/cc/current_toolchain:objdump -- -d bazel-bin/my_binary
+
+   # Link object files manually (for debugging)
+   $ bazel run //pw_toolchain/cc/current_toolchain:ld -- ...
+
+   # List symbols
+   $ bazel run //pw_toolchain/cc/current_toolchain:nm -- bazel-bin/my_binary
+
+.. admonition:: Warning
+   :class: warning
+
+   These targets are intended **exclusively** for interactive use via ``bazel run``.
+   **Do NOT** use them as dependencies in other rules (e.g. in ``srcs``,
+   ``tools``, or ``deps``).
+
+   Doing so will likely result in the wrong tool being selected (e.g. the host
+   ``objdump`` instead of the target ``objdump``) due to Bazel's configuration
+   transition logic.
 
 .. _module-pw_toolchain-bazel-compiler-specific-logic:
 
@@ -220,11 +340,71 @@ Example:
    cc_library(
        copts = if_compiler_is_clang(
            ["-fno-codegen"],
-           default = [],
+           otherwise = [],
        ),
        linkopts = if_linker_is_gcc(
            ["-Wl,--delete-main"],
-           default = [],
+           otherwise = [],
        ),
        srcs = ["lib.cc"],
    )
+
+---------------------------------
+Compiler-specific toolchain flags
+---------------------------------
+In cases where foundationally different toolchains (e.g. Clang, GCC, MSVC) share
+large pieces of project-wide configuration, you may want to conditionally add
+flags that are compiler-specific. This can be done with the following steps:
+
+#. **Express the type of compiler in your cc_toolchain.** This is how the
+   rest of your toolchain rules will know what kind of compiler is active.
+
+   .. code-block:: py
+
+      cc_toolchain(
+          name = "arm_clang_toolchain_cortex-a",
+          # ...
+          enabled_features = [
+              "@pigweed//pw_toolchain/cc/capability:compiler_is_clang",
+              "@pigweed//pw_toolchain/cc/capability:linker_is_clang",
+          ],
+      )
+
+#. **Add the list of known toolchain types to your toolchain.** This ensures
+   that the ``cc_toolchain`` passes feature correctness validations.
+
+   .. code-block:: py
+
+      cc_toolchain(
+          name = "arm_clang_toolchain_cortex-a",
+          # ...
+          enabled_features = [
+              "@pigweed//pw_toolchain/cc/capability:compiler_is_clang",
+              "@pigweed//pw_toolchain/cc/capability:linker_is_clang",
+          ],
+          known_features = [
+              "//pw_toolchain/cc/capability:known_toolchain_types",
+          ],
+      )
+
+#. **Gate the arguments with requires_any_of.** ``cc_args`` gated by
+   a ``requires_any_of`` constraint on a toolchain type will only be expanded
+   in the compiler/linker invocation if the toolchain tool matches the required
+   type. Keep in mind that ``compiler_is_clang`` and ``linker_is_clang`` types
+   are offered separately to support cases where the compiler and linker types
+   are not the same.
+
+   .. code-block:: py
+
+      cc_args(
+          name = "clang_only_extra_pigweed_warnings",
+          actions = [
+              "@rules_cc//cc/toolchains/actions:compile_actions",
+          ],
+          requires_any_of = [
+              "//pw_toolchain/cc/capability:compiler_is_clang",
+          ],
+          args = [
+              "-Wshadow-all",
+          ],
+      )

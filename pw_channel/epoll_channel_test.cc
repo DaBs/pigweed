@@ -20,7 +20,7 @@
 #include <unistd.h>
 
 #include "pw_assert/check.h"
-#include "pw_async2/dispatcher.h"
+#include "pw_async2/dispatcher_for_test.h"
 #include "pw_bytes/array.h"
 #include "pw_bytes/suffix.h"
 #include "pw_channel/channel.h"
@@ -36,9 +36,9 @@ namespace {
 using namespace std::chrono_literals;
 
 using ::pw::async2::Context;
-using ::pw::async2::Dispatcher;
 using ::pw::async2::Pending;
 using ::pw::async2::Poll;
+using ::pw::async2::PollOptional;
 using ::pw::async2::Ready;
 using ::pw::async2::Task;
 using ::pw::channel::ByteReader;
@@ -125,7 +125,7 @@ class EpollChannelTest : public ::testing::Test {
 
 TEST_F(EpollChannelTest, Read_ValidData_Succeeds) {
   SimpleAllocatorForTest alloc;
-  Dispatcher dispatcher;
+  pw::async2::EpollDispatcher dispatcher;
 
   EpollChannel channel(read_fd_, dispatcher, alloc);
   ASSERT_TRUE(channel.is_read_open());
@@ -134,7 +134,7 @@ TEST_F(EpollChannelTest, Read_ValidData_Succeeds) {
   ReaderTask<ByteReader> read_task(channel.channel(), 1);
   dispatcher.Post(read_task);
 
-  EXPECT_EQ(dispatcher.RunUntilStalled(), Pending());
+  EXPECT_TRUE(dispatcher.RunUntilStalled());
   EXPECT_EQ(read_task.poll_count, 1);
   EXPECT_EQ(read_task.read_count, 0);
   EXPECT_EQ(read_task.bytes_read, 0);
@@ -154,13 +154,13 @@ TEST_F(EpollChannelTest, Read_ValidData_Succeeds) {
 
   CloseTask close_task(channel);
   dispatcher.Post(close_task);
-  EXPECT_EQ(dispatcher.RunUntilStalled(), Ready());
+  dispatcher.RunToCompletion();
   EXPECT_EQ(close_task.close_status, pw::OkStatus());
 }
 
 TEST_F(EpollChannelTest, Read_Closed_ReturnsFailedPrecondition) {
   SimpleAllocatorForTest alloc;
-  Dispatcher dispatcher;
+  pw::async2::EpollDispatcher dispatcher;
 
   EpollChannel channel(read_fd_, dispatcher, alloc);
   ASSERT_TRUE(channel.is_read_open());
@@ -168,13 +168,13 @@ TEST_F(EpollChannelTest, Read_Closed_ReturnsFailedPrecondition) {
 
   CloseTask close_task(channel);
   dispatcher.Post(close_task);
-  EXPECT_EQ(dispatcher.RunUntilStalled(), Ready());
+  dispatcher.RunToCompletion();
   EXPECT_EQ(close_task.close_status, pw::OkStatus());
 
   ReaderTask<ByteReader> read_task(channel.channel(), 1);
   dispatcher.Post(read_task);
 
-  EXPECT_EQ(dispatcher.RunUntilStalled(), Ready());
+  dispatcher.RunToCompletion();
   EXPECT_EQ(read_task.read_status, pw::Status::FailedPrecondition());
 }
 
@@ -211,7 +211,7 @@ class WriterTask : public Task {
       }
       ++write_count;
 
-      Poll<std::optional<MultiBuf>> multibuf_result =
+      PollOptional<MultiBuf> multibuf_result =
           channel_.PendAllocateWriteBuffer(cx, data_to_write_.size());
       PW_CHECK(multibuf_result.IsReady());
       PW_CHECK(multibuf_result->has_value());
@@ -237,7 +237,7 @@ class WriterTask : public Task {
 
 TEST_F(EpollChannelTest, Write_ValidData_Succeeds) {
   SimpleAllocatorForTest alloc;
-  Dispatcher dispatcher;
+  pw::async2::EpollDispatcher dispatcher;
 
   EpollChannel channel(write_fd_, dispatcher, alloc);
   ASSERT_TRUE(channel.is_read_open());
@@ -257,13 +257,13 @@ TEST_F(EpollChannelTest, Write_ValidData_Succeeds) {
 
   CloseTask close_task(channel);
   dispatcher.Post(close_task);
-  EXPECT_EQ(dispatcher.RunUntilStalled(), Ready());
+  dispatcher.RunToCompletion();
   EXPECT_EQ(close_task.close_status, pw::OkStatus());
 }
 
 TEST_F(EpollChannelTest, Write_EmptyData_Succeeds) {
   SimpleAllocatorForTest alloc;
-  Dispatcher dispatcher;
+  pw::async2::EpollDispatcher dispatcher;
 
   EpollChannel channel(write_fd_, dispatcher, alloc);
   ASSERT_TRUE(channel.is_read_open());
@@ -277,13 +277,13 @@ TEST_F(EpollChannelTest, Write_EmptyData_Succeeds) {
 
   CloseTask close_task(channel);
   dispatcher.Post(close_task);
-  EXPECT_EQ(dispatcher.RunUntilStalled(), Ready());
+  dispatcher.RunToCompletion();
   EXPECT_EQ(close_task.close_status, pw::OkStatus());
 }
 
 TEST_F(EpollChannelTest, Write_Closed_ReturnsFailedPrecondition) {
   SimpleAllocatorForTest alloc;
-  Dispatcher dispatcher;
+  pw::async2::EpollDispatcher dispatcher;
 
   EpollChannel channel(write_fd_, dispatcher, alloc);
   ASSERT_TRUE(channel.is_read_open());
@@ -291,7 +291,7 @@ TEST_F(EpollChannelTest, Write_Closed_ReturnsFailedPrecondition) {
 
   CloseTask close_task(channel);
   dispatcher.Post(close_task);
-  EXPECT_EQ(dispatcher.RunUntilStalled(), Ready());
+  dispatcher.RunToCompletion();
   EXPECT_EQ(close_task.close_status, pw::OkStatus());
 
   WriterTask<ByteWriter> write_task(channel.channel(), 1, {});
@@ -303,7 +303,7 @@ TEST_F(EpollChannelTest, Write_Closed_ReturnsFailedPrecondition) {
 
 TEST_F(EpollChannelTest, Destructor_ClosesFileDescriptor) {
   SimpleAllocatorForTest alloc;
-  Dispatcher dispatcher;
+  pw::async2::EpollDispatcher dispatcher;
 
   {
     EpollChannel channel(write_fd_, dispatcher, alloc);
@@ -318,7 +318,7 @@ TEST_F(EpollChannelTest, Destructor_ClosesFileDescriptor) {
 
 TEST_F(EpollChannelTest, PendReadyToWrite_BlocksWhenUnavailable) {
   SimpleAllocatorForTest alloc;
-  Dispatcher dispatcher;
+  pw::async2::EpollDispatcher dispatcher;
   EpollChannel channel(write_fd_, dispatcher, alloc);
   ASSERT_TRUE(channel.is_read_open());
   ASSERT_TRUE(channel.is_write_open());
@@ -333,7 +333,7 @@ TEST_F(EpollChannelTest, PendReadyToWrite_BlocksWhenUnavailable) {
 
   // Try to write a bunch of data, eventually filling the pipe and blocking the
   // task.
-  EXPECT_EQ(dispatcher.RunUntilStalled(), Pending());
+  EXPECT_TRUE(dispatcher.RunUntilStalled());
   EXPECT_EQ(write_task.poll_count, 1);
   EXPECT_EQ(write_task.write_pending_count, 1);
   EXPECT_EQ(write_task.last_write_status, pw::Status::Unavailable());

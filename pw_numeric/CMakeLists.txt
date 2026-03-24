@@ -19,8 +19,6 @@ pw_add_library(pw_numeric.checked_arithmetic INTERFACE
     public/pw_numeric/checked_arithmetic.h
   PUBLIC_INCLUDES
     public
-  PUBLIC_DEPS
-    pw_preprocessor
 )
 
 pw_add_test(pw_numeric.checked_arithmetic_test
@@ -28,6 +26,7 @@ pw_add_test(pw_numeric.checked_arithmetic_test
     checked_arithmetic_test.cc
   PRIVATE_DEPS
     pw_numeric.checked_arithmetic
+    pw_unit_test.constexpr
   GROUPS
     modules
     pw_numeric
@@ -47,4 +46,21 @@ pw_add_test(pw_numeric.integer_division_test
   GROUPS
     modules
     pw_numeric
+)
+
+pw_add_library(pw_numeric.saturating_arithmetic INTERFACE
+  HEADERS
+    public/pw_numeric/saturating_arithmetic.h
+  PUBLIC_INCLUDES
+    public
+  PUBLIC_DEPS
+    pw_numeric.checked_arithmetic
+)
+
+pw_add_test(pw_numeric.saturating_arithmetic_test
+  SOURCES
+    saturating_arithmetic_test.cc
+  PRIVATE_DEPS
+    pw_numeric.saturating_arithmetic
+    pw_unit_test.constexpr
 )

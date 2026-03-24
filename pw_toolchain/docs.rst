@@ -78,132 +78,24 @@ using ``pw_toolchain/arm_gcc:newlib_os_interface_stubs``.
 
 .. _module-pw_toolchain-cpp-globals:
 
-Global variables: constant initialization and binary size
-=========================================================
-Global variables---variables with static storage duration---are initialized
-either during compilation (constant initialization) or at runtime.
-Runtime-initialized globals are initialized before ``main``; function ``static``
-variables are initialized when the function is called the first time.
+Freestanding support
+====================
+While Pigweed largely works with ``-ffreestanding``, Pigweed has observed
+issues where ``newlib-nano`` loses ``PRIx64`` and the other 64-bit
+``PRI*`` macros due to ``gcc``'s ``stdint-gcc.h`` being pulled in rather than
+newlib-nano's ``stdint.h`` (see https://pwbug.dev/382484307).
 
-Constant initialization is guaranteed for ``constinit`` or ``constexpr``
-variables. However, the compiler may constant initialize any variable, even if
-it is not ``constinit`` or ``constexpr`` constructible.
+Additionally, ``-ffreestanding`` isn't often correctly supported well, and most
+embedded toolchains and libc implementations have been designed around the
+assumption that ``-ffreestanding`` is not set. This partial support can cause
+confusing errors/behaviors that wouldn't be encountered under normal conditions.
 
-Constant initialization is usually better than runtime initialization. Constant
-initialization:
-
-- Reduces binary size. The binary stores initialized variable in the binary
-  (e.g. in ``.data`` or ``.rodata``), instead of the code needed to produce that
-  data, which is typically larger.
-- Saves CPU cycles. Initialization is a simple ``memcpy``.
-- Avoids the `static initialization order fiasco
-  <https://en.cppreference.com/w/cpp/language/siof>`_. Constant initialization
-  is order-independent and occurs before static initialization.
-
-Constant initialization may be undesirable if initialized data is larger than
-the code that produces it. Variables that are initialized to all 0s are
-placed in a zero-initialized segment (e.g. ``.bss``) and never affect binary
-size. Non-zero globals may increase binary size if they are constant
-initialized, however.
-
-Should I constant initialize?
------------------------------
-Globals should usually be constant initialized when possible. Consider the
-following when deciding:
-
-- If the global is zero-initialized, make it ``constinit`` or ``constexpr`` if
-  possible. It will not increase binary size.
-- If the global is initialized to anything other than 0 or ``nullptr``,
-  it will occupy space in the binary.
-
-  - If the variable is small (e.g. a few words), make it ``constinit`` or
-    ``constexpr``. The initialized variable takes space in the binary, but it
-    probably takes less space than the code to initialize it would.
-  - If the variable is large, weigh its size against the size and runtime
-    cost of its initialization code.
-
-There is no hard-and-fast rule for when to constant initialize or not. The
-decision must be considered in light of each project's memory layout and
-capabilities. Experimentation may be necessary.
-
-**Example**
-
-.. literalinclude:: globals_test.cc
-   :start-after: [pw_toolchain-globals-init]
-   :end-before: [pw_toolchain-globals-init]
-   :language: cpp
-
-.. note::
-
-   Objects cannot be split between ``.data`` and ``.bss``. If an object contains
-   a single ``bool`` initialized to ``true`` followed by a 4KB array of zeroes,
-   it will be placed in ``.data``, and all 4096 zeroes will be present in the
-   binary.
-
-   A global ``pw::Vector`` works like this. A default-initialized
-   ``pw::Vector<char, 4096>`` includes one non-zero ``uint16_t``. If constant
-   initialized, the entire ``pw::Vector`` is stored in the binary, even though
-   it is mostly zeroes.
-
-Controlling constant initialization of globals
-----------------------------------------------
-Pigweed offers two utilities for declaring global variables:
-
-- :cpp:class:`pw::NoDestructor` -- Removes the destructor, which is not
-  necessary for globals. Constant initialization is supported, but not required.
-- :cpp:class:`pw::RuntimeInitGlobal` -- Removes the destructor. Prevents
-  constant initialization.
-
-It is recommended to specify constant or runtime initialization for all global
-variables.
-
-.. list-table:: **Declaring globals**
-   :header-rows: 1
-
-   * - Initialization
-     - Mutability
-     - Declaration
-   * - constant
-     - mutable
-     - | ``constinit T``
-       | ``constinit pw::NoDestructor<T>``
-   * - constant
-     - constant
-     - ``constexpr T``
-   * - runtime
-     - mutable
-     - ``pw::RuntimeInitGlobal<T>``
-   * - runtime
-     - constant
-     - ``const pw::RuntimeInitGlobal<T>``
-   * - unspecified
-     - constant
-     - | ``const T``
-       | ``const pw::NoDestructor<T>``
-   * - unspecified
-     - mutable
-     - | ``T``
-       | ``pw::NoDestructor<T>``
+For these reasons, Pigweed recommends most projects **do not** use
+``-ffreestanding``.
 
 API reference
 =============
-pw_toolchain/constexpr_tag.h
-----------------------------
-.. doxygenstruct:: pw::ConstexprTag
-
-.. doxygenvariable:: pw::kConstexpr
-
-pw_toolchain/globals.h
-----------------------
-.. doxygenclass:: pw::RuntimeInitGlobal
-
-pw_toolchain/no_destructor.h
-----------------------------
-.. doxygenclass:: pw::NoDestructor
-
-pw_toolchain/infinite_loop.h
-----------------------------
-.. doxygenfunction:: pw::InfiniteLoop
+Moved: :cc:`pw_toolchain`
 
 builtins
 ========

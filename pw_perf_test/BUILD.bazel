@@ -55,12 +55,15 @@ cc_library(
     hdrs = [
         "public/pw_perf_test/state.h",
     ],
+    implementation_deps = [
+        "//pw_log",
+        "//pw_numeric:integer_division",
+    ],
     strip_include_prefix = "public",
     deps = [
         ":event_handler",
         ":timer",
         "//pw_assert:assert",
-        "//pw_log",
     ],
 )
 
@@ -80,16 +83,37 @@ cc_library(
 )
 
 cc_library(
+    name = "log_csv_event_handler",
+    srcs = ["log_csv_event_handler.cc"],
+    hdrs = ["public/pw_perf_test/log_csv_event_handler.h"],
+    implementation_deps = ["//pw_log"],
+    strip_include_prefix = "public",
+    deps = [
+        ":event_handler",
+        "//pw_string:string",
+    ],
+)
+
+cc_library(
+    name = "log_csv_main",
+    srcs = ["log_csv_main.cc"],
+    deps = [
+        ":log_csv_event_handler",
+        ":pw_perf_test",
+    ],
+)
+
+cc_library(
     name = "logging_event_handler",
     srcs = ["logging_event_handler.cc"],
     hdrs = [
         "public/pw_perf_test/googletest_style_event_handler.h",
         "public/pw_perf_test/logging_event_handler.h",
     ],
+    implementation_deps = ["//pw_log"],
     strip_include_prefix = "public",
     deps = [
         ":event_handler",
-        "//pw_log",
     ],
 )
 
@@ -187,7 +211,6 @@ cc_library(
         "arm_cortex_cyccnt_public_overrides",
         "public",
     ],
-    target_compatible_with = incompatible_with_mcu(),
     deps = [
         ":duration_unit",
         ":timer.facade",
@@ -199,6 +222,7 @@ cc_library(
 pw_cc_perf_test(
     name = "example_perf_test",
     srcs = ["examples/example_perf_test.cc"],
+    features = ["-conversion_warnings"],
 )
 
 sphinx_docs_library(

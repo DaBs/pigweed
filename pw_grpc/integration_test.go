@@ -18,9 +18,11 @@ package integration_test
 import (
 	"bufio"
 	"context"
+	"flag"
 	"fmt"
 	"hash/crc32"
 	"io"
+	"os"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -31,25 +33,62 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
 	pb "google.golang.org/grpc/examples/features/proto/echo"
+	hellopb "google.golang.org/grpc/examples/helloworld/helloworld"
 	"google.golang.org/grpc/status"
 )
 
-const port = "3402"
+var connectToExistingServer = flag.Bool("connect_to_existing_server", false, "Connect to an existing server instance")
+var port = flag.Int("port", 3402, "Port on which to run the server, or the port on which an existing server is running, if --connect_to_existing_server is specified")
 
-func TestUnaryEcho(t *testing.T) {
-	const num_connections = 1
+func setupTest(t *testing.T, num_connections int) {
+	if *connectToExistingServer {
+		return
+	}
+
 	cmd, reader, err := launchServer(t, num_connections)
 	if err != nil {
-		t.Errorf("Failed to launch %v", err)
+		t.Fatalf("Failed to launch %v", err)
 	}
-	defer cmd.Wait()
+	go logServer(t, reader)
+
+	t.Cleanup(func() {
+		cmd.Process.Signal(os.Interrupt)
+		cmd.Wait()
+	})
+}
+
+func TestUnknownService(t *testing.T) {
+	setupTest(t, 1)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	conn, err := dialServer()
+	if err != nil {
+		t.Errorf("Failed to connect %v", err)
+	}
+	defer conn.Close()
+
+	// This service is not implemented by the test pw_grpc server.
+	hello_client := hellopb.NewGreeterClient(conn)
+	resp, err := hello_client.SayHello(ctx, &hellopb.HelloRequest{Name: "unused"})
+	if err == nil {
+		t.Errorf("Unexpected response %v", resp)
+		return
+	}
+	if gotCode := status.Convert(err).Code(); gotCode != codes.Unimplemented {
+		t.Errorf("Greeter.SayHello()=Error(%v), want=Error(Unimplemented)", gotCode)
+	}
+}
+
+func TestUnaryEcho(t *testing.T) {
+	setupTest(t, 1)
 
 	conn, echo_client, err := connectServer()
 	if err != nil {
 		t.Errorf("Failed to connect %v", err)
 	}
 	defer conn.Close()
-	go logServer(t, reader)
 
 	testRPC(t, func(t *testing.T, ctx context.Context, msg string) {
 		t.Logf("call UnaryEcho(%v)", msg)
@@ -72,19 +111,13 @@ func TestFragmentedMessage(t *testing.T) {
 	// Test sending successively larger messages, larger than the maximum
 	// HTTP2 data frame size (16384), ensuring messages are fragmented across
 	// frames.
-	const num_connections = 1
-	cmd, reader, err := launchServer(t, num_connections)
-	if err != nil {
-		t.Errorf("Failed to launch %v", err)
-	}
-	defer cmd.Wait()
+	setupTest(t, 1)
 
 	conn, echo_client, err := connectServer()
 	if err != nil {
 		t.Errorf("Failed to connect %v", err)
 	}
 	defer conn.Close()
-	go logServer(t, reader)
 
 	const num_calls = 4
 	for i := 0; i < num_calls; i++ {
@@ -119,13 +152,7 @@ func TestFragmentedMessage(t *testing.T) {
 
 func TestMultipleConnections(t *testing.T) {
 	const num_connections = 3
-	cmd, reader, err := launchServer(t, num_connections)
-	if err != nil {
-		t.Errorf("Failed to launch %v", err)
-	}
-	defer cmd.Wait()
-
-	go logServer(t, reader)
+	setupTest(t, num_connections)
 
 	for i := 0; i < num_connections; i++ {
 		t.Run(fmt.Sprintf("connection %d of %d", i+1, num_connections), func(t *testing.T) {
@@ -153,19 +180,13 @@ func TestMultipleConnections(t *testing.T) {
 }
 
 func TestServerStreamingEcho(t *testing.T) {
-	const num_connections = 1
-	cmd, reader, err := launchServer(t, num_connections)
-	if err != nil {
-		t.Errorf("Failed to launch %v", err)
-	}
-	defer cmd.Wait()
+	setupTest(t, 1)
 
 	conn, echo_client, err := connectServer()
 	if err != nil {
 		t.Errorf("Failed to connect %v", err)
 	}
 	defer conn.Close()
-	go logServer(t, reader)
 
 	testRPC(t, func(t *testing.T, ctx context.Context, msg string) {
 		t.Logf("call ServerStreamingEcho(%v)", msg)
@@ -196,19 +217,13 @@ func TestServerStreamingEcho(t *testing.T) {
 }
 
 func TestClientStreamingEcho(t *testing.T) {
-	const num_connections = 1
-	cmd, reader, err := launchServer(t, num_connections)
-	if err != nil {
-		t.Errorf("Failed to launch %v", err)
-	}
-	defer cmd.Wait()
+	setupTest(t, 1)
 
 	conn, echo_client, err := connectServer()
 	if err != nil {
 		t.Errorf("Failed to connect %v", err)
 	}
 	defer conn.Close()
-	go logServer(t, reader)
 
 	testRPC(t, func(t *testing.T, ctx context.Context, msg string) {
 		t.Logf("call ClientStreamingEcho()")
@@ -244,19 +259,13 @@ func TestClientStreamingEcho(t *testing.T) {
 }
 
 func TestBidirectionalStreamingEcho(t *testing.T) {
-	const num_connections = 1
-	cmd, reader, err := launchServer(t, num_connections)
-	if err != nil {
-		t.Errorf("Failed to launch %v", err)
-	}
-	defer cmd.Wait()
+	setupTest(t, 1)
 
 	conn, echo_client, err := connectServer()
 	if err != nil {
 		t.Errorf("Failed to connect %v", err)
 	}
 	defer conn.Close()
-	go logServer(t, reader)
 
 	testRPC(t, func(t *testing.T, ctx context.Context, msg string) {
 		t.Logf("call BidirectionalStreamingEcho()")
@@ -308,7 +317,7 @@ func logServer(t *testing.T, reader *bufio.Reader) {
 }
 
 func launchServer(t *testing.T, num_connections int) (*exec.Cmd, *bufio.Reader, error) {
-	cmd := exec.Command("./test_pw_rpc_server", port, strconv.Itoa(num_connections))
+	cmd := exec.Command("./test_pw_rpc_server", strconv.Itoa(*port), strconv.Itoa(num_connections))
 
 	output, err := cmd.StdoutPipe()
 	if err != nil {
@@ -332,10 +341,13 @@ func launchServer(t *testing.T, num_connections int) (*exec.Cmd, *bufio.Reader, 
 	return cmd, reader, nil
 }
 
-func connectServer() (*grpc.ClientConn, pb.EchoClient, error) {
-	addr := "localhost:" + port
+func dialServer() (*grpc.ClientConn, error) {
+	addr := "localhost:" + strconv.Itoa(*port)
+	return grpc.Dial(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+}
 
-	conn, err := grpc.Dial(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+func connectServer() (*grpc.ClientConn, pb.EchoClient, error) {
+	conn, err := dialServer()
 	if err != nil {
 		return nil, nil, err
 	}
@@ -352,7 +364,9 @@ func testRPC(t *testing.T, call func(t *testing.T, ctx context.Context, msg stri
 			defer cancel()
 
 			msg := fmt.Sprintf("message%d", i)
-			if i == num_calls-1 {
+			if i == num_calls-2 {
+				msg = "" // Test with an empty message
+			} else if i == num_calls-1 {
 				msg = "quiet"
 			}
 

@@ -1,0 +1,200 @@
+// Copyright 2025 The Pigweed Authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License"); you may not
+// use this file except in compliance with the License. You may obtain a copy of
+// the License at
+//
+//     https://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+// WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+// License for the specific language governing permissions and limitations under
+// the License.
+
+package {
+    default_applicable_licenses: ["external_pigweed_license"],
+}
+
+// This rule deviates from the standard genrules in pw_rpc/Android.bp to handle
+// the legacy structure of pw_log. While standard rules assume a two-level
+// directory depth (module/file.proto), pw_log is three levels deep
+// (pw_log/proto/log.proto). This rule explicitly adds
+// :pw_log_log_proto_with_prefix as a dependency and injects the correct
+// include path to resolve it.
+
+genrule_defaults {
+    name: "pw_snapshot_generate_pwpb_header",
+    cmd: "in_files=($(in)); proto_files=(); proto_path_args=(); " +
+        "for f in \"$${in_files[@]}\"; do " +
+        "if [[ \"$${f##*.}\" == \"proto\" ]]; then " +
+        "proto_path_args+=(\"--proto-path=$$(dirname $$(dirname $${f})) \"); " +
+        "proto_files+=(\"$${f}\"); fi; done; " +
+        "python3 $(location pw_protobuf_compiler_py) " +
+        "--proto-path=external/protobuf/src/ " +
+        "--proto-path=$$(dirname $$(dirname $$(dirname $(location :pw_log_log_proto_with_prefix)))) " +
+        "--plugin-path=$(location pw_protobuf_plugin_py) " +
+        "--out-dir=$(genDir) " +
+        "$${proto_path_args[@]}" +
+        "--language pwpb " +
+        "--sources $${proto_files[@]} " +
+        "--no-experimental-proto3-optional " +
+        "--no-experimental-editions " +
+        "--pwpb-no-oneof-callbacks " +
+        "--protoc=$(location aprotoc)",
+    tools: [
+        "aprotoc",
+        "pw_protobuf_compiler_py",
+        "pw_protobuf_plugin_py",
+    ],
+    srcs: [
+        ":pw_log_log_proto_with_prefix",
+    ],
+}
+
+genrule_defaults {
+    name: "pw_snapshot_generate_rpc_pwpb_header",
+    cmd: "in_files=($(in)); proto_files=(); proto_path_args=(); " +
+        "for f in \"$${in_files[@]}\"; do " +
+        "if [[ \"$${f##*.}\" == \"proto\" ]]; then " +
+        "proto_path_args+=(\"--proto-path=$$(dirname $$(dirname $${f})) \"); " +
+        "proto_files+=(\"$${f}\"); fi; done; " +
+        "python3 $(location pw_protobuf_compiler_py) " +
+        "--proto-path=external/protobuf/src/ " +
+        "--proto-path=$$(dirname $$(dirname $$(dirname $(location :pw_log_log_proto_with_prefix)))) " +
+        "--plugin-path=$(location pw_rpc_plugin_pwpb_py) " +
+        "--out-dir=$(genDir) " +
+        "$${proto_path_args[@]}" +
+        "--language pwpb_rpc " +
+        "--sources $${proto_files[@]} " +
+        "--no-experimental-proto3-optional " +
+        "--no-experimental-editions " +
+        "--pwpb-no-oneof-callbacks " +
+        "--protoc=$(location aprotoc)",
+    tools: [
+        "aprotoc",
+        "pw_protobuf_compiler_py",
+        "pw_rpc_plugin_pwpb_py",
+    ],
+    srcs: [
+        ":pw_log_log_proto_with_prefix",
+    ],
+}
+
+// Expose pw_snapshot/snapshot.proto
+filegroup {
+    name: "pw_snapshot_proto_src",
+    srcs: [
+        "pw_snapshot_protos/snapshot.proto",
+        ":pw_snapshot_metadata_proto_with_prefix",
+        ":pw_chrono_protos",
+        ":pw_metric_protos",
+        ":pw_tokenizer_proto_options_proto",
+        ":pw_protobuf_common_proto",
+        ":pw_log_log_proto_with_prefix",
+        ":pw_thread_protos",
+        ":pw_cpu_exception_cortex_m_protos",
+        ":libprotobuf-internal-protos",
+    ],
+}
+
+genrule {
+    name: "pw_snapshot_pwpb_rpc_header",
+    defaults: ["pw_snapshot_generate_rpc_pwpb_header"],
+    srcs: [
+        ":pw_snapshot_proto_src",
+    ],
+    out: [
+        "pw_snapshot_protos/snapshot.rpc.pwpb.h",
+    ],
+}
+
+genrule {
+    name: "pw_snapshot_pwpb_proto_header",
+    defaults: ["pw_snapshot_generate_pwpb_header"],
+    srcs: [
+        ":pw_snapshot_proto_src",
+    ],
+    out: [
+        "pw_snapshot_protos/snapshot.pwpb.h",
+    ],
+}
+
+// Expose pw_snapshot/snapshot_metadata.proto
+genrule {
+    name: "pw_snapshot_metadata_proto_with_prefix",
+    defaults: ["pw_rpc_add_prefix_to_proto"],
+    srcs: [
+        "pw_snapshot_protos/snapshot_metadata.proto"
+    ],
+    out: [
+        "pw_snapshot_metadata_proto/snapshot_metadata.proto"
+    ],
+}
+
+genrule {
+    name: "pw_snapshot_metadata_pwpb_rpc_header",
+    defaults: ["pw_rpc_generate_rpc_pwpb_header_with_prefix_and_protobuf"],
+    srcs: [
+        ":pw_snapshot_metadata_proto_with_prefix",
+        ":pw_tokenizer_proto_options_proto",
+        ":libprotobuf-internal-protos",
+    ],
+    out: [
+        "pw_snapshot_metadata_proto/snapshot_metadata.rpc.pwpb.h",
+    ],
+}
+
+genrule {
+    name: "pw_snapshot_metadata_pwpb_proto_header",
+    defaults: ["pw_rpc_generate_pwpb_header_with_prefix_and_protobuf"],
+    srcs: [
+        ":pw_snapshot_metadata_proto_with_prefix",
+        ":pw_tokenizer_proto_options_proto",
+        ":libprotobuf-internal-protos",
+    ],
+    out: ["pw_snapshot_metadata_proto/snapshot_metadata.pwpb.h"],
+}
+
+cc_library {
+    name: "pw_snapshot_service_pwpb",
+    defaults: [
+        "pw_android_common_target_support",
+        "pw_android_cpp_version",
+    ],
+    export_include_dirs: ["public/pw_snapshot"],
+    generated_headers: [
+        "pw_chrono_pwpb_header",
+        "pw_cpu_exception_cortex_m_pwpb_proto_header",
+        "pw_cpu_exception_cortex_m_pwpb_rpc_header",
+        "pw_log_log_proto_pwpb_h",
+        "pw_log_log_rpc_pwpb_h",
+        "pw_metric_pwpb_proto_header",
+        "pw_metric_pwpb_rpc_header",
+        "pw_protobuf_protos_common_pwpb_h",
+        "pw_snapshot_metadata_pwpb_proto_header",
+        "pw_snapshot_metadata_pwpb_rpc_header",
+        "pw_snapshot_pwpb_proto_header",
+        "pw_snapshot_pwpb_rpc_header",
+        "pw_thread_pwpb_proto_header",
+        "pw_thread_pwpb_rpc_header",
+        "pw_tokenizer_proto_options_pwpb_h",
+    ],
+    export_generated_headers: [
+        "pw_chrono_pwpb_header",
+        "pw_cpu_exception_cortex_m_pwpb_proto_header",
+        "pw_cpu_exception_cortex_m_pwpb_rpc_header",
+        "pw_log_log_proto_pwpb_h",
+        "pw_log_log_rpc_pwpb_h",
+        "pw_metric_pwpb_proto_header",
+        "pw_metric_pwpb_rpc_header",
+        "pw_protobuf_protos_common_pwpb_h",
+        "pw_snapshot_metadata_pwpb_proto_header",
+        "pw_snapshot_metadata_pwpb_rpc_header",
+        "pw_snapshot_pwpb_proto_header",
+        "pw_snapshot_pwpb_rpc_header",
+        "pw_thread_pwpb_proto_header",
+        "pw_thread_pwpb_rpc_header",
+        "pw_tokenizer_proto_options_pwpb_h",
+    ],
+}

@@ -25,7 +25,7 @@ import logging
 import os
 import subprocess
 import time
-from typing import Callable, NoReturn, TYPE_CHECKING
+from typing import Callable, Iterable, NoReturn, TYPE_CHECKING
 
 from prompt_toolkit.formatted_text import (
     AnyFormattedText,
@@ -142,10 +142,10 @@ class ProjectBuilderContext:  # pylint: disable=too-many-instance-attributes,too
     current_state: ProjectBuilderState = ProjectBuilderState.IDLE
     desired_state: ProjectBuilderState = ProjectBuilderState.BUILDING
     procs: dict[BuildRecipe, subprocess.Popen] = field(default_factory=dict)
-    recipes: list[BuildRecipe] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         self.project_builder: ProjectBuilder | None = None
+        self.dry_run: bool = False
 
         self.progress_bar_formatters = [
             formatters.Text(' '),
@@ -198,6 +198,12 @@ class ProjectBuilderContext:  # pylint: disable=too-many-instance-attributes,too
     def interrupted(self) -> bool:
         return self.ctrl_c_pressed or self.restart_flag
 
+    def enable_dry_run(self) -> None:
+        self.dry_run = True
+
+    def disable_dry_run(self) -> None:
+        self.dry_run = False
+
     def set_bottom_toolbar(self, text: AnyFormattedText) -> None:
         self.bottom_toolbar = text
 
@@ -220,9 +226,9 @@ class ProjectBuilderContext:  # pylint: disable=too-many-instance-attributes,too
         self.progress_bar.__enter__()  # pylint: disable=unnecessary-dunder-call
 
         self.create_title_bar_container()
-        self.progress_bar.app.layout.container.children[  # type: ignore
-            0
-        ] = DynamicContainer(lambda: self.title_bar_container)
+        self.progress_bar.app.layout.container.children[0] = (  # type: ignore
+            DynamicContainer(lambda: self.title_bar_container)
+        )
         self._progress_bar_started = True
 
     def exit_progress(self) -> None:
@@ -414,7 +420,12 @@ class ProjectBuilderContext:  # pylint: disable=too-many-instance-attributes,too
 
     def set_project_builder(self, project_builder) -> None:
         self.project_builder = project_builder
-        self.recipes = project_builder.build_recipes
+
+    @property
+    def recipes(self) -> Iterable[BuildRecipe]:
+        """Recipes sorted by name."""
+        assert self.project_builder
+        return self.project_builder.build_recipes_sorted_by_name()
 
     def set_idle(self) -> None:
         self.current_state = ProjectBuilderState.IDLE

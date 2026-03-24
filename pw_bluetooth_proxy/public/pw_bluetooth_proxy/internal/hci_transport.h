@@ -14,7 +14,7 @@
 
 #pragma once
 
-#include "pw_assert/check.h"
+#include "pw_assert/assert.h"
 #include "pw_bluetooth_proxy/h4_packet.h"
 #include "pw_function/function.h"
 
@@ -32,13 +32,13 @@ class HciTransport {
 
   // Send packet onwards to host.
   void SendToHost(H4PacketWithHci&& h4_packet) {
-    PW_DCHECK(outward_send_to_host_fn_ != nullptr);
+    PW_DASSERT(outward_send_to_host_fn_ != nullptr);
     outward_send_to_host_fn_(std::move(h4_packet));
   }
 
   // Send packet onwards to controller.
   void SendToController(H4PacketWithH4&& h4_packet) {
-    PW_DCHECK(outward_send_to_controller_fn_ != nullptr);
+    PW_DASSERT(outward_send_to_controller_fn_ != nullptr);
     outward_send_to_controller_fn_(std::move(h4_packet));
   }
 

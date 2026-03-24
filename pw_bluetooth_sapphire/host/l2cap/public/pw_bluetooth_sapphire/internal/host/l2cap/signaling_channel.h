@@ -22,6 +22,7 @@
 #include "pw_bluetooth_sapphire/internal/host/hci/connection.h"
 #include "pw_bluetooth_sapphire/internal/host/l2cap/l2cap_defs.h"
 #include "pw_bluetooth_sapphire/internal/host/l2cap/scoped_channel.h"
+#include "pw_bluetooth_sapphire/lease.h"
 
 namespace bt::l2cap {
 
@@ -103,6 +104,10 @@ class SignalingChannelInterface {
   // the current delegate.
   virtual void ServeRequest(CommandCode req_code, RequestDelegate cb) = 0;
 
+  // Send a command that expects no response.
+  virtual bool SendCommandWithoutResponse(CommandCode req_code,
+                                          const ByteBuffer& payload) = 0;
+
  protected:
   virtual ~SignalingChannelInterface() = default;
 };
@@ -115,7 +120,8 @@ class SignalingChannel : public SignalingChannelInterface {
  public:
   SignalingChannel(Channel::WeakPtr chan,
                    pw::bluetooth::emboss::ConnectionRole role,
-                   pw::async::Dispatcher& dispatcher);
+                   pw::async::Dispatcher& dispatcher,
+                   pw::bluetooth_sapphire::LeaseProvider& wake_lease_provider);
   ~SignalingChannel() override = default;
 
   // SignalingChannelInterface overrides
@@ -123,6 +129,8 @@ class SignalingChannel : public SignalingChannelInterface {
                    const ByteBuffer& payload,
                    ResponseHandler cb) override;
   void ServeRequest(CommandCode req_code, RequestDelegate cb) override;
+  bool SendCommandWithoutResponse(CommandCode req_code,
+                                  const ByteBuffer& payload) override;
 
   bool is_open() const { return is_open_; }
 
@@ -189,6 +197,11 @@ class SignalingChannel : public SignalingChannelInterface {
   // IDs to prevent collisions with pending commands.
   CommandId GetNextCommandId();
 
+  // Generate a command identifier in sequential order that is never
+  // kInvalidId, and ensures that it does not correspond to a pending command.
+  // If all possible command IDs are pending, returns std::nullopt.
+  std::optional<CommandId> GetNextAvailableCommandId();
+
  private:
   // Enqueue a response to a request with command id |id| and payload
   // |request_packet|. Register a callback |cb| that will be invoked when a
@@ -248,13 +261,15 @@ class SignalingChannel : public SignalingChannelInterface {
     PendingCommand(const ByteBuffer& request_packet,
                    CommandCode response_command_code,
                    ResponseHandler response_handler_cb,
-                   pw::async::Dispatcher& dispatcher)
+                   pw::async::Dispatcher& dispatcher,
+                   pw::bluetooth_sapphire::Lease wake_lease_in)
         : response_code(response_command_code),
           response_handler(std::move(response_handler_cb)),
           command_packet(std::make_unique<DynamicByteBuffer>(request_packet)),
           transmit_count(1u),
           timer_duration(0u),
-          response_timeout_task(dispatcher) {}
+          response_timeout_task(dispatcher),
+          wake_lease(std::move(wake_lease_in)) {}
     CommandCode response_code;
     ResponseHandler response_handler;
 
@@ -270,6 +285,9 @@ class SignalingChannel : public SignalingChannelInterface {
 
     // Automatically canceled by destruction if the response is received.
     SmartTask response_timeout_task;
+
+    // Keep the system awake while this command is pending.
+    pw::bluetooth_sapphire::Lease wake_lease;
   };
 
   // Retransmit the request corresponding to |pending_command| and reset the RTX
@@ -277,6 +295,8 @@ class SignalingChannel : public SignalingChannelInterface {
   void RetransmitPendingCommand(PendingCommand& pending_command);
 
   pw::async::Dispatcher& pw_dispatcher_;
+
+  pw::bluetooth_sapphire::LeaseProvider& wake_lease_provider_;
 
   bool is_open_;
   l2cap::ScopedChannel chan_;

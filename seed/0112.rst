@@ -89,7 +89,8 @@ data and then sends it out before completing:
      // ``SendFuture`` is some type returned by `Sender::Send` that offers a
      // ``Poll`` method similar to the one on ``Task``.
      std::optional<SendFuture> send_future_;
-     // `receiver_` and `sender_` are provided by the `ProxyOneMessage` constructor.
+     // `receiver_` and `sender_` are provided by the `ProxyOneMessage`
+     // constructor.
      Receiver receiver_;
      Sender sender_;
    };
@@ -181,8 +182,10 @@ returning a simple ``bool``.
 .. code-block:: cpp
 
    /// A value that is ready, and
-   template<typename T>
-   struct Ready<T> { value: T };
+   template <typename T>
+   struct Ready<T> {
+     value : T
+   };
 
    /// A content-less struct that indicates a not-ready value.
    struct Pending {};
@@ -194,7 +197,7 @@ returning a simple ``bool``.
    /// This can aid in making type signatures such as
    /// ``MaybeReady<std::optional<Item>>`` easier to understand, and provides
    /// clearer naming like `IsReady` (compared to ``has_value()``).
-   template<typename T>
+   template <typename T>
    class MaybeReady {
     public:
      /// Implicitly converts from ``T``,  ``Ready<T>`` or ``Pending``.
@@ -203,7 +206,7 @@ returning a simple ``bool``.
      MaybeReady(Pending);
      bool IsReady();
      T Value() &&;
-     ...
+     // ...
    };
 
    /// A content-less struct that indicates completion.
@@ -221,7 +224,7 @@ function they are in. For example:
      if (!__priv.IsReady()) {            \
        return pw::async::Pending;        \
      }                                   \
-     lhs = std::move(__priv.Value())     \
+     lhs = std::move(__priv.Value())
 
    MaybeReady<Bar> PollCreateBar(Context& cx);
 
@@ -253,7 +256,7 @@ to support single-threaded asynchronous I/O.
      /// until the ``Task`` is "awoken", at which point it will call ``Poll``
      /// again until the ``Task`` completes.
      void Post(Task&);
-     ...
+     // ...
    };
 
 The ``Waker`` Type
@@ -289,7 +292,7 @@ a ``Task`` ID onto a system-level async construct such as ``epoll``.
      /// ``Clone`` is made explicit in order to allow for easier tracking of
      /// the different ``Waker``s that may wake up a ``Task``.
      Waker Clone(Token wait_reason_indicator) &;
-     ...
+     // ...
    };
 
 The ``Wake`` function itself may be called by any system with knowledge that
@@ -312,7 +315,7 @@ when to run this ``Task`` again.
      Context(Dispatcher&, Waker&);
      Dispatcher& Dispatcher();
      Waker& Waker();
-     ...
+     // ...
    };
 
 The ``Task`` Type
@@ -331,7 +334,7 @@ users can create a new ``Task`` object and send it to be run on a
    class Task {
     public:
      MaybeReady<Complete> Poll(Context&);
-     ...
+     //...
     protected:
      /// Returns whether or not the ``Task`` has completed.
      ///
@@ -339,7 +342,7 @@ users can create a new ``Task`` object and send it to be run on a
      /// and `context.Waker()` will receive a `Wake()` call when the ``Task``
      /// is ready to make progress and should be ``Poll`` ed again.
      virtual MaybeReady<Complete> DoPoll(Context&) = 0;
-     ...
+     // ...
    };
 
 This structure makes it possible to run complex asynchronous ``Task`` s
@@ -437,7 +440,7 @@ testing primitives natively:
 
    class Dispatcher {
     public:
-     ...
+     // ...
 
      /// Runs tasks until none are able to make immediate progress.
      ///
@@ -503,10 +506,10 @@ function.
 
    class Task {
     public:
-     ...
+     //...
      void Init();
      virtual void Cleanup();
-     ...
+     // ...
    };
 
 This allows downstream ``Task`` inheritors to implement dynamic free-ing of
@@ -536,7 +539,7 @@ One possible ``Timer`` API would be as follows:
      Timer(Context&, chrono::SystemClock::time_point deadline);
      Timer(Context&, chrono::SystemClock::duration delay);
      pw::MaybeReady<Complete> Poll(Context&);
-     ...
+     // ...
    };
 
 In order to enable this, the ``Dispatcher`` base class will include the
@@ -546,7 +549,7 @@ following functions which implementations should use to trigger timers:
 
    class DispatcherBase {
     public:
-     ...
+     //...
     protected:
      /// Returns the time of the earliest timer currently scheduled to fire.
      std::optional<chrono::SystemClock::time_point> EarliestTimerExpiry();
@@ -562,7 +565,7 @@ following functions which implementations should use to trigger timers:
      /// ``Dispatcher`` implementations can override this to receive
      /// notifications when a new timer is added.
      virtual void NewEarliestTimer();
-     ...
+     // ...
    };
 
 ---------------------

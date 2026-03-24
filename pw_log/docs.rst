@@ -1,3 +1,5 @@
+.. TODO: b/442238478 - Migrate C/C++ API reference content to Doxygen
+
 .. _module-pw_log:
 
 ======
@@ -76,7 +78,7 @@ Below is an example diagram showing how the modules connect together for the
 turn outputs to the STM32F429 bare metal backend for ``pw_sys_io``, which is
 ``pw_sys_io_baremetal_stm32f429i``.
 
-.. image:: https://storage.googleapis.com/pigweed-media/pw_log/example_layer_diagram.svg
+.. image:: https://www.gstatic.com/pigweed/pw_log/example_layer_diagram.svg
 
 .. _module-pw_log-macros:
 
@@ -118,8 +120,17 @@ system, intended to be used directly.
 
    .. code-block:: cpp
 
-      PW_LOG(PW_LOG_LEVEL_INFO, PW_LOG_LEVEL_DEBUG, PW_LOG_MODULE_NAME, PW_LOG_FLAGS, "Temp is %d degrees", temp);
-      PW_LOG(PW_LOG_LEVEL_ERROR, PW_LOG_LEVEL_DEBUG, PW_LOG_MODULE_NAME, UNRELIABLE_DELIVERY, "It didn't work!");
+      PW_LOG(PW_LOG_LEVEL_INFO,
+             PW_LOG_LEVEL_DEBUG,
+             PW_LOG_MODULE_NAME,
+             PW_LOG_FLAGS,
+             "Temp is %d degrees",
+             temp);
+      PW_LOG(PW_LOG_LEVEL_ERROR,
+             PW_LOG_LEVEL_DEBUG,
+             PW_LOG_MODULE_NAME,
+             UNRELIABLE_DELIVERY,
+             "It didn't work!");
 
    .. note::
 
@@ -162,7 +173,7 @@ system, intended to be used directly.
    Dropped logs will be counted to add a drop count and calculated rate of the
    logs.
 
-   *msg* - Formattable log message, as you would pass to the above ``PW_LOG``
+   *msg* - Formattable log message, as you would pass to the above :cc:`PW_LOG`
    macro.
 
    .. note::
@@ -183,12 +194,13 @@ system, intended to be used directly.
 
       // Ensure at least 500ms between transfer parameter logs.
       chrono::SystemClock::duration rate_limit_ =
-         chrono::SystemClock::for_at_least(std::chrono::milliseconds(500));
+          chrono::SystemClock::for_at_least(std::chrono::milliseconds(500));
 
-      PW_LOG_EVERY_N_DURATION(PW_LOG_LEVEL_INFO,
-                              rate_limit_,
-                              "Transfer %u sending transfer parameters!"
-                              static_cast<unsigned>(session_id_));
+      PW_LOG_EVERY_N_DURATION(
+          PW_LOG_LEVEL_INFO,
+          rate_limit_,
+          "Transfer %u sending transfer parameters!" static_cast<unsigned>(
+              session_id_));
 
 --------------------
 Module configuration
@@ -202,7 +214,7 @@ more details.
 
    Controls the default value of ``PW_LOG_LEVEL``. Setting
    ``PW_LOG_LEVEL_DEFAULT`` will change the behavior of all source files that
-   have not explicitly set ``PW_LOG_LEVEL``. Defaults to ``PW_LOG_LEVEL_DEBUG``.
+   have not explicitly set ``PW_LOG_LEVEL``. Defaults to ``PW_LOG_LEVEL_INFO``.
 
 .. c:macro:: PW_LOG_FLAGS_DEFAULT
 
@@ -248,9 +260,7 @@ source files, not headers. For example:
    #include "pw_log/log.h"
    #include "pw_rpc/server.h"
 
-   int MyFunction() {
-     PW_LOG_INFO("hello???");
-   }
+   int MyFunction() { PW_LOG_INFO("hello???"); }
 
 .. c:macro:: PW_LOG_MODULE_NAME
 
@@ -260,7 +270,7 @@ source files, not headers. For example:
 .. c:macro:: PW_LOG_FLAGS
 
    Log flags to use for the ``PW_LOG_<level>`` macros. Different flags may be
-   applied when using the ``PW_LOG`` macro directly.
+   applied when using the :cc:`PW_LOG` macro directly.
 
    Log backends use flags to change how they handle individual log messages.
    Potential uses include assigning logs priority or marking them as containing
@@ -315,9 +325,9 @@ complexity, and more.
 
 .. _module-pw_log-circular-deps:
 
-----------------------------------------------
-Avoiding circular dependencies with ``PW_LOG``
-----------------------------------------------
+------------------------------------------------
+Avoiding circular dependencies with :cc:`PW_LOG`
+------------------------------------------------
 Because logs are so widely used, including in low-level libraries, it is
 common for the ``pw_log`` backend to cause circular dependencies. Because of
 this, log backends may avoid declaring explicit dependencies, instead relying
@@ -404,7 +414,8 @@ move to tokenization:
 
 .. code-block:: cpp
 
-   LOG(INFO) << TOKEN("My temperature is ") << temperature << TOKEN(". State: ") << state;
+   LOG(INFO) << TOKEN("My temperature is ") << temperature << TOKEN(". State: ")
+             << state;
 
 However, this doesn't work. The key problem is that the tokenization system
 needs to allocate the string in a linker section that is excluded from the

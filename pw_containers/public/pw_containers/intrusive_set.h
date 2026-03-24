@@ -20,6 +20,11 @@
 
 namespace pw {
 
+/// @module{pw_containers}
+
+/// @addtogroup pw_containers_sets
+/// @{
+
 /// A `std::set<Key, Compare>`-like class that uses intrusive items as keys.
 ///
 /// Since the set structure is stored in the items themselves, each item must
@@ -116,10 +121,10 @@ class IntrusiveSet {
   /// @param    Compare   Function with the signature `bool(T, T)` that is
   ///                     used to order items.
   template <typename Comparator>
-  constexpr explicit IntrusiveSet(Comparator&& compare)
-      : tree_(true,
-              std::forward<Comparator>(compare),
-              [](const T& t) -> const T& { return t; }) {
+  constexpr explicit IntrusiveSet(Comparator compare)
+      : tree_(true, std::move(compare), [](const T& t) -> const T& {
+          return t;
+        }) {
     CheckItemType();
   }
 
@@ -217,7 +222,7 @@ class IntrusiveSet {
   iterator erase(iterator pos) { return iterator(tree_.erase_one(*pos)); }
 
   iterator erase(iterator first, iterator last) {
-    return iterator(tree_.erase_range(*first, *last));
+    return iterator(tree_.erase_range(first, last));
   }
 
   size_t erase(const T& item) { return tree_.erase_all(item); }

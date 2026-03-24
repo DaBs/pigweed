@@ -53,7 +53,6 @@
 //! assert_eq!(len, 5);
 //! # Ok::<(), pw_status::Error>(())
 //! ```
-#![cfg_attr(feature = "nightly", feature(type_alias_impl_trait))]
 #![cfg_attr(not(feature = "std"), no_std)]
 #![deny(missing_docs)]
 
@@ -71,7 +70,6 @@ pub mod internal;
 // `pw_tokenizer` while still allowing a user to import it under a different
 // name.
 pub mod __private {
-    pub use crate::*;
     pub use pw_bytes::concat_static_strs;
     pub use pw_format_core::{PrintfFormatter, PrintfHexFormatter, PrintfUpperHexFormatter};
     pub use pw_status::Result;
@@ -81,6 +79,8 @@ pub mod __private {
         _token, _tokenize_core_fmt_to_buffer, _tokenize_core_fmt_to_writer,
         _tokenize_printf_to_buffer, _tokenize_printf_to_writer,
     };
+
+    pub use crate::*;
 }
 
 /// Return the [`u32`] token for the specified string and add it to the token
@@ -226,6 +226,11 @@ macro_rules! tokenize_to_buffer {
 /// tokenization will be written to a shared/ambient resource like stdio, a
 /// UART, or a shared buffer.
 ///
+/// The `writer_type` should implement [`MessageWriter`] and [`Default`] traits.
+/// The writer is instantiated with the [`Default`] allowing any intermediate
+/// buffers to be declared on the stack of the internal writing engine instead
+/// of the caller's stack.
+///
 /// See [`token`] for an explanation on how strings are tokenized and entries
 /// are added to the token database.  The token's domain is set to `""`.
 ///
@@ -265,13 +270,15 @@ macro_rules! tokenize_to_buffer {
 ///   cursor: Cursor<[u8; BUFFER_LEN]>,
 /// }
 ///
-/// impl MessageWriter for TestMessageWriter {
-///   fn new() -> Self {
+/// impl Default for TestMessageWriter {
+///   fn default() -> Self {
 ///       Self {
 ///           cursor: Cursor::new([0u8; BUFFER_LEN]),
 ///       }
 ///   }
+/// }
 ///
+/// impl MessageWriter for TestMessageWriter {
 ///   fn write(&mut self, data: &[u8]) -> Result<()> {
 ///       self.cursor.write_all(data)
 ///   }
@@ -295,9 +302,9 @@ macro_rules! tokenize_to_buffer {
 /// ```
 #[macro_export]
 macro_rules! tokenize_core_fmt_to_writer {
-    ($ty:ty, $($format_string:literal)PW_FMT_CONCAT+ $(, $args:expr)* $(,)?) => {{
+    ($writer:expr, $($format_string:literal)PW_FMT_CONCAT+ $(, $args:expr)* $(,)?) => {{
       use $crate::__private as __pw_tokenizer_crate;
-      __pw_tokenizer_crate::_tokenize_core_fmt_to_writer!($ty, $($format_string)PW_FMT_CONCAT+, $($args),*)
+      __pw_tokenizer_crate::_tokenize_core_fmt_to_writer!($writer, $($format_string)PW_FMT_CONCAT+, $($args),*)
     }};
 }
 
@@ -308,6 +315,11 @@ macro_rules! tokenize_core_fmt_to_writer {
 /// provide an optimized API for use cases like logging where the output of the
 /// tokenization will be written to a shared/ambient resource like stdio, a
 /// UART, or a shared buffer.
+///
+/// The `writer_type` should implement [`MessageWriter`] and [`Default`] traits.
+/// The writer is instantiated with the [`Default`] allowing any intermediate
+/// buffers to be declared on the stack of the internal writing engine instead
+/// of the caller's stack.
 ///
 /// See [`token`] for an explanation on how strings are tokenized and entries
 /// are added to the token database.  The token's domain is set to `""`.
@@ -348,13 +360,15 @@ macro_rules! tokenize_core_fmt_to_writer {
 ///   cursor: Cursor<[u8; BUFFER_LEN]>,
 /// }
 ///
-/// impl MessageWriter for TestMessageWriter {
-///   fn new() -> Self {
+/// impl Default for TestMessageWriter {
+///   fn default() -> Self {
 ///       Self {
 ///           cursor: Cursor::new([0u8; BUFFER_LEN]),
 ///       }
 ///   }
+/// }
 ///
+/// impl MessageWriter for TestMessageWriter {
 ///   fn write(&mut self, data: &[u8]) -> Result<()> {
 ///       self.cursor.write_all(data)
 ///   }
@@ -378,17 +392,17 @@ macro_rules! tokenize_core_fmt_to_writer {
 /// ```
 #[macro_export]
 macro_rules! tokenize_printf_to_writer {
-    ($ty:ty, $($format_string:literal)PW_FMT_CONCAT+ $(, $args:expr)* $(,)?) => {{
+    ($writer:expr, $($format_string:literal)PW_FMT_CONCAT+ $(, $args:expr)* $(,)?) => {{
       use $crate::__private as __pw_tokenizer_crate;
-      __pw_tokenizer_crate::_tokenize_printf_to_writer!($ty, $($format_string)PW_FMT_CONCAT+, $($args),*)
+      __pw_tokenizer_crate::_tokenize_printf_to_writer!($writer, $($format_string)PW_FMT_CONCAT+, $($args),*)
     }};
 }
 
 /// Deprecated alias for [`tokenize_printf_to_writer!`].
 #[macro_export]
 macro_rules! tokenize_to_writer {
-  ($ty:ty, $($format_string:literal)PW_FMT_CONCAT+ $(, $args:expr)* $(,)?) => {{
-    $crate::tokenize_printf_to_writer!($ty, $($format_string)PW_FMT_CONCAT+, $($args),*)
+  ($writer:expr, $($format_string:literal)PW_FMT_CONCAT+ $(, $args:expr)* $(,)?) => {{
+    $crate::tokenize_printf_to_writer!($writer, $($format_string)PW_FMT_CONCAT+, $($args),*)
   }};
 }
 
@@ -397,9 +411,6 @@ macro_rules! tokenize_to_writer {
 /// For more details on how this type is used, see the [`tokenize_to_writer!`]
 /// documentation.
 pub trait MessageWriter {
-    /// Returns a new instance of a `MessageWriter`.
-    fn new() -> Self;
-
     /// Append `data` to the message.
     fn write(&mut self, data: &[u8]) -> Result<()>;
 
@@ -421,8 +432,9 @@ pub trait MessageWriter {
 mod tests {
     use super::*;
     extern crate self as pw_tokenizer;
-    use pw_stream::{Cursor, Write};
     use std::cell::RefCell;
+
+    use pw_stream::{Cursor, Write};
 
     // This is not meant to be an exhaustive test of tokenization which is
     // covered by `pw_tokenizer_core`'s unit tests.  Rather, this is testing
@@ -469,13 +481,15 @@ mod tests {
             cursor: Cursor<[u8; $buffer_len]>,
         }
 
-        impl MessageWriter for TestMessageWriter {
-          fn new() -> Self {
+        impl Default for TestMessageWriter {
+          fn default() -> Self {
               Self {
                   cursor: Cursor::new([0u8; $buffer_len]),
               }
           }
+        }
 
+        impl MessageWriter for TestMessageWriter {
           fn write(&mut self, data: &[u8]) -> Result<()> {
               self.cursor.write_all(data)
           }
@@ -643,10 +657,10 @@ mod tests {
     #[test]
     fn test_char_format() {
         tokenize_test!(
-            &[0x2e, 0x52, 0xac, 0xe4, 0x50], // expected buffer
-            64,                              // buffer size
-            "Hello: %cigweed",               // printf style
-            "",                              // no equivalent core::fmt style
+            &[0x2e, 0x52, 0xac, 0xe4, 0xa0, 0x1], // expected buffer
+            64,                                   // buffer size
+            "Hello: %cigweed",                    // printf style
+            "",                                   // no equivalent core::fmt style
             "P".as_bytes()[0]
         );
     }
@@ -717,7 +731,7 @@ mod tests {
         let len = tokenize_printf_to_buffer!(&mut buffer, "Hello: " PW_FMT_CONCAT "%cigweed",
           "P".as_bytes()[0])
         .unwrap();
-        assert_eq!(&buffer[..len], &[0x2e, 0x52, 0xac, 0xe4, 0x50]);
+        assert_eq!(&buffer[..len], &[0x2e, 0x52, 0xac, 0xe4, 0xa0, 0x1]);
     }
 
     #[test]

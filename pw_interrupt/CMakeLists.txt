@@ -23,3 +23,12 @@ pw_add_facade(pw_interrupt.context INTERFACE
   PUBLIC_INCLUDES
     public
 )
+
+pw_add_library(pw_interrupt.fake_context STATIC
+  PUBLIC_DEPS
+    pw_interrupt.context.facade
+  HEADERS
+    public/pw_interrupt/fake_context.h
+  SOURCES
+    fake_context.cc
+)

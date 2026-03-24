@@ -16,8 +16,10 @@
 # pigweed.dev Sphinx themes
 sphinx-copybutton==0.5.1
 breathe==4.35.0
+google-genai==1.39.1
 pydata-sphinx-theme==0.15.4
 sphinx-reredirects==0.1.3
+sphinxcontrib-doxylink @ git+https://pigweed.googlesource.com/third_party/github/sphinx-contrib/doxylink@main
 
 # WARNING: This list is for Pigweed repo only Python requirements.
 # If you are adding a new Python dependency to be used by downstream

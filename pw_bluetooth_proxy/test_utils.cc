@@ -16,22 +16,10 @@
 
 #include <cstdint>
 
+#include "pw_allocator/null_allocator.h"
+#include "pw_allocator/synchronized_allocator.h"
 #include "pw_allocator/testing.h"
-#include "pw_bluetooth/emboss_util.h"
-#include "pw_bluetooth/hci_common.emb.h"
-#include "pw_bluetooth/hci_data.emb.h"
-#include "pw_bluetooth/hci_events.emb.h"
-#include "pw_bluetooth/hci_h4.emb.h"
-#include "pw_bluetooth/l2cap_frames.emb.h"
-#include "pw_bluetooth_proxy/basic_l2cap_channel.h"
-#include "pw_bluetooth_proxy/h4_packet.h"
-#include "pw_bluetooth_proxy/internal/logical_transport.h"
-#include "pw_bluetooth_proxy/l2cap_channel_common.h"
-#include "pw_bluetooth_proxy/l2cap_status_delegate.h"
-#include "pw_bluetooth_proxy/proxy_host.h"
-#include "pw_status/status.h"
-#include "pw_status/try.h"
-#include "pw_unit_test/framework.h"
+#include "pw_assert/check.h"
 
 namespace pw::bluetooth::proxy {
 
@@ -42,9 +30,14 @@ Result<AclFrameWithStorage> SetupAcl(uint16_t handle, uint16_t l2cap_length) {
   frame.storage.resize(l2cap_length + emboss::AclDataFrame::MinSizeInBytes() +
                        AclFrameWithStorage::kH4HeaderSize);
   std::fill(frame.storage.begin(), frame.storage.end(), 0);
+  frame.storage[0] = cpp23::to_underlying(emboss::H4PacketType::ACL_DATA);
   PW_TRY_ASSIGN(frame.writer,
                 MakeEmbossWriter<emboss::AclDataFrameWriter>(frame.hci_span()));
   frame.writer.header().handle().Write(handle);
+  frame.writer.header().packet_boundary_flag().Write(
+      emboss::AclDataPacketBoundaryFlag::FIRST_NON_FLUSHABLE);
+  frame.writer.header().broadcast_flag().Write(
+      emboss::AclDataPacketBroadcastFlag::POINT_TO_POINT);
   frame.writer.data_total_length().Write(l2cap_length);
   EXPECT_EQ(l2cap_length,
             frame.writer.payload().BackingStorage().SizeInBytes());
@@ -152,7 +145,7 @@ Result<KFrameWithStorage> SetupKFrame(uint16_t handle,
 
 // Send an LE_Read_Buffer_Size (V2) CommandComplete event to `proxy` to request
 // the reservation of a number of LE ACL send credits.
-Status SendLeReadBufferResponseFromController(
+Status ProxyHostTest::SendLeReadBufferResponseFromController(
     ProxyHost& proxy,
     uint8_t num_credits_to_reserve,
     uint16_t le_acl_data_packet_length) {
@@ -171,11 +164,14 @@ Status SendLeReadBufferResponseFromController(
   view.le_acl_data_packet_length().Write(le_acl_data_packet_length);
 
   proxy.HandleH4HciFromController(std::move(h4_packet));
+  RunDispatcher();
   return OkStatus();
 }
 
-Status SendReadBufferResponseFromController(ProxyHost& proxy,
-                                            uint8_t num_credits_to_reserve) {
+Status ProxyHostTest::SendReadBufferResponseFromController(
+    ProxyHost& proxy,
+    uint8_t num_credits_to_reserve,
+    uint16_t acl_data_packet_length) {
   std::array<uint8_t,
              emboss::ReadBufferSizeCommandCompleteEventWriter::SizeInBytes()>
       hci_arr{};
@@ -187,19 +183,61 @@ Status SendReadBufferResponseFromController(ProxyHost& proxy,
   view.command_complete().command_opcode().Write(
       emboss::OpCode::READ_BUFFER_SIZE);
   view.total_num_acl_data_packets().Write(num_credits_to_reserve);
-  view.acl_data_packet_length().Write(0xFFFF);
+  view.acl_data_packet_length().Write(acl_data_packet_length);
   view.synchronous_data_packet_length().Write(0xFF);
   EXPECT_TRUE(view.Ok());
 
   proxy.HandleH4HciFromController(std::move(h4_packet));
+  RunDispatcher();
+  return OkStatus();
+}
+
+static constexpr size_t NumberOfCompletedPacketsSize(size_t num_connections) {
+  return emboss::NumberOfCompletedPacketsEvent::MinSizeInBytes() +
+         num_connections *
+             emboss::NumberOfCompletedPacketsEventData::IntrinsicSizeInBytes();
+}
+
+Status ProxyHostTest::SendNumberOfCompletedPackets(
+    ProxyHost& proxy,
+    std::initializer_list<std::pair<uint16_t, uint16_t>>
+        packets_per_connection) {
+  constexpr const size_t kMaxConnections = 5;
+  PW_CHECK_UINT_LE(packets_per_connection.size(), kMaxConnections);
+
+  std::array<uint8_t, NumberOfCompletedPacketsSize(kMaxConnections)> hci_arr;
+  hci_arr.fill(0);
+  span<uint8_t> hci_span(
+      hci_arr.data(),
+      NumberOfCompletedPacketsSize(packets_per_connection.size()));
+  H4PacketWithHci nocp_event{emboss::H4PacketType::EVENT, hci_span};
+  PW_TRY_ASSIGN(auto view,
+                MakeEmbossWriter<emboss::NumberOfCompletedPacketsEventWriter>(
+                    nocp_event.GetHciSpan()));
+  view.header().event_code().Write(
+      emboss::EventCode::NUMBER_OF_COMPLETED_PACKETS);
+  view.header().parameter_total_size().Write(
+      nocp_event.GetHciSpan().size() -
+      emboss::EventHeader::IntrinsicSizeInBytes());
+  view.num_handles().Write(packets_per_connection.size());
+
+  size_t i = 0;
+  for (const auto& [handle, num_packets] : packets_per_connection) {
+    view.nocp_data()[i].connection_handle().Write(handle);
+    view.nocp_data()[i].num_completed_packets().Write(num_packets);
+    ++i;
+  }
+
+  proxy.HandleH4HciFromController(std::move(nocp_event));
+  RunDispatcher();
   return OkStatus();
 }
 
 // Send a Connection_Complete event to `proxy` indicating the provided
 // `handle` has disconnected.
-Status SendConnectionCompleteEvent(ProxyHost& proxy,
-                                   uint16_t handle,
-                                   emboss::StatusCode status) {
+Status ProxyHostTest::SendConnectionCompleteEvent(ProxyHost& proxy,
+                                                  uint16_t handle,
+                                                  emboss::StatusCode status) {
   std::array<uint8_t, emboss::ConnectionCompleteEvent::IntrinsicSizeInBytes()>
       hci_arr{};
   H4PacketWithHci h4_packet{emboss::H4PacketType::EVENT, hci_arr};
@@ -210,14 +248,15 @@ Status SendConnectionCompleteEvent(ProxyHost& proxy,
   view.status().Write(status);
   view.connection_handle().Write(handle);
   proxy.HandleH4HciFromController(std::move(h4_packet));
+  RunDispatcher();
   return OkStatus();
 }
 
 // Send a LE_Connection_Complete event to `proxy` indicating the provided
 // `handle` has disconnected.
-Status SendLeConnectionCompleteEvent(ProxyHost& proxy,
-                                     uint16_t handle,
-                                     emboss::StatusCode status) {
+Status ProxyHostTest::SendLeConnectionCompleteEvent(ProxyHost& proxy,
+                                                    uint16_t handle,
+                                                    emboss::StatusCode status) {
   std::array<uint8_t,
              emboss::LEConnectionCompleteSubevent::IntrinsicSizeInBytes()>
       hci_arr_dc{};
@@ -231,16 +270,19 @@ Status SendLeConnectionCompleteEvent(ProxyHost& proxy,
       emboss::LeSubEventCode::CONNECTION_COMPLETE);
   view.status().Write(status);
   view.connection_handle().Write(handle);
+  view.connection_interval().Write(0x0006);
+  view.supervision_timeout().Write(0x000A);
   proxy.HandleH4HciFromController(std::move(dc_event));
+  RunDispatcher();
   return OkStatus();
 }
 
 // Send a Disconnection_Complete event to `proxy` indicating the provided
 // `handle` has disconnected.
-Status SendDisconnectionCompleteEvent(ProxyHost& proxy,
-                                      uint16_t handle,
-                                      Direction direction,
-                                      bool successful) {
+Status ProxyHostTest::SendDisconnectionCompleteEvent(ProxyHost& proxy,
+                                                     uint16_t handle,
+                                                     Direction direction,
+                                                     bool successful) {
   std::array<uint8_t,
              sizeof(emboss::H4PacketType) +
                  emboss::DisconnectionCompleteEvent::IntrinsicSizeInBytes()>
@@ -266,13 +308,15 @@ Status SendDisconnectionCompleteEvent(ProxyHost& proxy,
   } else {
     return Status::InvalidArgument();
   }
+  RunDispatcher();
   return OkStatus();
 }
 
-Status SendL2capConnectionReq(ProxyHost& proxy,
-                              uint16_t handle,
-                              uint16_t source_cid,
-                              uint16_t psm) {
+Status ProxyHostTest::SendL2capConnectionReq(ProxyHost& proxy,
+                                             Direction direction,
+                                             uint16_t handle,
+                                             uint16_t source_cid,
+                                             uint16_t psm) {
   // First send CONNECTION_REQ to setup partial connection.
   constexpr size_t kConnectionReqLen =
       emboss::L2capConnectionReq::IntrinsicSizeInBytes();
@@ -295,14 +339,124 @@ Status SendL2capConnectionReq(ProxyHost& proxy,
   conn_req_writer.psm().Write(psm);
   conn_req_writer.source_cid().Write(source_cid);
 
-  H4PacketWithHci connection_req_packet{emboss::H4PacketType::ACL_DATA,
-                                        cframe.acl.hci_span()};
-  proxy.HandleH4HciFromController(std::move(connection_req_packet));
+  if (direction == Direction::kFromController) {
+    H4PacketWithHci packet{emboss::H4PacketType::ACL_DATA,
+                           cframe.acl.hci_span()};
+    proxy.HandleH4HciFromController(std::move(packet));
+  } else if (direction == Direction::kFromHost) {
+    H4PacketWithH4 packet{emboss::H4PacketType::ACL_DATA, cframe.acl.h4_span()};
+    proxy.HandleH4HciFromHost(std::move(packet));
+  } else {
+    return Status::InvalidArgument();
+  }
+  RunDispatcher();
   return OkStatus();
 }
 
-Status SendL2capConnectionRsp(
+Status ProxyHostTest::SendL2capConfigureReq(ProxyHost& proxy,
+                                            Direction direction,
+                                            uint16_t handle,
+                                            uint16_t destination_cid,
+                                            L2capOptions& l2cap_options) {
+  size_t kOptionsSize = 0;
+  if (l2cap_options.mtu.has_value()) {
+    kOptionsSize += emboss::L2capMtuConfigurationOption::IntrinsicSizeInBytes();
+  }
+  const size_t kConfigureReqLen =
+      emboss::L2capConfigureReq::MinSizeInBytes() + kOptionsSize;
+
+  PW_TRY_ASSIGN(
+      CFrameWithStorage cframe,
+      SetupCFrame(handle,
+                  cpp23::to_underlying(emboss::L2capFixedCid::ACL_U_SIGNALING),
+                  kConfigureReqLen));
+
+  auto configure_req_writer = MakeEmbossWriter<emboss::L2capConfigureReqWriter>(
+      cframe.writer.payload().SizeInBytes(),
+      cframe.writer.payload().BackingStorage().data(),
+      cframe.writer.payload().SizeInBytes());
+  configure_req_writer->command_header().code().Write(
+      emboss::L2capSignalingPacketCode::CONFIGURATION_REQ);
+  configure_req_writer->command_header().data_length().Write(
+      kConfigureReqLen -
+      emboss::L2capSignalingCommandHeader::IntrinsicSizeInBytes());
+  configure_req_writer->destination_cid().Write(destination_cid);
+  configure_req_writer->continuation_flag().Write(false);
+
+  if (l2cap_options.mtu.has_value()) {
+    constexpr size_t buffer_size =
+        emboss::L2capMtuConfigurationOption::IntrinsicSizeInBytes();
+    std::array<uint8_t, buffer_size> l2cap_option_buffer{};
+
+    auto l2cap_option =
+        MakeEmbossWriter<emboss::L2capMtuConfigurationOptionWriter>(
+            &l2cap_option_buffer);
+    l2cap_option->header().option_type().Write(
+        emboss::L2capConfigurationOptionType::MTU);
+    l2cap_option->header().option_length().Write(2);
+    l2cap_option->mtu().Write(l2cap_options.mtu.value().mtu);
+
+    memcpy(configure_req_writer->options().BackingStorage().data(),
+           l2cap_option_buffer.data(),
+           l2cap_option_buffer.size());
+  }
+
+  if (direction == Direction::kFromController) {
+    H4PacketWithHci configuration_req_packet{emboss::H4PacketType::ACL_DATA,
+                                             cframe.acl.hci_span()};
+    proxy.HandleH4HciFromController(std::move(configuration_req_packet));
+  } else {
+    H4PacketWithH4 configure_req_packet{emboss::H4PacketType::ACL_DATA,
+                                        cframe.acl.h4_span()};
+    proxy.HandleH4HciFromHost(std::move(configure_req_packet));
+  }
+  RunDispatcher();
+  return OkStatus();
+}
+
+Status ProxyHostTest::SendL2capConfigureRsp(
     ProxyHost& proxy,
+    Direction direction,
+    uint16_t handle,
+    uint16_t local_cid,
+    emboss::L2capConfigurationResult result) {
+  constexpr size_t kConfigureRspLen =
+      emboss::L2capConfigureRsp::MinSizeInBytes();
+  PW_TRY_ASSIGN(
+      CFrameWithStorage cframe,
+      SetupCFrame(handle,
+                  cpp23::to_underlying(emboss::L2capFixedCid::ACL_U_SIGNALING),
+                  kConfigureRspLen));
+
+  auto configure_rsp_writer = MakeEmbossWriter<emboss::L2capConfigureRspWriter>(
+      cframe.writer.payload().SizeInBytes(),
+      cframe.writer.payload().BackingStorage().data(),
+      cframe.writer.payload().SizeInBytes());
+  configure_rsp_writer->command_header().code().Write(
+      emboss::L2capSignalingPacketCode::CONFIGURATION_RSP);
+  configure_rsp_writer->command_header().data_length().Write(
+      kConfigureRspLen -
+      emboss::L2capSignalingCommandHeader::IntrinsicSizeInBytes());
+  configure_rsp_writer->source_cid().Write(local_cid);
+  configure_rsp_writer->continuation_flag().Write(false);
+  configure_rsp_writer->result().Write(result);
+
+  if (direction == Direction::kFromController) {
+    H4PacketWithHci configure_rsp_packet{emboss::H4PacketType::ACL_DATA,
+                                         cframe.acl.hci_span()};
+    proxy.HandleH4HciFromController(std::move(configure_rsp_packet));
+  } else {
+    H4PacketWithH4 configure_rsp_packet{emboss::H4PacketType::ACL_DATA,
+                                        cframe.acl.h4_span()};
+    proxy.HandleH4HciFromHost(std::move(configure_rsp_packet));
+  }
+  RunDispatcher();
+  return OkStatus();
+}
+
+Status ProxyHostTest::SendL2capConnectionRsp(
+    ProxyHost& proxy,
+    Direction direction,
     uint16_t handle,
     uint16_t source_cid,
     uint16_t destination_cid,
@@ -329,18 +483,26 @@ Status SendL2capConnectionRsp(
   conn_rsp_writer.destination_cid().Write(destination_cid);
   conn_rsp_writer.result().Write(result_code);
 
-  H4PacketWithH4 connection_rsp_packet{emboss::H4PacketType::ACL_DATA,
-                                       cframe.acl.h4_span()};
-  proxy.HandleH4HciFromHost(std::move(connection_rsp_packet));
+  if (direction == Direction::kFromController) {
+    H4PacketWithHci packet{emboss::H4PacketType::ACL_DATA,
+                           cframe.acl.hci_span()};
+    proxy.HandleH4HciFromController(std::move(packet));
+  } else if (direction == Direction::kFromHost) {
+    H4PacketWithH4 packet{emboss::H4PacketType::ACL_DATA, cframe.acl.h4_span()};
+    proxy.HandleH4HciFromHost(std::move(packet));
+  } else {
+    return Status::InvalidArgument();
+  }
+  RunDispatcher();
   return OkStatus();
 }
 
-Status SendL2capDisconnectRsp(ProxyHost& proxy,
-                              AclTransportType transport,
-                              uint16_t handle,
-                              uint16_t source_cid,
-                              uint16_t destination_cid,
-                              Direction direction) {
+Status ProxyHostTest::SendL2capDisconnectRsp(ProxyHost& proxy,
+                                             Direction direction,
+                                             AclTransportType transport,
+                                             uint16_t handle,
+                                             uint16_t source_cid,
+                                             uint16_t destination_cid) {
   constexpr size_t kDisconnectionRspLen =
       emboss::L2capDisconnectionRsp::MinSizeInBytes();
   PW_TRY_ASSIGN(
@@ -375,14 +537,15 @@ Status SendL2capDisconnectRsp(ProxyHost& proxy,
   } else {
     return Status::InvalidArgument();
   }
+  RunDispatcher();
   return OkStatus();
 }
 
-void SendL2capBFrame(ProxyHost& proxy,
-                     uint16_t handle,
-                     pw::span<const uint8_t> payload,
-                     size_t pdu_length,
-                     uint16_t channel_id) {
+void ProxyHostTest::SendL2capBFrame(ProxyHost& proxy,
+                                    uint16_t handle,
+                                    pw::span<const uint8_t> payload,
+                                    size_t pdu_length,
+                                    uint16_t channel_id) {
   constexpr size_t kHeadersSize =
       emboss::AclDataFrameHeader::IntrinsicSizeInBytes() +
       emboss::BasicL2capHeader::IntrinsicSizeInBytes();
@@ -411,11 +574,12 @@ void SendL2capBFrame(ProxyHost& proxy,
             h4_packet.GetHciSpan().begin() + kHeadersSize);
 
   proxy.HandleH4HciFromController(std::move(h4_packet));
+  RunDispatcher();
 }
 
-void SendAclContinuingFrag(ProxyHost& proxy,
-                           uint16_t handle,
-                           pw::span<const uint8_t> payload) {
+void ProxyHostTest::SendAclContinuingFrag(ProxyHost& proxy,
+                                          uint16_t handle,
+                                          pw::span<const uint8_t> payload) {
   constexpr size_t kHeadersSize =
       emboss::AclDataFrameHeader::IntrinsicSizeInBytes();
   // No BasicL2capHeader.
@@ -433,6 +597,8 @@ void SendAclContinuingFrag(ProxyHost& proxy,
   acl->header().handle().Write(handle);
   acl->header().packet_boundary_flag().Write(
       emboss::AclDataPacketBoundaryFlag::CONTINUING_FRAGMENT);
+  acl->header().broadcast_flag().Write(
+      emboss::AclDataPacketBroadcastFlag::POINT_TO_POINT);
   acl->data_total_length().Write(acl_data_size);
 
   // Payload
@@ -441,6 +607,20 @@ void SendAclContinuingFrag(ProxyHost& proxy,
             h4_packet.GetHciSpan().begin() + kHeadersSize);
 
   proxy.HandleH4HciFromController(std::move(h4_packet));
+  RunDispatcher();
+}
+
+L2capChannel::State GetState(const internal::GenericL2capChannel& channel) {
+  auto* l2cap = channel.InternalForTesting();
+  return l2cap == nullptr ? L2capChannel::State::kClosed : l2cap->state();
+}
+
+Allocator* ProxyHostTest::GetProxyHostAllocator() {
+  // This is static as it is too large to fit in the test fixture when using the
+  // "light" backend.
+  static allocator::test::AllocatorForTest<16384> alloc;
+  static allocator::SynchronizedAllocator<sync::Mutex> sync{alloc};
+  return &sync;
 }
 
 pw::Result<L2capCoc> ProxyHostTest::BuildCocWithResult(ProxyHost& proxy,
@@ -468,8 +648,11 @@ L2capCoc ProxyHostTest::BuildCoc(ProxyHost& proxy, CocParameters params) {
 
 Result<BasicL2capChannel> ProxyHostTest::BuildBasicL2capChannelWithResult(
     ProxyHost& proxy, BasicL2capParameters params) {
+  multibuf::MultiBufAllocator* rx_multibuf_allocator =
+      params.rx_multibuf_allocator ? params.rx_multibuf_allocator
+                                   : &sut_multibuf_allocator_;
   return proxy.AcquireBasicL2capChannel(
-      sut_multibuf_allocator_,
+      *rx_multibuf_allocator,
       params.handle,
       params.local_cid,
       params.remote_cid,
@@ -501,59 +684,25 @@ GattNotifyChannel ProxyHostTest::BuildGattNotifyChannel(
   return std::move(channel.value());
 }
 
-RfcommChannel ProxyHostTest::BuildRfcomm(
-    ProxyHost& proxy,
-    RfcommParameters params,
-    Function<void(multibuf::MultiBuf&& payload)>&& receive_fn,
-    ChannelEventCallback&& event_fn) {
-  pw::Result<RfcommChannel> channel = proxy.AcquireRfcommChannel(
-      sut_multibuf_allocator_,
-      params.handle,
-      RfcommChannel::Config{
-          .cid = params.rx_config.cid,
-          .max_information_length = params.rx_config.max_information_length,
-          .credits = params.rx_config.credits},
-      RfcommChannel::Config{
-          .cid = params.tx_config.cid,
-          .max_information_length = params.tx_config.max_information_length,
-          .credits = params.tx_config.credits},
-      params.rfcomm_channel,
-      std::move(receive_fn),
-      std::move(event_fn));
-  PW_TEST_EXPECT_OK(channel);
-  return std::move((channel.value()));
+Result<UniquePtr<ChannelProxy>>
+ProxyHostTest::BuildBasicModeChannelProxyWithResult(
+    ProxyHost& proxy, BasicChannelProxyParameters&& params) {
+  return proxy.InterceptBasicModeChannel(
+      params.connection_handle,
+      params.local_channel_id,
+      params.remote_channel_id,
+      params.transport,
+      std::move(params.payload_from_controller_fn),
+      std::move(params.payload_from_host_fn),
+      std::move(params.event_fn));
 }
 
-OneOfEachChannel ProxyHostTest::BuildOneOfEachChannel(
-    ProxyHost& proxy, ChannelEventCallback& shared_event_fn) {
-  // Each channel its unique cids and its own rvalue lambda which calls the
-  // shared_event_fn.
-  return OneOfEachChannel(
-      BuildBasicL2capChannel(proxy,
-                             {.local_cid = 201,
-                              .remote_cid = 301,
-                              .event_fn =
-                                  [&shared_event_fn](L2capChannelEvent event) {
-                                    shared_event_fn(event);
-                                  }}),
-      BuildCoc(proxy,
-               {.local_cid = 202,
-                .remote_cid = 302,
-                .event_fn =
-                    [&shared_event_fn](L2capChannelEvent event) {
-                      shared_event_fn(event);
-                    }}),
-      BuildRfcomm(proxy,
-                  {.rx_config{.cid = 203}, .tx_config = {.cid = 303}},
-                  /*receive_fn=*/nullptr,
-                  /*event_fn=*/
-                  [&shared_event_fn](L2capChannelEvent event) {
-                    shared_event_fn(event);
-                  }),
-      BuildGattNotifyChannel(
-          proxy, {.event_fn = [&shared_event_fn](L2capChannelEvent event) {
-            shared_event_fn(event);
-          }}));
+UniquePtr<ChannelProxy> ProxyHostTest::BuildBasicModeChannelProxy(
+    ProxyHost& proxy, BasicChannelProxyParameters&& params) {
+  Result<UniquePtr<ChannelProxy>> result =
+      BuildBasicModeChannelProxyWithResult(proxy, std::move(params));
+  PW_TEST_EXPECT_OK(result);
+  return std::move(result.value());
 }
 
 }  // namespace pw::bluetooth::proxy

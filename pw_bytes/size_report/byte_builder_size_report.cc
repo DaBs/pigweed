@@ -56,10 +56,11 @@ void PutBytes() {
   if (endian::native == endian::little) {
     std::memcpy(b_array, &kVal1, sizeof(kVal1));
 
-    kVal2 = int32_t(((kVal2 & 0x000000FF) << 3 * 8) |  //
-                    ((kVal2 & 0x0000FF00) << 1 * 8) |  //
-                    ((kVal2 & 0x00FF0000) >> 1 * 8) |  //
-                    ((kVal2 & 0xFF000000) >> 3 * 8));
+    kVal2 = static_cast<int32_t>(
+        ((static_cast<uint32_t>(kVal2) & 0x000000FF) << 3 * 8) |  //
+        ((static_cast<uint32_t>(kVal2) & 0x0000FF00) << 1 * 8) |  //
+        ((static_cast<uint32_t>(kVal2) & 0x00FF0000) >> 1 * 8) |  //
+        ((static_cast<uint32_t>(kVal2) & 0xFF000000) >> 3 * 8));
     std::memcpy(b_array + 4, &kVal2, sizeof(kVal2));
   } else {
     kVal1 = uint32_t(((kVal1 & 0x000000FF) << 3 * 8) |  //
@@ -79,10 +80,11 @@ void ReadBytes() {
   if (endian::native == endian::little) {
     std::memcpy(&kVal1, b_array, sizeof(kVal1));
     std::memcpy(&kVal2, b_array + 4, sizeof(kVal2));
-    kVal2 = int32_t(((kVal2 & 0x000000FF) << 3 * 8) |  //
-                    ((kVal2 & 0x0000FF00) << 1 * 8) |  //
-                    ((kVal2 & 0x00FF0000) >> 1 * 8) |  //
-                    ((kVal2 & 0xFF000000) >> 3 * 8));
+    kVal2 = static_cast<int32_t>(
+        ((static_cast<uint32_t>(kVal2) & 0x000000FF) << 3 * 8) |  //
+        ((static_cast<uint32_t>(kVal2) & 0x0000FF00) << 1 * 8) |  //
+        ((static_cast<uint32_t>(kVal2) & 0x00FF0000) >> 1 * 8) |  //
+        ((static_cast<uint32_t>(kVal2) & 0xFF000000) >> 3 * 8));
   } else {
     std::memcpy(&kVal1, b_array, sizeof(kVal1));
     std::memcpy(&kVal2, b_array + 4, sizeof(kVal2));

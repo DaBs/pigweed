@@ -15,7 +15,10 @@
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("//pw_unit_test:pw_cc_test.bzl", "pw_cc_test")
 
-package(default_visibility = ["//visibility:public"])
+package(
+    default_visibility = ["//visibility:public"],
+    features = ["-ctad_warnings"],
+)
 
 licenses(["notice"])
 
@@ -35,6 +38,7 @@ cc_library(
 cc_library(
     name = "fast_sorted",
     hdrs = ["public/pw_allocator/bucket/fast_sorted.h"],
+    features = ["-conversion_warnings"],
     strip_include_prefix = "public",
     deps = [
         ":base",
@@ -87,6 +91,7 @@ cc_library(
 pw_cc_test(
     name = "fast_sorted_test",
     srcs = ["fast_sorted_test.cc"],
+    features = ["-conversion_warnings"],
     deps = [
         ":fast_sorted",
         ":testing",
@@ -97,6 +102,7 @@ pw_cc_test(
 pw_cc_test(
     name = "sequenced_test",
     srcs = ["sequenced_test.cc"],
+    features = ["-conversion_warnings"],
     deps = [
         ":sequenced",
         ":testing",
@@ -107,6 +113,7 @@ pw_cc_test(
 pw_cc_test(
     name = "sorted_test",
     srcs = ["sorted_test.cc"],
+    features = ["-conversion_warnings"],
     deps = [
         ":sorted",
         ":testing",
@@ -117,6 +124,7 @@ pw_cc_test(
 pw_cc_test(
     name = "unordered_test",
     srcs = ["unordered_test.cc"],
+    features = ["-conversion_warnings"],
     deps = [
         ":testing",
         ":unordered",

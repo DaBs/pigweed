@@ -55,6 +55,8 @@ class Owned : public GenericOwned {
 
 }  // namespace internal
 
+/// @submodule{pw_allocator,concrete}
+
 /// Allocator that does not automatically delete.
 ///
 /// A "bump" or "arena" allocator provides memory by simply incrementing a
@@ -122,7 +124,7 @@ class BumpAllocator : public Allocator {
   /// @param[in]  args...     Arguments passed to the object constructor.
   template <typename T, int&... kExplicitGuard, typename... Args>
   [[nodiscard]] UniquePtr<T> MakeUniqueOwned(Args&&... args) {
-    return WrapUnique<T>(NewOwned<T>(std::forward<Args>(args)...));
+    return UniquePtr<T>(NewOwned<T>(std::forward<Args>(args)...), *this);
   }
 
  private:
@@ -142,5 +144,7 @@ class BumpAllocator : public Allocator {
   ByteSpan remaining_;
   internal::GenericOwned* owned_ = nullptr;
 };
+
+/// @}
 
 }  // namespace pw::allocator

@@ -15,6 +15,9 @@
 unsafe extern "Rust" {
     fn pw_kernel_target_name() -> &'static str;
     fn pw_kernel_target_console_init();
+    fn pw_kernel_target_main() -> !;
+    #[allow(dead_code)]
+    fn pw_kernel_target_shutdown(code: u32) -> !;
 }
 
 #[inline(always)]
@@ -25,4 +28,15 @@ pub fn name() -> &'static str {
 #[inline(always)]
 pub fn console_init() {
     unsafe { pw_kernel_target_console_init() }
+}
+
+#[inline(always)]
+pub fn main() -> ! {
+    unsafe { pw_kernel_target_main() }
+}
+
+#[inline(always)]
+#[allow(dead_code)]
+pub fn shutdown(code: u32) -> ! {
+    unsafe { pw_kernel_target_shutdown(code) }
 }

@@ -125,11 +125,11 @@ function(pw_sensor_library NAME)
     DEPENDS
     ${output_file}
   )
-  add_library(${NAME} STATIC
+  add_library(${NAME} INTERFACE
       ${output_file}
   )
-  target_link_libraries(${NAME} PUBLIC ${arg_PUBLIC_DEPS})
-  target_include_directories(${NAME} PUBLIC
+  target_link_libraries(${NAME} INTERFACE ${arg_PUBLIC_DEPS})
+  target_include_directories(${NAME} INTERFACE
       ${arg_OUT_INCLUDES}
   )
   add_dependencies(${NAME} ${NAME}.__generate_constants)

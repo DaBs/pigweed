@@ -15,12 +15,12 @@
 import("//build_overrides/pigweed.gni")
 
 import("$dir_pigweed/third_party/emboss/build_defs.gni")
+
 import("$dir_pw_async2/backend.gni")
 import("$dir_pw_bloat/bloat.gni")
 import("$dir_pw_build/module_config.gni")
 import("$dir_pw_build/target_types.gni")
 import("$dir_pw_chrono/backend.gni")
-import("$dir_pw_docgen/docs.gni")
 import("$dir_pw_unit_test/test.gni")
 
 declare_args() {
@@ -41,17 +41,6 @@ config("public_include_path") {
   visibility = [ ":*" ]
 }
 
-pw_doc_group("docs") {
-  # Also, sources with doxygen comment blocks must be added to //docs/BUILD.gn
-  inputs = [ "emboss_test.cc" ]
-  sources = [ "docs.rst" ]
-
-  report_deps = [
-    ":emboss_size_report",
-    ":emboss_size_report_diff",
-  ]
-}
-
 pw_source_set("pw_bluetooth") {
   public_configs = [ ":public_include_path" ]
   public = [
@@ -65,7 +54,6 @@ pw_source_set("pw_bluetooth") {
     "public/pw_bluetooth/gatt/server.h",
     "public/pw_bluetooth/gatt/types.h",
     "public/pw_bluetooth/host.h",
-    "public/pw_bluetooth/internal/hex.h",
     "public/pw_bluetooth/internal/raii_ptr.h",
     "public/pw_bluetooth/low_energy/advertising_data.h",
     "public/pw_bluetooth/low_energy/bond_data.h",
@@ -84,6 +72,7 @@ pw_source_set("pw_bluetooth") {
   public_deps = [
     ":config",
     "$dir_pw_chrono:system_clock",
+    "$dir_pw_string:hex",
     "$dir_pw_string:string",
     dir_pw_containers,
     dir_pw_function,
@@ -91,6 +80,7 @@ pw_source_set("pw_bluetooth") {
     dir_pw_result,
     dir_pw_span,
     dir_pw_status,
+    dir_pw_uuid,
   ]
 }
 
@@ -106,7 +96,6 @@ pw_source_set("pw_bluetooth2") {
     "public/pw_bluetooth/gatt/error.h",
     "public/pw_bluetooth/gatt/server2.h",
     "public/pw_bluetooth/gatt/types.h",
-    "public/pw_bluetooth/internal/hex.h",
     "public/pw_bluetooth/internal/raii_ptr.h",
     "public/pw_bluetooth/low_energy/advertising_data.h",
     "public/pw_bluetooth/low_energy/bond_data2.h",
@@ -124,10 +113,11 @@ pw_source_set("pw_bluetooth2") {
   ]
   public_deps = [
     ":config",
-    "$dir_pw_async2:dispatcher",
-    "$dir_pw_async2:once_sender",
+    "$dir_pw_async2:pw_async2",
+    "$dir_pw_async2:value_future",
     "$dir_pw_chrono:system_clock",
     "$dir_pw_result:expected",
+    "$dir_pw_string:hex",
     "$dir_pw_string:string",
     dir_pw_channel,
     dir_pw_containers,
@@ -136,6 +126,7 @@ pw_source_set("pw_bluetooth2") {
     dir_pw_result,
     dir_pw_span,
     dir_pw_status,
+    dir_pw_uuid,
   ]
 }
 
@@ -143,6 +134,20 @@ pw_source_set("emboss_util") {
   public_configs = [ ":public_include_path" ]
   public = [ "public/pw_bluetooth/emboss_util.h" ]
   public_deps = [
+    dir_pw_result,
+    dir_pw_span,
+    dir_pw_status,
+    dir_pw_uuid,
+  ]
+}
+pw_source_set("hci_util") {
+  public_configs = [ ":public_include_path" ]
+  public = [ "public/pw_bluetooth/hci_util.h" ]
+  sources = [ "hci_util.cc" ]
+  public_deps = [
+    ":emboss_hci_common",
+    ":emboss_hci_data",
+    ":emboss_hci_h4",
     dir_pw_result,
     dir_pw_span,
     dir_pw_status,
@@ -154,7 +159,9 @@ pw_source_set("snoop") {
   public = [ "public/pw_bluetooth/snoop.h" ]
   sources = [ "snoop.cc" ]
   public_deps = [
+    ":emboss_hci_group",
     ":emboss_snoop",
+    ":emboss_util",
     "$dir_pw_chrono:system_clock",
     "$dir_pw_containers:inline_var_len_entry_queue",
     "$dir_pw_sync:mutex",
@@ -164,6 +171,9 @@ pw_source_set("snoop") {
     dir_pw_hex_dump,
     dir_pw_log,
     dir_pw_result,
+    dir_pw_stream,
+    dir_pw_string,
+    dir_pw_trace,
   ]
 }
 
@@ -330,7 +340,7 @@ pw_test("emboss_util_test") {
 }
 
 pw_test("api2_test") {
-  enable_if = pw_async2_DISPATCHER_BACKEND != ""
+  enable_if = pw_async2_DISPATCHER_FOR_TEST_BACKEND != ""
   sources = [ "api2_test.cc" ]
   deps = [ ":pw_bluetooth2" ]
 }
@@ -356,7 +366,8 @@ pw_test("emboss_test") {
     ":emboss_hci_test",
     ":emboss_l2cap_frames",
     ":emboss_rfcomm_frames",
-    "$dir_pw_third_party/fuchsia:stdcompat",
+    ":emboss_util",
+    "$pw_external_fuchsia:stdcompat",
   ]
 }
 
@@ -404,6 +415,14 @@ if (dir_pw_third_party_emboss != "") {
       },
     ]
   }
+}
+
+pw_test("hci_util_test") {
+  enable_if =
+      dir_pw_third_party_emboss != "" && pw_chrono_SYSTEM_CLOCK_BACKEND != ""
+  sources = [ "hci_util_test.cc" ]
+  include_dirs = [ "." ]
+  deps = [ ":hci_util" ]
 }
 
 pw_test("snoop_test") {

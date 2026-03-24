@@ -217,13 +217,13 @@ API
      provider.Acquire(PW_WAKELOCK_TOKEN_EXPR(name))
 
    class WakelockProvider {
-   public:
+    public:
      virtual ~WakelockProvider() = default;
      virtual Result<Wakelock> Acquire(PW_WAKELOCK_TOKEN_TYPE name) = 0;
    };
 
    class Wakelock final {
-   public:
+    public:
      Wakelock();
      Wakelock(pw::Function<void()>);
      Wakelock(Wakelock&&) = default;
@@ -237,7 +237,7 @@ API
        }
      }
 
-   private:
+    private:
      pw::Function<void()> unlock_fn_ = nullptr;
    };
 
@@ -251,11 +251,11 @@ Example usage
    }
 
    int main() {
-      LinuxWakelockProvider provider;
-      if (!MyFunction(provider).ok()) {
-        return 1;
-      }
-      return 0;
+     LinuxWakelockProvider provider;
+     if (!MyFunction(provider).ok()) {
+       return 1;
+     }
+     return 0;
    }
 
 Testing
@@ -266,21 +266,21 @@ API:
 .. code-block:: c++
 
    class FakeWakelockProvider final : WakelockProvider {
-   public:
+    public:
      Result<Wakelock> Acquire(PW_WAKELOCK_TOKEN_TYPE name) override {
-       if (!status_.ok())  {
+       if (!status_.ok()) {
          return status_;
        }
        wakelock_count_++;
-       return Wakelock([this](){ wakelock_count_--; });
+       return Wakelock([this]() { wakelock_count_--; });
      }
 
      uint16_t wakelock_count() const { return wakelock_count_; }
 
      void set_acquire_status(Status status) { status_ = status; }
 
-   private:
-     uint16_t  wakelock_count_ = 0;
+    private:
+     uint16_t wakelock_count_ = 0;
      Status status_ = PW_STATUS_OK;
    };
 
@@ -308,14 +308,14 @@ Linux
    #define WAKE_UNLOCK_PATH "/sys/power/wake_unlock"
 
    class LinuxWakelockProvider final {
-   public:
+    public:
      // Note: if name is tokenized, we can convert the token into a base64
      // string.
      Result<Wakelock> Acquire(const char* name) override {
-       int wake_lock_fd = open(WAKE_LOCK_PATH, O_WRONLY|O_APPEND);
+       int wake_lock_fd = open(WAKE_LOCK_PATH, O_WRONLY | O_APPEND);
        if (wake_lock_fd < 0) {
-         PW_LOG_WARN("Unable to open %s, err:%s",
-           WAKE_LOCK_PATH, std::strerror(errno));
+         PW_LOG_WARN(
+             "Unable to open %s, err:%s", WAKE_LOCK_PATH, std::strerror(errno));
          if (errno == ENOENT) {
            PW_LOG_WARN("No wake lock support");
          }
@@ -326,28 +326,27 @@ Linux
        int ret = write(wake_lock_fd, name, strlen(name));
        close(wake_lock_fd);
        if (ret < 0) {
-         PW_LOG_ERROR("Failed to acquire wakelock %d %s", ret,
-           strerror(errno));
+         PW_LOG_ERROR("Failed to acquire wakelock %d %s", ret, strerror(errno));
          return Status::Unavailable();
        }
 
-       return Wakelock([name](){ LinuxWakelockProvider::Release(name); });
+       return Wakelock([name]() { LinuxWakelockProvider::Release(name); });
      }
 
      static void Release(const char* name) {
-         int wake_unlock_fd = open(WAKE_UNLOCK_PATH, O_WRONLY|O_APPEND);
-         if (wake_unlock_fd < 0) {
-           PW_LOG_WARN("Unable to open %s, err:%s",
-               WAKE_UNLOCK_PATH, std::strerror(errno));
-           return Status::Unavailable();
-         }
-         // Release the wakelock
-         int ret = write(wake_unlock_fd, name, strlen(name));
-         close(wake_unlock_fd);
-         if (ret < 0) {
-           PW_LOG_ERROR("Failed to release wakelock %d %s", ret, strerror(errno));
-           return;
-         }
+       int wake_unlock_fd = open(WAKE_UNLOCK_PATH, O_WRONLY | O_APPEND);
+       if (wake_unlock_fd < 0) {
+         PW_LOG_WARN(
+             "Unable to open %s, err:%s", WAKE_UNLOCK_PATH, std::strerror(errno));
+         return Status::Unavailable();
+       }
+       // Release the wakelock
+       int ret = write(wake_unlock_fd, name, strlen(name));
+       close(wake_unlock_fd);
+       if (ret < 0) {
+         PW_LOG_ERROR("Failed to release wakelock %d %s", ret, strerror(errno));
+         return;
+       }
      }
    };
 
@@ -390,23 +389,25 @@ with unit tests.
    /// Acquire a wakelock object. Returns a Result<Wakelock>.
    /// PW_HANDLE_WAKELOCK_ACQUIRE is implemented by the backend.
    #define PW_WAKELOCK_ACQUIRE(name) \
-           PW_HANDLE_WAKELOCK_ACQUIRE(name, __FILE__, __LINE__)
+     PW_HANDLE_WAKELOCK_ACQUIRE(name, __FILE__, __LINE__)
 
    // Wakelock interface (using the Class/NativeClass pattern)
    class Wakelock final {
-   public:
-       Wakelock() : native_wakelock_(*this) {}
-       ~Wakelock();
-       Wakelock(Wakelock&& other);
-       Wakelock& operator=(Wakelock&& other);
+    public:
+     Wakelock() : native_wakelock_(*this) {}
+     ~Wakelock();
+     Wakelock(Wakelock&& other);
+     Wakelock& operator=(Wakelock&& other);
 
-       /// Returns the inner `NativeWakelock` containing backend-specific state.
-       /// Only non-portable code should call these methods.
-       backend::NativeWakelock& native_wakelock() { return native_wakelock_; }
-       const backend::NativeWakelock& native_wakelock() const { return native_wakelock_; }
+     /// Returns the inner `NativeWakelock` containing backend-specific state.
+     /// Only non-portable code should call these methods.
+     backend::NativeWakelock& native_wakelock() { return native_wakelock_; }
+     const backend::NativeWakelock& native_wakelock() const {
+       return native_wakelock_;
+     }
 
-   private:
-       backend::NativeWakelock native_wakelock_;
+    private:
+     backend::NativeWakelock native_wakelock_;
    };
 
 Custom wakelock API in pw_bluetooth_sapphire

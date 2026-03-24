@@ -47,6 +47,7 @@ pw_python_package("py") {
   ]
   tests = [
     "database_test.py",
+    "data_driven_detokenize_test.py",
     "decode_test.py",
     "detokenize_proto_test.py",
     "detokenize_test.py",
@@ -56,7 +57,10 @@ pw_python_package("py") {
     "tokens_test.py",
     "varint_test_data.py",
   ]
-  python_test_deps = [ ":test_proto.python" ]
+  python_test_deps = [
+    ":test_proto.python",
+    "$dir_pw_build/py",
+  ]
   inputs = [
     "elf_reader_test_binary.elf",
     "example_binary_with_tokenized_strings.elf",

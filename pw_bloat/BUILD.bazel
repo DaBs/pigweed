@@ -27,6 +27,7 @@ cc_library(
     name = "bloat_this_binary",
     srcs = ["bloat_this_binary.cc"],
     hdrs = ["public/pw_bloat/bloat_this_binary.h"],
+    features = ["-conversion_warnings"],
     implementation_deps = [
         "//pw_assert:assert",
         "//pw_assert:check",
@@ -53,6 +54,7 @@ sphinx_docs_library(
     name = "docs",
     srcs = [
         "docs.rst",
+        "//pw_bloat/examples:docs",
     ],
     prefix = "pw_bloat/",
     target_compatible_with = incompatible_with_mcu(),

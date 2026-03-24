@@ -16,7 +16,6 @@ menu "pw_string"
 
 config PIGWEED_STRING
     bool "Link pw_string library"
-    select PIGWEED_ASSERT
     select PIGWEED_PREPROCESSOR
     select PIGWEED_RESULT
     select PIGWEED_SPAN

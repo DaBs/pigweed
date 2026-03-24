@@ -12,6 +12,7 @@
 # License for the specific language governing permissions and limitations under
 # the License.
 
+load("@bazel_skylib//rules:common_settings.bzl", "bool_flag")
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("@rules_cc//cc/toolchains:args.bzl", "cc_args")
 load("@rules_cc//cc/toolchains:toolchain.bzl", "cc_toolchain")
@@ -98,13 +99,29 @@ cc_args(
     ],
 )
 
+# Controls whether or not -ffreestanding is enabled.
+# Generally, we avoid build flags for singular compiler arguments, but this
+# flag has potentially significant ramifications, so we want to have a dedicated
+# flag to track the removal of `-ffreestanding` from our toolchains.
+bool_flag(
+    name = "freestanding",
+    build_setting_default = True,
+)
+
+config_setting(
+    name = "enable_freestanding",
+    flag_values = {":freestanding": "True"},
+)
+
 cc_args(
     name = "cortex_common",
     actions = [
         "@rules_cc//cc/toolchains/actions:compile_actions",
     ],
-    args = [
-        "-ffreestanding",
+    args = select({
+        ":enable_freestanding": ["-ffreestanding"],
+        "//conditions:default": [],
+    }) + [
         "-specs=nano.specs",
         "-specs=nosys.specs",
     ],
@@ -215,6 +232,18 @@ cc_args(
     ],
 )
 
+cc_args(
+    name = "cortex-m55",
+    actions = [
+        "@rules_cc//cc/toolchains/actions:assembly_actions",
+        "@rules_cc//cc/toolchains/actions:compile_actions",
+        "@rules_cc//cc/toolchains/actions:link_actions",
+    ],
+    args = [
+        "-mcpu=cortex-m55",
+    ],
+)
+
 cc_toolchain(
     name = "arm_gcc_toolchain_cortex-m",
     args = [
@@ -233,6 +262,7 @@ cc_toolchain(
         "//pw_build/constraints/arm:cortex-m3": [":cortex-m3"],
         "//pw_build/constraints/arm:cortex-m33": [":cortex-m33"],
         "//pw_build/constraints/arm:cortex-m4": [":cortex-m4"],
+        "//pw_build/constraints/arm:cortex-m55": [":cortex-m55"],
         "//pw_build/constraints/arm:cortex-m7": [":cortex-m7"],
         "//pw_build/constraints/arm:none": [],
     }) + [
@@ -243,6 +273,8 @@ cc_toolchain(
         ":cortex_common_link",
         ":no_canonical_system_headers",
         ":warnings",
+        # This should always go last so users can override previous choices.
+        "//pw_toolchain/cc/args:extra_toolchain_args",
     ],
     enabled_features = [
         "@rules_cc//cc/toolchains/args:experimental_replace_legacy_action_config_features",
@@ -259,8 +291,7 @@ cc_toolchain(
         "@rules_cc//cc/toolchains/args:experimental_replace_legacy_action_config_features",
         "//pw_toolchain/cc/args:c++17_feature",
         "//pw_toolchain/cc/args:c++20_feature",
-        "//pw_toolchain/cc/capability:compiler_is_gcc",
-        "//pw_toolchain/cc/capability:linker_is_gcc",
+        "//pw_toolchain/cc/capability:known_toolchain_types",
     ],
     target_compatible_with = select({
         "//pw_build/constraints/arm:cortex-m0": [],
@@ -268,6 +299,7 @@ cc_toolchain(
         "//pw_build/constraints/arm:cortex-m3": [],
         "//pw_build/constraints/arm:cortex-m33": [],
         "//pw_build/constraints/arm:cortex-m4": [],
+        "//pw_build/constraints/arm:cortex-m55": [],
         "//pw_build/constraints/arm:cortex-m7": [],
         "//pw_build/constraints/arm:none": ["@platforms//:incompatible"],
     }),
@@ -324,6 +356,15 @@ toolchain(
     name = "arm_gcc_cc_toolchain_cortex-m33",
     target_compatible_with = [
         "//pw_build/constraints/arm:cortex-m33",
+    ],
+    toolchain = ":arm_gcc_toolchain_cortex-m",
+    toolchain_type = "@bazel_tools//tools/cpp:toolchain_type",
+)
+
+toolchain(
+    name = "arm_gcc_cc_toolchain_cortex-m55",
+    target_compatible_with = [
+        "//pw_build/constraints/arm:cortex-m55",
     ],
     toolchain = ":arm_gcc_toolchain_cortex-m",
     toolchain_type = "@bazel_tools//tools/cpp:toolchain_type",

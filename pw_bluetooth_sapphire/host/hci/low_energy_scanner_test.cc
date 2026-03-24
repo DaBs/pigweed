@@ -12,6 +12,8 @@
 // License for the specific language governing permissions and limitations under
 // the License.
 
+#include <unordered_set>
+
 #include "pw_bluetooth_sapphire/internal/host/hci/extended_low_energy_scanner.h"
 #include "pw_bluetooth_sapphire/internal/host/hci/fake_local_address_delegate.h"
 #include "pw_bluetooth_sapphire/internal/host/hci/legacy_low_energy_scanner.h"
@@ -81,8 +83,7 @@ class LowEnergyScannerTest : public TestingBase,
     settings.ApplyLegacyLEConfig();
     this->test_device()->set_settings(settings);
 
-    scanner_ = std::unique_ptr<T>(CreateScannerInternal());
-    scanner_->set_delegate(this);
+    CreateScanner<T>();
   }
 
   void TearDown() override {
@@ -91,23 +92,46 @@ class LowEnergyScannerTest : public TestingBase,
     TestingBase::TearDown();
   }
 
+  template <typename U>
+  void CreateScanner(bool enable_offloading = false, uint8_t max_filters = 4) {
+    scanner_ = std::unique_ptr<U>(
+        CreateScannerInternal(enable_offloading, max_filters));
+    scanner_->SetPacketFilters(0, {});
+    scanner_->set_delegate(this);
+  }
+
   template <bool same = std::is_same_v<T, ExtendedLowEnergyScanner>>
-  std::enable_if_t<same, ExtendedLowEnergyScanner>* CreateScannerInternal() {
-    return new ExtendedLowEnergyScanner(fake_address_delegate(),
-                                        {false, 0},
-                                        transport()->GetWeakPtr(),
-                                        dispatcher());
+  std::enable_if_t<same, ExtendedLowEnergyScanner>* CreateScannerInternal(
+      bool enable_offloading = false, uint8_t max_filters = 4) {
+    return new ExtendedLowEnergyScanner(
+        fake_address_delegate(),
+        {enable_offloading,
+         max_filters,
+         AdvertisingPacketFilter::Config::DeliveryMode::kImmediate},
+        transport()->GetWeakPtr(),
+        dispatcher());
   }
 
   template <bool same = std::is_same_v<T, LegacyLowEnergyScanner>>
-  std::enable_if_t<same, LegacyLowEnergyScanner>* CreateScannerInternal() {
-    return new LegacyLowEnergyScanner(fake_address_delegate(),
-                                      {false, 0},
-                                      transport()->GetWeakPtr(),
-                                      dispatcher());
+  std::enable_if_t<same, LegacyLowEnergyScanner>* CreateScannerInternal(
+      bool enable_offloading = false, uint8_t max_filters = 4) {
+    return new LegacyLowEnergyScanner(
+        fake_address_delegate(),
+        {enable_offloading,
+         max_filters,
+         AdvertisingPacketFilter::Config::DeliveryMode::kImmediate},
+        transport()->GetWeakPtr(),
+        dispatcher());
   }
 
-  using PeerFoundCallback = fit::function<void(const LowEnergyScanResult&)>;
+  void EnableOffloading(uint8_t max_filters = 4) {
+    CreateScanner<T>(true, max_filters);
+  }
+
+  void DisableOffloading() { CreateScanner<T>(false); }
+
+  using PeerFoundCallback = fit::function<void(
+      const std::unordered_set<uint16_t>&, const LowEnergyScanResult&)>;
   void set_peer_found_callback(PeerFoundCallback cb) {
     peer_found_cb_ = std::move(cb);
   }
@@ -130,9 +154,10 @@ class LowEnergyScannerTest : public TestingBase,
   }
 
   // LowEnergyScanner::Delegate override:
-  void OnPeerFound(const LowEnergyScanResult& result) override {
+  void OnPeerFound(const std::unordered_set<uint16_t>& scan_ids,
+                   const LowEnergyScanResult& result) override {
     if (peer_found_cb_) {
-      peer_found_cb_(result);
+      peer_found_cb_(scan_ids, result);
     }
   }
 
@@ -360,9 +385,11 @@ TYPED_TEST(LowEnergyScannerTest, ScanResponseTimeout) {
       kScanResponseTimeout / 2;
 
   std::unordered_set<DeviceAddress> results;
-  this->set_peer_found_callback([&](const LowEnergyScanResult& result) {
-    results.insert(result.address());
-  });
+  this->set_peer_found_callback(
+      [&](const std::unordered_set<uint16_t>& /*scan_ids*/,
+          const LowEnergyScanResult& result) {
+        results.insert(result.address());
+      });
 
   // Add a peer that sends a scan response and one that doesn't.
   auto fake_peer = std::make_unique<FakePeer>(
@@ -420,10 +447,13 @@ TYPED_TEST(LowEnergyScannerTest, ScanResponseAfterTimeout) {
   bool peer_found_callback_called = false;
   std::unordered_map<DeviceAddress, std::unique_ptr<DynamicByteBuffer>> map;
 
-  this->set_peer_found_callback([&](const LowEnergyScanResult& result) {
-    peer_found_callback_called = true;
-    map[result.address()] = std::make_unique<DynamicByteBuffer>(result.data());
-  });
+  this->set_peer_found_callback(
+      [&](const std::unordered_set<uint16_t>& /*scan_ids*/,
+          const LowEnergyScanResult& result) {
+        peer_found_callback_called = true;
+        map[result.address()] =
+            std::make_unique<DynamicByteBuffer>(result.data());
+      });
 
   EXPECT_TRUE(this->StartScan(true));
   this->RunUntilIdle();
@@ -448,9 +478,11 @@ TYPED_TEST(LowEnergyScannerTest, ActiveScanResults) {
   this->AddFakePeers();
 
   std::map<DeviceAddress, LowEnergyScanResult> results;
-  this->set_peer_found_callback([&](const LowEnergyScanResult& result) {
-    results[result.address()] = result;
-  });
+  this->set_peer_found_callback(
+      [&](const std::unordered_set<uint16_t>& /*scan_ids*/,
+          const LowEnergyScanResult& result) {
+        results[result.address()] = result;
+      });
 
   // Perform an active scan.
   EXPECT_TRUE(this->StartScan(true, kPwScanPeriod));
@@ -539,9 +571,11 @@ TYPED_TEST(LowEnergyScannerTest, StopDuringActiveScan) {
   this->AddFakePeers();
 
   std::map<DeviceAddress, LowEnergyScanResult> results;
-  this->set_peer_found_callback([&results](const LowEnergyScanResult& result) {
-    results[result.address()] = result;
-  });
+  this->set_peer_found_callback(
+      [&results](const std::unordered_set<uint16_t>& /*scan_ids*/,
+                 const LowEnergyScanResult& result) {
+        results[result.address()] = result;
+      });
 
   // Perform an active scan indefinitely. This means that the scan period will
   // never complete by itself.
@@ -572,9 +606,11 @@ TYPED_TEST(LowEnergyScannerTest, PassiveScanResults) {
   this->AddFakePeers();
 
   std::map<DeviceAddress, LowEnergyScanResult> results;
-  this->set_peer_found_callback([&](const LowEnergyScanResult& result) {
-    results[result.address()] = result;
-  });
+  this->set_peer_found_callback(
+      [&](const std::unordered_set<uint16_t>& /*scan_ids*/,
+          const LowEnergyScanResult& result) {
+        results[result.address()] = result;
+      });
 
   // Perform a passive scan.
   EXPECT_TRUE(this->StartScan(false));
@@ -792,10 +828,128 @@ TYPED_TEST(LowEnergyScannerTest, CallbackStopsScanning) {
   // crashing, it will likely be due to a use-after-free type bug. Such a bug
   // may or may not manifest itself in a non-asan build.
   this->set_peer_found_callback(
-      [&](const LowEnergyScanResult&) { this->scanner()->StopScan(); });
+      [&](const std::unordered_set<uint16_t>& /*scan_ids*/,
+          const LowEnergyScanResult&) { this->scanner()->StopScan(); });
 
   EXPECT_TRUE(this->StartScan(true, kPwScanPeriod));
   this->RunFor(kScanPeriod);
+}
+
+TYPED_TEST(LowEnergyScannerTest, FilterPeers) {
+  auto fake_peer = std::make_unique<FakePeer>(
+      kRandomAddress1, this->dispatcher(), true, true);
+  fake_peer->set_advertising_data(kPlainAdvDataBytes);
+  fake_peer->set_scan_response(kPlainScanRspBytes);
+  this->test_device()->AddPeer(std::move(fake_peer));
+
+  fake_peer = std::make_unique<FakePeer>(
+      kRandomAddress2, this->dispatcher(), false, false);
+  fake_peer->set_advertising_data(kPlainAdvDataBytes);
+  this->test_device()->AddPeer(std::move(fake_peer));
+
+  DiscoveryFilter filter;
+  filter.set_connectable(true);
+  this->scanner()->SetPacketFilters(0, {filter});
+
+  std::unordered_set<DeviceAddress> results;
+  this->set_peer_found_callback(
+      [&](const std::unordered_set<uint16_t>& /*scan_ids*/,
+          const LowEnergyScanResult& result) {
+        results.insert(result.address());
+      });
+
+  EXPECT_TRUE(this->StartScan(true));
+  this->RunUntilIdle();
+  ASSERT_EQ(1u, results.size());
+  EXPECT_EQ(1u, results.count(kRandomAddress1));
+}
+
+TYPED_TEST(LowEnergyScannerTest, CachedScanResultsAreFiltered) {
+  EXPECT_TRUE(this->StartScan(true));
+
+  auto fake_peer = std::make_unique<FakePeer>(
+      kRandomAddress1, this->dispatcher(), true, true);
+  fake_peer->set_advertising_data(kPlainAdvDataBytes);
+  fake_peer->set_scan_response(kPlainScanRspBytes);
+  this->test_device()->AddPeer(std::move(fake_peer));
+
+  fake_peer = std::make_unique<FakePeer>(
+      kRandomAddress2, this->dispatcher(), false, false);
+  fake_peer->set_advertising_data(kPlainAdvDataBytes);
+  this->test_device()->AddPeer(std::move(fake_peer));
+  this->RunUntilIdle();
+
+  std::unordered_set<DeviceAddress> results;
+  this->set_peer_found_callback(
+      [&](const std::unordered_set<uint16_t>& /*scan_ids*/,
+          const LowEnergyScanResult& result) {
+        results.insert(result.address());
+      });
+
+  DiscoveryFilter filter;
+  filter.set_connectable(true);
+  this->scanner()->SetPacketFilters(0, {filter});
+  this->scanner()->NotifyCachedPeers(0);
+
+  this->RunUntilIdle();
+  ASSERT_EQ(1u, results.size());
+  EXPECT_EQ(1u, results.count(kRandomAddress1));
+}
+
+TYPED_TEST(LowEnergyScannerTest, DISABLED_NewFilterWhileOffloadingEnabled) {
+  this->EnableOffloading();
+
+  EXPECT_TRUE(this->StartScan(true));
+
+  auto fake_peer = std::make_unique<FakePeer>(
+      kRandomAddress1, this->dispatcher(), true, true);
+  fake_peer->set_advertising_data(kPlainAdvDataBytes);
+  fake_peer->set_scan_response(kPlainScanRspBytes);
+  this->test_device()->AddPeer(std::move(fake_peer));
+
+  fake_peer = std::make_unique<FakePeer>(
+      kRandomAddress2, this->dispatcher(), false, false);
+  fake_peer->set_advertising_data(kPlainAdvDataBytes);
+  this->test_device()->AddPeer(std::move(fake_peer));
+
+  std::unordered_set<DeviceAddress> results;
+  this->set_peer_found_callback(
+      [&](const std::unordered_set<uint16_t>& /*scan_ids*/,
+          const LowEnergyScanResult& result) {
+        results.insert(result.address());
+      });
+  this->RunUntilIdle();
+
+  ASSERT_EQ(2u, results.size());
+  EXPECT_EQ(1u, results.count(kRandomAddress1));
+  EXPECT_EQ(1u, results.count(kRandomAddress2));
+
+  results.clear();
+  this->scanner()->SetPacketFilters(0, {});
+  this->scanner()->NotifyCachedPeers(0);
+
+  this->RunUntilIdle();
+  ASSERT_EQ(0u, results.size());
+}
+
+TEST(LowEnergyScanResultTest, AssignmentOperator) {
+  constexpr int8_t kRSSI = -18;
+  constexpr uint8_t kAdvertisingSid = 0x0d;
+  constexpr uint16_t kPeriodicAdvertisingInterval = 0x2468;
+  LowEnergyScanResult scan_result_1(
+      kPublicAddress1, /*resolved=*/true, /*connectable=*/true);
+  scan_result_1.set_rssi(kRSSI);
+  scan_result_1.set_advertising_sid(kAdvertisingSid);
+  scan_result_1.set_periodic_advertising_interval(kPeriodicAdvertisingInterval);
+
+  LowEnergyScanResult scan_result_2 = scan_result_1;
+  EXPECT_EQ(scan_result_2.address(), kPublicAddress1);
+  EXPECT_EQ(scan_result_2.resolved(), true);
+  EXPECT_EQ(scan_result_2.connectable(), true);
+  EXPECT_EQ(scan_result_2.rssi(), kRSSI);
+  EXPECT_EQ(scan_result_2.advertising_sid(), kAdvertisingSid);
+  EXPECT_EQ(scan_result_2.periodic_advertising_interval(),
+            kPeriodicAdvertisingInterval);
 }
 
 }  // namespace bt::hci

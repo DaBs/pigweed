@@ -22,6 +22,7 @@
 #include "lib/fidl/cpp/binding.h"
 #include "pw_bluetooth_sapphire/fuchsia/host/fidl/gatt_client_server.h"
 #include "pw_bluetooth_sapphire/fuchsia/host/fidl/low_energy_connection_server.h"
+#include "pw_bluetooth_sapphire/fuchsia/host/fidl/periodic_advertising_sync_server.h"
 #include "pw_bluetooth_sapphire/fuchsia/host/fidl/server_base.h"
 #include "pw_bluetooth_sapphire/internal/host/common/macros.h"
 #include "pw_bluetooth_sapphire/internal/host/gap/low_energy_connection_manager.h"
@@ -44,7 +45,9 @@ class LowEnergyCentralServer
   LowEnergyCentralServer(
       bt::gap::Adapter::WeakPtr adapter,
       ::fidl::InterfaceRequest<fuchsia::bluetooth::le::Central> request,
-      bt::gatt::GATT::WeakPtr gatt);
+      bt::gatt::GATT::WeakPtr gatt,
+      pw::bluetooth_sapphire::LeaseProvider& wake_lease_provider,
+      async_dispatcher_t* dispatcher);
   ~LowEnergyCentralServer() override;
 
   // Returns the connection pointer in the connections_deprecated_ map, if it
@@ -148,6 +151,15 @@ class LowEnergyCentralServer
   void DisconnectPeripheral(::std::string identifier,
                             DisconnectPeripheralCallback callback) override;
 
+  void CreateConnectedIsochronousGroup(
+      ::fuchsia::bluetooth::le::CentralCreateConnectedIsochronousGroupRequest
+          request,
+      CreateConnectedIsochronousGroupCallback callback) override {}
+
+  void SyncToPeriodicAdvertising(
+      ::fuchsia::bluetooth::le::CentralSyncToPeriodicAdvertisingRequest request)
+      override;
+
   // fuchsia::bluetooth::le::ChannelListenerRegistry overrides:
   void ListenL2cap(
       fuchsia::bluetooth::le::ChannelListenerRegistryListenL2capRequest request,
@@ -167,6 +179,8 @@ class LowEnergyCentralServer
 
   // GATT is used to construct GattClientServers upon connection.
   bt::gatt::GATT::WeakPtr gatt_;
+
+  pw::bluetooth_sapphire::LeaseProvider& wake_lease_provider_;
 
   // Stores active GATT client FIDL servers. Only 1 client server per peer may
   // exist.
@@ -190,6 +204,13 @@ class LowEnergyCentralServer
   std::unordered_map<bt::PeerId,
                      std::unique_ptr<bt::gap::LowEnergyConnectionHandle>>
       connections_deprecated_;
+
+  std::unordered_map<size_t, std::unique_ptr<PeriodicAdvertisingSyncServer>>
+      periodic_advertising_sync_servers_;
+
+  size_t next_server_id_ = 0;
+
+  async_dispatcher_t* dispatcher_;
 
   // Keep this as the last member to make sure that all weak pointers are
   // invalidated before other members get destroyed.

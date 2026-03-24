@@ -1,0 +1,132 @@
+// Copyright 2025 The Pigweed Authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License"); you may not
+// use this file except in compliance with the License. You may obtain a copy of
+// the License at
+//
+//     https://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+// WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+// License for the specific language governing permissions and limitations under
+// the License.
+#![no_std]
+
+{% if kernel.interrupt_table %}
+{%- include "interrupts" -%}
+{% endif %}
+
+{% if userspace %}
+{% if apps | length > 0 %}
+pub fn start() {
+    use core::ptr::NonNull;
+
+    use {{ arch_crate_name }} as arch;
+    use kernel::__private::foreign_box::{ForeignRc, static_foreign_box};
+    use kernel::macro_exports::foreign_box::ForeignBox;
+    use kernel::object::{KernelObject, ObjectTable};
+
+    type MemoryConfig = arch::MemoryConfig;
+    type K = arch::Arch;
+    #[allow(unused_variables)]
+    let kernel = K {};
+
+// Channel handlers are declared first so that initiators can reference them.
+// Unlike other object templates, handlers return a tuple of two ForeignRcs.
+// The first is a `dyn KernelObject<K>` which is suitable for adding to a
+// processes object table.  The second is a `ChannelHandlerObject<K>` which
+// is suitable for creating a `ChannelInitiator` object
+{%- for app in apps %}
+    {%- for object in app.process.objects %}
+        {% if object.type == "channel_handler" -%}
+            #[allow(unused_variables)]
+            let (
+                object_{{app.name}}_{{object.name | lower}},
+                object_{{app.name}}_{{object.name | lower}}_handler
+            ) = {% include "object_channel_handler" %};
+        {%- endif -%}
+        // Other objects declared later.
+    {%- endfor -%}
+{%- endfor -%}
+
+{%- for app in apps %}
+    let start_fn_{{app.name}} = {{app.start_fn_address | hex}}_usize;
+
+    const MEMORY_CONFIG_{{app.name | upper }}: MemoryConfig = MemoryConfig::const_new(&[
+        {%- for mapping in app.process.memory_mappings %}
+        memory_config::MemoryRegion::new(
+            {% if mapping.type == "device" -%}
+            memory_config::MemoryRegionType::Device,
+            {% elif mapping.type == "read_only_executable" -%}
+            memory_config::MemoryRegionType::ReadOnlyExecutable,
+            {% elif mapping.type == "read_write_data" -%}
+            memory_config::MemoryRegionType::ReadWriteData,
+            {% endif -%}
+            {{mapping.start_address | hex}},
+            {{(mapping.start_address + mapping.size_bytes) | hex}},
+        ),
+        {%- endfor -%}
+    ]);
+
+    {%- for object in app.process.objects %}
+        let object_{{app.name}}_{{object.name | lower}} =
+        {% if object.type == "channel_handler" -%}
+                // Reference to handler object already declared above.
+                object_{{app.name}}_{{object.name | lower}}
+        {% elif object.type == "channel_initiator" -%}
+            {% include "object_channel_initiator" %}
+        {% elif object.type == "interrupt" -%}
+            {% include "object_interrupt" %}
+        {% elif object.type == "wait_group" -%}
+            {% include "object_wait_group" %}
+        {%- endif -%}
+        ;
+    {%- endfor %}
+
+    let object_table_{{app.name}}: ForeignBox<dyn ObjectTable<K>> = unsafe {
+        static_foreign_box!(
+            [ForeignRc<<K as kernel::Arch>::AtomicUsize, dyn KernelObject<K>>; {{app.process.objects | length}}],
+            [
+            {%- for object in app.process.objects %}
+                object_{{app.name}}_{{object.name | lower}},
+            {%- endfor %}
+            ]
+        )
+    };
+
+
+    kernel::declare_non_priv_process_storage!(PROCESS_STORAGE_{{app.name | upper}});
+    const PROCESS_ID_{{app.name | upper}}: *const () =
+        kernel::non_priv_process_id!(PROCESS_STORAGE_{{app.name | upper}});
+    #[allow(unused_variables)]
+    let process_{{app.name}} = unsafe { kernel::init_non_priv_process!(
+        PROCESS_STORAGE_{{app.name | upper}},
+        "{{app.process.name}}",
+        MEMORY_CONFIG_{{app.name | upper}},
+        object_table_{{app.name}}
+    )};
+
+{%- for thread in app.process.threads -%}
+{% set thread_index = loop.index0 %}
+    let thread_{{app.name}}_{{thread_index}} = unsafe {
+        kernel::init_non_priv_thread!(
+            "{{thread.name}}",
+            {% if thread.priority -%}
+            kernel::Priority::{{ thread.priority }},
+            {%- else -%}
+            kernel::Priority::DEFAULT_PRIORITY,
+            {%- endif %}
+            process_{{app.name}},
+            PROCESS_ID_{{app.name | upper}},
+            start_fn_{{app.name}},
+            {{app.initial_sp | hex}},
+            {{thread.stack_size_bytes}}
+        )
+    };
+    kernel::start_thread(arch::Arch, thread_{{app.name}}_{{thread_index}});
+{%- endfor -%}
+{%- endfor %}
+}
+{%- endif %}
+{% endif %}

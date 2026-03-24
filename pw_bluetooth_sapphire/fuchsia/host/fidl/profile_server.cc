@@ -235,12 +235,17 @@ AclPriority FidlToAclPriority(fidlbredr::A2dpDirectionPriority in) {
 
 }  // namespace
 
-ProfileServer::ProfileServer(bt::gap::Adapter::WeakPtr adapter,
-                             fidl::InterfaceRequest<Profile> request)
+ProfileServer::ProfileServer(
+    bt::gap::Adapter::WeakPtr adapter,
+    pw::bluetooth_sapphire::LeaseProvider& wake_lease_provider,
+    uint8_t sco_offload_index,
+    fidl::InterfaceRequest<Profile> request)
     : ServerBase(this, std::move(request)),
       advertised_total_(0),
       searches_total_(0),
       adapter_(std::move(adapter)),
+      wake_lease_provider_(wake_lease_provider),
+      sco_offload_index_(sco_offload_index),
       weak_self_(this) {}
 
 ProfileServer::~ProfileServer() {
@@ -260,6 +265,8 @@ ProfileServer::~ProfileServer() {
 void ProfileServer::L2capParametersExt::RequestParameters(
     fuchsia::bluetooth::ChannelParameters requested,
     RequestParametersCallback callback) {
+  PW_CHECK(channel_.is_alive());
+
   if (requested.has_flush_timeout()) {
     channel_->SetBrEdrAutomaticFlushTimeout(
         std::chrono::nanoseconds(requested.flush_timeout()),
@@ -278,10 +285,12 @@ void ProfileServer::L2capParametersExt::RequestParameters(
           // Return the current parameters even if the request failed.
           // TODO(fxbug.dev/42152567): set current security requirements in
           // returned channel parameters
-          cb(fidlbredr::L2capParametersExt_RequestParameters_Result::
-                 WithResponse(
-                     fidlbredr::L2capParametersExt_RequestParameters_Response(
-                         ChannelInfoToFidlChannelParameters(chan->info()))));
+          if (chan.is_alive()) {
+            cb(fidlbredr::L2capParametersExt_RequestParameters_Result::
+                   WithResponse(
+                       fidlbredr::L2capParametersExt_RequestParameters_Response(
+                           ChannelInfoToFidlChannelParameters(chan->info()))));
+          }
         });
     return;
   }
@@ -662,7 +671,9 @@ void ProfileServer::ScoConnectionServer::Close(zx_status_t epitaph) {
 void ProfileServer::Advertise(
     fuchsia::bluetooth::bredr::ProfileAdvertiseRequest request,
     AdvertiseCallback callback) {
-  if (!request.has_services() || !request.has_receiver()) {
+  const bool has_receiver =
+      request.has_receiver() || request.has_connection_receiver();
+  if (!request.has_services() || !has_receiver) {
     callback(fidlbredr::Profile_Advertise_Result::WithErr(
         fuchsia::bluetooth::ErrorCode::INVALID_ARGUMENTS));
     return;
@@ -723,30 +734,43 @@ void ProfileServer::Advertise(
     registered_definitions.emplace_back(std::move(def.value()));
   }
 
-  fidlbredr::ConnectionReceiverPtr receiver =
-      request.mutable_receiver()->Bind();
-  // Monitor events on the `ConnectionReceiver`. Remove the service if the FIDL
-  // client revokes the service registration.
-  receiver.events().OnRevoke = [this, ad_id = next]() {
-    bt_log(DEBUG,
-           "fidl",
-           "Connection receiver revoked. Ending service advertisement %lu",
-           ad_id);
-    OnConnectionReceiverClosed(ad_id);
-  };
-  // Errors on the `ConnectionReceiver` will result in service unregistration.
-  receiver.set_error_handler([this, ad_id = next](zx_status_t status) {
-    bt_log(DEBUG,
-           "fidl",
-           "Connection receiver closed with error: %s. Ending service "
-           "advertisement %lu",
-           zx_status_get_string(status),
-           ad_id);
-    OnConnectionReceiverClosed(ad_id);
-  });
+  std::optional<ConnectionReceiverVariant> receiver_var;
+  if (request.has_receiver()) {
+    receiver_var = request.mutable_receiver()->Bind();
+  } else if (request.has_connection_receiver()) {
+    receiver_var = request.mutable_connection_receiver()->Bind();
+  } else {
+    // This is checked above, so it should never happen.
+    ZX_PANIC("Missing ConnectionReceiver parameter");
+  }
+  std::visit(
+      [this, next](auto&& receiver) {
+        // Monitor events on the `ConnectionReceiver`. Remove the service if the
+        // FIDL client revokes the service registration.
+        receiver.events().OnRevoke = [this, ad_id = next]() {
+          bt_log(
+              DEBUG,
+              "fidl",
+              "Connection receiver revoked. Ending service advertisement %lu",
+              ad_id);
+          OnConnectionReceiverClosed(ad_id);
+        };
+        // Errors on the `ConnectionReceiver` will result in service
+        // unregistration.
+        receiver.set_error_handler([this, ad_id = next](zx_status_t status) {
+          bt_log(DEBUG,
+                 "fidl",
+                 "Connection receiver closed with error: %s. Ending service "
+                 "advertisement %lu",
+                 zx_status_get_string(status),
+                 ad_id);
+          OnConnectionReceiverClosed(ad_id);
+        });
+      },
+      *receiver_var);
 
   current_advertised_.try_emplace(
-      next, std::move(receiver), registration_handle);
+      next, std::move(*receiver_var), registration_handle);
   advertised_total_ = next;
   fuchsia::bluetooth::bredr::Profile_Advertise_Response result;
   result.set_services(std::move(registered_definitions));
@@ -906,8 +930,8 @@ void ProfileServer::ConnectSco(
     return;
   }
 
-  auto params_result =
-      fidl_helpers::FidlToScoParametersVector(request.params());
+  auto params_result = fidl_helpers::FidlToScoParametersVector(
+      request.params(), sco_offload_index_);
   if (params_result.is_error()) {
     bt_log(WARN,
            "fidl",
@@ -1019,8 +1043,36 @@ void ProfileServer::OnChannelConnected(
     return;
   }
 
-  it->second.receiver->Connected(
-      peer_id, std::move(fidl_chan.value()), std::move(list));
+  ConnectionReceiverVariant& receiver_var = it->second.receiver;
+  if (auto* receiver =
+          std::get_if<fidl::InterfacePtr<fidlbredr::ConnectionReceiver>>(
+              &receiver_var)) {
+    (*receiver)->Connected(
+        peer_id, std::move(fidl_chan.value()), std::move(list));
+  } else if (auto* receiver = std::get_if<
+                 fidl::InterfacePtr<fidlbredr::ConnectionReceiver2>>(
+                 &receiver_var)) {
+    fidlbredr::ConnectionReceiver2ConnectedRequest request;
+    request.set_peer_id(peer_id);
+    request.set_channel(std::move(fidl_chan.value()));
+    request.set_protocol(std::move(list));
+    // Capture a wake lease until a response is received.
+    pw::bluetooth_sapphire::Lease wake_lease =
+        PW_SAPPHIRE_ACQUIRE_LEASE(wake_lease_provider_,
+                                  "ConnectionReceiver2.Connected")
+            .value_or(pw::bluetooth_sapphire::Lease());
+    (*receiver)->Connected(
+        std::move(request),
+        [lease = std::move(wake_lease)](
+            fidlbredr::ConnectionReceiver2_Connected_Result result) {
+          if (result.is_framework_err()) {
+            bt_log(WARN,
+                   "fidl",
+                   "ConnectionReceiver2.Connected error: %d",
+                   fidl::ToUnderlying(result.framework_err()));
+          }
+        });
+  }
 }
 
 void ProfileServer::OnConnectionReceiverClosed(uint64_t ad_id) {
@@ -1094,12 +1146,65 @@ void ProfileServer::OnServiceFound(
     fidl_attrs.emplace_back(std::move(*attr));
   }
 
-  fuchsia::bluetooth::PeerId fidl_peer_id{peer_id.value()};
+  if (search_it->second.unacknowledged_search_results_count >=
+          kMaxUnackedSearchResults ||
+      !search_it->second.pending_search_results.empty()) {
+    bt_log(
+        TRACE,
+        "fidl",
+        "Queueing search result due to unacked previous results for peer %s.",
+        bt_str(peer_id));
+    search_it->second.pending_search_results.push_back(PendingSearchResult(
+        {peer_id.value()}, std::move(descriptor_list), std::move(fidl_attrs)));
+    return;
+  }
 
-  search_it->second.results->ServiceFound(fidl_peer_id,
-                                          std::move(descriptor_list),
-                                          std::move(fidl_attrs),
-                                          [](auto) {});
+  SendServiceFound(search_it->second,
+                   PendingSearchResult({peer_id.value()},
+                                       std::move(descriptor_list),
+                                       std::move(fidl_attrs)));
+}
+
+void ProfileServer::SendServiceFound(RegisteredSearch& search,
+                                     PendingSearchResult pending_result) {
+  search.unacknowledged_search_results_count++;
+  if (!search.wake_lease) {
+    search.wake_lease = PW_SAPPHIRE_ACQUIRE_LEASE(wake_lease_provider_,
+                                                  "SearchResults.ServiceFound")
+                            .value_or(pw::bluetooth_sapphire::Lease());
+  }
+
+  auto response_cb = [search_id = search.search_id, this](auto) {
+    OnServiceFoundComplete(search_id);
+  };
+
+  search.results->ServiceFound(pending_result.peer_id,
+                               std::move(pending_result.descriptor_list),
+                               std::move(pending_result.attributes),
+                               std::move(response_cb));
+}
+
+void ProfileServer::OnServiceFoundComplete(
+    bt::gap::BrEdrConnectionManager::SearchId search_id) {
+  auto search_it = searches_.find(search_id);
+  if (search_it == searches_.end()) {
+    // Search was de-registered.
+    return;
+  }
+  auto& search = search_it->second;
+
+  search.unacknowledged_search_results_count--;
+  while (!search.pending_search_results.empty() &&
+         search.unacknowledged_search_results_count <
+             kMaxUnackedSearchResults) {
+    auto pending_result = std::move(search.pending_search_results.front());
+    search.pending_search_results.pop_front();
+    SendServiceFound(search, std::move(pending_result));
+  }
+
+  if (search.unacknowledged_search_results_count == 0) {
+    search.wake_lease.reset();
+  }
 }
 
 void ProfileServer::OnScoConnectionResult(
@@ -1266,8 +1371,10 @@ ProfileServer::BindChannelServer(bt::l2cap::Channel::WeakPtr channel,
   bt::l2cap::Channel::UniqueId unique_id = channel->unique_id();
 
   std::unique_ptr<bthost::ChannelServer> connection_server =
-      ChannelServer::Create(
-          client.NewRequest(), std::move(channel), std::move(closed_callback));
+      ChannelServer::Create(client.NewRequest(),
+                            std::move(channel),
+                            wake_lease_provider_,
+                            std::move(closed_callback));
   if (!connection_server) {
     return std::nullopt;
   }

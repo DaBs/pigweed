@@ -58,15 +58,22 @@ using fidl_helpers::PeerIdFromString;
 using fidl_helpers::ResultToFidl;
 using fidl_helpers::SecurityLevelFromFidl;
 
-HostServer::HostServer(zx::channel channel,
-                       const bt::gap::Adapter::WeakPtr& adapter,
-                       bt::gatt::GATT::WeakPtr gatt)
+HostServer::HostServer(
+    zx::channel channel,
+    const bt::gap::Adapter::WeakPtr& adapter,
+    bt::gatt::GATT::WeakPtr gatt,
+    pw::bluetooth_sapphire::LeaseProvider& wake_lease_provider,
+    uint8_t sco_offload_index,
+    async_dispatcher_t* dispatcher)
     : AdapterServerBase(adapter, this, std::move(channel)),
       pairing_delegate_(nullptr),
       gatt_(std::move(gatt)),
+      wake_lease_provider_(wake_lease_provider),
       requesting_background_scan_(false),
       requesting_discoverable_(false),
       io_capability_(IOCapability::kNoInputNoOutput),
+      sco_offload_index_(sco_offload_index),
+      dispatcher_(dispatcher),
       weak_self_(this),
       weak_pairing_(this) {
   PW_CHECK(gatt_.is_alive());
@@ -100,12 +107,17 @@ HostServer::~HostServer() { Shutdown(); }
 void HostServer::RequestProtocol(fhost::ProtocolRequest request) {
   switch (request.Which()) {
     case fhost::ProtocolRequest::Tag::kCentral:
-      BindServer<LowEnergyCentralServer>(
-          adapter()->AsWeakPtr(), std::move(request.central()), gatt_);
+      BindServer<LowEnergyCentralServer>(adapter()->AsWeakPtr(),
+                                         std::move(request.central()),
+                                         gatt_,
+                                         wake_lease_provider_,
+                                         dispatcher_);
       break;
     case fhost::ProtocolRequest::Tag::kPeripheral:
-      BindServer<LowEnergyPeripheralServer>(
-          adapter()->AsWeakPtr(), gatt_, std::move(request.peripheral()));
+      BindServer<LowEnergyPeripheralServer>(adapter()->AsWeakPtr(),
+                                            gatt_,
+                                            wake_lease_provider_,
+                                            std::move(request.peripheral()));
       break;
     case fhost::ProtocolRequest::Tag::kGattServer:
       BindServer<GattServerServer>(gatt_->GetWeakPtr(),
@@ -117,12 +129,15 @@ void HostServer::RequestProtocol(fhost::ProtocolRequest request) {
       break;
     case fhost::ProtocolRequest::Tag::kProfile:
       BindServer<ProfileServer>(adapter()->AsWeakPtr(),
+                                wake_lease_provider_,
+                                sco_offload_index_,
                                 std::move(request.profile()));
       break;
     case fhost::ProtocolRequest::Tag::kPrivilegedPeripheral:
       BindServer<LowEnergyPrivilegedPeripheralServer>(
           adapter()->AsWeakPtr(),
           gatt_,
+          wake_lease_provider_,
           std::move(request.privileged_peripheral()));
       break;
     default:
@@ -350,6 +365,9 @@ void HostServer::RestoreBonds(
     bd.address = *address;
     if (bond.has_name()) {
       bd.name = {bond.name()};
+    }
+    if (bond.has_device_class()) {
+      bd.device_class = bt::DeviceClass(bond.device_class().value);
     }
 
     if (bond.has_le_bond()) {
@@ -936,10 +954,6 @@ HostServer::PeerWatcherServer::~PeerWatcherServer() {
 }
 
 void HostServer::PeerWatcherServer::OnPeerUpdated(const bt::gap::Peer& peer) {
-  if (!peer.connectable()) {
-    return;
-  }
-
   updated_.insert(peer.identifier());
   removed_.erase(peer.identifier());
   MaybeCallCallback();
@@ -952,6 +966,14 @@ void HostServer::PeerWatcherServer::OnPeerRemoved(bt::PeerId id) {
 }
 
 void HostServer::PeerWatcherServer::MaybeCallCallback() {
+  if (updated_.empty() && removed_.empty()) {
+    wake_lease_.reset();
+  } else if (!wake_lease_) {
+    wake_lease_ = PW_SAPPHIRE_ACQUIRE_LEASE(host_->wake_lease_provider_,
+                                            "PeerWatcherServer")
+                      .value_or(pw::bluetooth_sapphire::Lease());
+  }
+
   if (!callback_) {
     return;
   }

@@ -46,6 +46,7 @@ constexpr uint64_t BuildEventMask() {
   ENABLE_EVT(kLEMetaEvent);
   ENABLE_EVT(kLinkKeyRequestEvent);
   ENABLE_EVT(kLinkKeyNotificationEvent);
+  ENABLE_EVT(kModeChangeEvent);
   ENABLE_EVT(kPINCodeRequestEvent);
   ENABLE_EVT(kRemoteOOBDataRequestEvent);
   ENABLE_EVT(kRemoteNameRequestCompleteEvent);
@@ -83,6 +84,7 @@ constexpr uint64_t BuildLEEventMask() {
   ENABLE_EVT(kLECISEstablished);
   ENABLE_EVT(kLELongTermKeyRequest);
   ENABLE_EVT(kLEReadRemoteFeaturesComplete);
+  ENABLE_EVT(kLERequestPeerSCAComplete);
 
 #undef ENABLE_EVT
 

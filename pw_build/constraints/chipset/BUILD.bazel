@@ -15,28 +15,9 @@ package(default_visibility = ["//visibility:public"])
 
 licenses(["notice"])
 
+# These constraints are deprecated. Do not extend or use.
 constraint_setting(
     name = "chipset",
-)
-
-constraint_value(
-    name = "stm32f429",
-    constraint_setting = ":chipset",
-)
-
-constraint_value(
-    name = "lm3s6965evb",
-    constraint_setting = ":chipset",
-)
-
-constraint_value(
-    name = "mps2-an505",
-    constraint_setting = ":chipset",
-)
-
-constraint_value(
-    name = "nrf52833",
-    constraint_setting = ":chipset",
 )
 
 constraint_value(

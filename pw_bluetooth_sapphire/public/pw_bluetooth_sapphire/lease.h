@@ -26,6 +26,8 @@
 
 namespace pw::bluetooth_sapphire {
 
+/// @module{pw_bluetooth_sapphire}
+
 /// A handle representing an active lease. The lease is released on
 /// destruction.
 class Lease final {
@@ -57,17 +59,10 @@ class LeaseProvider {
   /// Prefer to use `PW_SAPPHIRE_ACQUIRE_LEASE` instead.
   /// @param name will be either a `const char*` or a `uint32_t` depending on
   /// whether tokenization is enabled.
-  /// @returns @rst
   ///
-  /// .. pw-status-codes::
-  ///
-  ///    OK: A `Lease` was successfully created and returned.
-  ///
-  ///    UNAVAILABLE: A lease could not be created.
-  ///
-  ///    INVALID_ARGUMENT: The name was invalid (e.g. empty).
-  ///
-  /// @endrst
+  /// @returns @Result{the lease}
+  /// * @UNAVAILABLE: A lease could not be created.
+  /// * @INVALID_ARGUMENT: The name was invalid (e.g. empty).
   virtual Result<Lease> Acquire(PW_SAPPHIRE_LEASE_TOKEN_TYPE name) = 0;
 };
 

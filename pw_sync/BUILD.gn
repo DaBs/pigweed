@@ -17,7 +17,7 @@ import("//build_overrides/pigweed.gni")
 import("$dir_pw_build/facade.gni")
 import("$dir_pw_build/target_types.gni")
 import("$dir_pw_chrono/backend.gni")
-import("$dir_pw_docgen/docs.gni")
+import("$dir_pw_thread/backend.gni")
 import("$dir_pw_unit_test/test.gni")
 import("backend.gni")
 
@@ -57,6 +57,12 @@ pw_source_set("lock_annotations") {
   public_configs = [ ":public_include_path" ]
   public = [ "public/pw_sync/lock_annotations.h" ]
   public_deps = [ "$dir_pw_preprocessor" ]
+}
+
+pw_source_set("no_lock") {
+  public_configs = [ ":public_include_path" ]
+  public = [ "public/pw_sync/no_lock.h" ]
+  public_deps = [ ":lock_annotations" ]
 }
 
 pw_source_set("lock_traits") {
@@ -150,6 +156,15 @@ pw_facade("recursive_mutex") {
   ]
 }
 
+pw_source_set("scoped_locker") {
+  public_configs = [ ":public_include_path" ]
+  public = [ "public/pw_sync/scoped_locker.h" ]
+  public_deps = [
+    ":lock_annotations",
+    ":lock_traits",
+  ]
+}
+
 pw_facade("interrupt_spin_lock") {
   backend = pw_sync_INTERRUPT_SPIN_LOCK_BACKEND
   public_configs = [ ":public_include_path" ]
@@ -215,11 +230,6 @@ pw_source_set("binary_semaphore_timed_thread_notification_backend") {
   ]
 }
 
-pw_source_set("yield_core") {
-  public = [ "public/pw_sync/yield_core.h" ]
-  public_configs = [ ":public_include_path" ]
-}
-
 pw_facade("condition_variable") {
   backend = pw_sync_CONDITION_VARIABLE_BACKEND
   public_configs = [ ":public_include_path" ]
@@ -237,8 +247,9 @@ pw_test_group("tests") {
     ":binary_semaphore_facade_test",
     ":counting_semaphore_facade_test",
     ":mutex_facade_test",
-    ":timed_mutex_facade_test",
     ":recursive_mutex_facade_test",
+    ":scoped_locker_test",
+    ":timed_mutex_facade_test",
     ":interrupt_spin_lock_facade_test",
     ":thread_notification_facade_test",
     ":timed_thread_notification_facade_test",
@@ -246,9 +257,30 @@ pw_test_group("tests") {
   ]
 }
 
+pw_source_set("threaded_testing") {
+  public_configs = [ ":public_include_path" ]
+  public = [ "public/pw_sync/test/threaded_testing.h" ]
+  public_deps = [
+    ":thread_notification",
+    "$dir_pw_thread:test_thread_context",
+    "$dir_pw_thread:thread",
+    "$dir_pw_unit_test",
+  ]
+}
+
+pw_source_set("timed_threaded_testing") {
+  public_configs = [ ":public_include_path" ]
+  public = [ "public/pw_sync/test/timed_threaded_testing.h" ]
+  public_deps = [
+    ":threaded_testing",
+    "$dir_pw_chrono:system_clock",
+    "$dir_pw_thread:sleep",
+  ]
+}
+
 pw_source_set("lock_testing") {
   public_configs = [ ":public_include_path" ]
-  public = [ "public/pw_sync/lock_testing.h" ]
+  public = [ "public/pw_sync/test/lock_testing.h" ]
   sources = [ "lock_testing.cc" ]
   public_deps = [
     ":virtual_basic_lockable",
@@ -259,7 +291,7 @@ pw_source_set("lock_testing") {
 
 pw_source_set("borrow_testing") {
   public_configs = [ ":public_include_path" ]
-  public = [ "public/pw_sync/borrow_testing.h" ]
+  public = [ "public/pw_sync/test/borrow_testing.h" ]
   public_deps = [
     ":borrow",
     ":lock_traits",
@@ -268,7 +300,7 @@ pw_source_set("borrow_testing") {
 
 pw_source_set("timed_borrow_testing") {
   public_configs = [ ":public_include_path" ]
-  public = [ "public/pw_sync/timed_borrow_testing.h" ]
+  public = [ "public/pw_sync/test/timed_borrow_testing.h" ]
   public_deps = [
     ":borrow_testing",
     ":timed_borrow",
@@ -344,6 +376,15 @@ pw_test("mutex_facade_test") {
   ]
 }
 
+pw_test("scoped_locker_test") {
+  enable_if = pw_chrono_SYSTEM_CLOCK_BACKEND != ""
+  sources = [ "scoped_locker_test.cc" ]
+  deps = [
+    ":lock_testing",
+    ":scoped_locker",
+  ]
+}
+
 pw_test("timed_mutex_facade_test") {
   enable_if = pw_sync_TIMED_MUTEX_BACKEND != ""
   sources = [
@@ -392,19 +433,25 @@ pw_test("interrupt_spin_lock_facade_test") {
 }
 
 pw_test("thread_notification_facade_test") {
-  enable_if = pw_sync_THREAD_NOTIFICATION_BACKEND != ""
+  enable_if = pw_sync_THREAD_NOTIFICATION_BACKEND != "" &&
+              pw_thread_THREAD_BACKEND != "" &&
+              pw_thread_TEST_THREAD_CONTEXT_BACKEND != ""
   sources = [ "thread_notification_facade_test.cc" ]
   deps = [
     ":thread_notification",
+    ":threaded_testing",
     pw_sync_THREAD_NOTIFICATION_BACKEND,
   ]
 }
 
 pw_test("timed_thread_notification_facade_test") {
-  enable_if = pw_sync_TIMED_THREAD_NOTIFICATION_BACKEND != ""
+  enable_if = pw_sync_TIMED_THREAD_NOTIFICATION_BACKEND != "" &&
+              pw_thread_THREAD_BACKEND != "" &&
+              pw_thread_TEST_THREAD_CONTEXT_BACKEND != ""
   sources = [ "timed_thread_notification_facade_test.cc" ]
   deps = [
     ":timed_thread_notification",
+    ":timed_threaded_testing",
     pw_sync_TIMED_THREAD_NOTIFICATION_BACKEND,
   ]
 }
@@ -427,9 +474,10 @@ pw_source_set("condition_variable_test") {
   ]
 }
 
-pw_doc_group("docs") {
-  sources = [
-    "backends.rst",
-    "docs.rst",
+pw_test("no_lock_test") {
+  sources = [ "no_lock_test.cc" ]
+  deps = [
+    ":mutex",
+    ":no_lock",
   ]
 }

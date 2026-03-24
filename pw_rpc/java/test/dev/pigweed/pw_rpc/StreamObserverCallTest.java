@@ -24,10 +24,13 @@ import dev.pigweed.pw_rpc.internal.Packet.RpcPacket;
 import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.junit.runners.JUnit4;
 import org.mockito.Mock;
 import org.mockito.junit.MockitoJUnit;
 import org.mockito.junit.MockitoRule;
 
+@RunWith(JUnit4.class)
 public final class StreamObserverCallTest {
   @Rule public final MockitoRule mockito = MockitoJUnit.rule();
 
@@ -43,7 +46,7 @@ public final class StreamObserverCallTest {
   @Mock private Channel.Output mockOutput;
 
   private final Channel channel = new Channel(CHANNEL_ID, packet -> mockOutput.send(packet));
-  private final Endpoint endpoint = new Endpoint(ImmutableList.of(channel));
+  private final Endpoint endpoint = new Endpoint(CallIdMode.ENABLED, ImmutableList.of(channel));
   private StreamObserverCall<SomeMessage, AnotherMessage> streamObserverCall;
 
   private static byte[] cancel() {
@@ -57,6 +60,7 @@ public final class StreamObserverCallTest {
   private static RpcPacket.Builder packetBuilder() {
     return RpcPacket.newBuilder()
         .setChannelId(CHANNEL_ID)
+        .setCallId(Endpoint.FIRST_CALL_ID)
         .setServiceId(SERVICE.id())
         .setMethodId(METHOD.id());
   }

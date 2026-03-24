@@ -86,8 +86,8 @@ class DecodedArg {
 
   // Constructs a DecodedArg that represents a string literal in the format
   // string (plain text or % character).
-  DecodedArg(const std::string& literal)
-      : value_(literal), raw_data_size_bytes_(0) {}
+  DecodedArg(std::string literal)
+      : value_(std::move(literal)), raw_data_size_bytes_(0) {}
 
   // Constructs a DecodedArg that encountered an error during decoding.
   DecodedArg(ArgStatus error,
@@ -142,6 +142,15 @@ class StringSegment {
 
   const std::string& text() const { return text_; }
 
+  friend bool operator==(const StringSegment& lhs, const StringSegment& rhs) {
+    return lhs.type_ == rhs.type_ && lhs.local_size_ == rhs.local_size_ &&
+           lhs.text_ == rhs.text_;
+  }
+
+  friend bool operator!=(const StringSegment& lhs, const StringSegment& rhs) {
+    return !(lhs == rhs);
+  }
+
  private:
   enum Type {
     kLiteral,
@@ -191,10 +200,10 @@ class DecodedFormatString {
                       size_t remaining_bytes)
       : segments_(std::move(segments)), remaining_bytes_(remaining_bytes) {}
 
-  DecodedFormatString(const DecodedFormatString&) = default;
+  DecodedFormatString(const DecodedFormatString&) = delete;
   DecodedFormatString(DecodedFormatString&&) = default;
 
-  DecodedFormatString& operator=(const DecodedFormatString&) = default;
+  DecodedFormatString& operator=(const DecodedFormatString&) = delete;
   DecodedFormatString& operator=(DecodedFormatString&&) = default;
 
   // Returns the decoded format string. If any argument decoding errors
@@ -226,7 +235,7 @@ class DecodedFormatString {
 class FormatString {
  public:
   // Constructs a FormatString from a null-terminated format string.
-  FormatString(const char* format_string);
+  explicit FormatString(const char* format_string);
 
   // Formats this format string according to the provided encoded arguments and
   // returns a string.
@@ -235,6 +244,17 @@ class FormatString {
   DecodedFormatString Format(std::string_view arguments) const {
     return Format(span(reinterpret_cast<const uint8_t*>(arguments.data()),
                        arguments.size()));
+  }
+
+  // Returns the raw, unformatted version of this string.
+  std::string text() const;
+
+  friend bool operator==(const FormatString& lhs, const FormatString& rhs) {
+    return lhs.segments_ == rhs.segments_;
+  }
+
+  friend bool operator!=(const FormatString& lhs, const FormatString& rhs) {
+    return !(lhs == rhs);
   }
 
  private:
@@ -258,7 +278,7 @@ DecodedArg DecodedArg::FromValue(const char* format,
   }
 
   // Reserve space in the value string for the snprintf call.
-  arg.value_.append(value_size + 1, '\0');
+  arg.value_.append(static_cast<size_t>(value_size) + 1, '\0');
 
   // Print the value to the string in the reserved space, then pop off the \0.
   std::snprintf(arg.value_.data(), arg.value_.size(), format, value);

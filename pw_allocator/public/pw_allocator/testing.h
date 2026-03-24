@@ -31,6 +31,8 @@
 
 namespace pw::allocator::test {
 
+/// @submodule{pw_allocator,impl_test}
+
 static_assert(Hardening::kIncludesDebugChecks,
               "Tests must use a config that enables strict validation");
 
@@ -65,10 +67,11 @@ void FreeAll(typename BlockType::Range range) {
 /// An `AllocatorForTest` that is automatically initialized on construction.
 template <size_t kBufferSize,
           typename BlockType_ = FirstFitBlock<uint32_t>,
-          typename MetricsType = internal::AllMetrics>
+          typename MetricsType_ = internal::AllMetrics>
 class AllocatorForTest : public Allocator {
  public:
   using BlockType = BlockType_;
+  using MetricsType = MetricsType_;
   using AllocatorType = FirstFitAllocator<BlockType>;
 
   // Since the unbderlying first-fit allocator uses an intrusive free list, all
@@ -76,15 +79,14 @@ class AllocatorForTest : public Allocator {
   static constexpr size_t kMinSize = BlockType::kAlignment;
 
   AllocatorForTest()
-      : Allocator(AllocatorType::kCapabilities), tracker_(kToken, *allocator_) {
+      : Allocator(AllocatorType::kCapabilities),
+        allocator_(),
+        tracker_(kToken, *allocator_) {
     ResetParameters();
     allocator_->Init(allocator_.as_bytes());
   }
 
-  ~AllocatorForTest() override {
-    FreeAll<BlockType>(blocks());
-    allocator_->Reset();
-  }
+  ~AllocatorForTest() override { FreeAll<BlockType>(blocks()); }
 
   typename BlockType::Range blocks() const { return allocator_->blocks(); }
   typename BlockType::Range blocks() { return allocator_->blocks(); }
@@ -133,6 +135,16 @@ class AllocatorForTest : public Allocator {
     return allocator_->MeasureFragmentation();
   }
 
+ protected:
+  /// Returns the underlying tracking allocator.
+  TrackingAllocator<MetricsType>& GetTracker() { return tracker_; }
+
+  /// @copydoc Allocator::DoMeasureFragmentation
+  std::optional<allocator::Fragmentation> DoMeasureFragmentation()
+      const override {
+    return allocator_->MeasureFragmentation();
+  }
+
  private:
   /// @copydoc Allocator::Allocate
   void* DoAllocate(Layout layout) override {
@@ -143,7 +155,7 @@ class AllocatorForTest : public Allocator {
 
   /// @copydoc Allocator::Deallocate
   void DoDeallocate(void* ptr) override {
-    Result<Layout> requested = GetRequestedLayout(tracker_, ptr);
+    Result<Layout> requested = GetRequestedLayout(ptr);
     deallocate_ptr_ = ptr;
     deallocate_size_ = requested.ok() ? requested->size() : 0;
     tracker_.Deallocate(ptr);
@@ -154,7 +166,7 @@ class AllocatorForTest : public Allocator {
 
   /// @copydoc Allocator::Resize
   bool DoResize(void* ptr, size_t new_size) override {
-    Result<Layout> requested = GetRequestedLayout(tracker_, ptr);
+    Result<Layout> requested = GetRequestedLayout(ptr);
     resize_ptr_ = ptr;
     resize_old_size_ = requested.ok() ? requested->size() : 0;
     resize_new_size_ = new_size;
@@ -178,5 +190,7 @@ class AllocatorForTest : public Allocator {
   size_t resize_old_size_;
   size_t resize_new_size_;
 };
+
+/// @}
 
 }  // namespace pw::allocator::test

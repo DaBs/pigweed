@@ -30,9 +30,6 @@ Get Started
       If only one part of the module is needed, depend only on it; for example
       ``@pigweed//pw_string:format``.
 
-      This assumes ``@pigweed`` is the name you pulled Pigweed into your Bazel
-      ``WORKSPACE`` as.
-
    .. tab-item:: GN
 
       Add ``$dir_pw_string`` to the ``deps`` list in your ``pw_executable()``
@@ -112,6 +109,7 @@ termination:
 .. code-block:: cpp
 
    #include <string>
+
    #include "pw_log/log.h"
    #include "pw_string/string_builder.h"
 
@@ -119,8 +117,7 @@ termination:
      // %s format strings require null terminated strings, so create one on the
      // stack with size up to kMaxNameLen, copy the string view `name` contents
      // into it, add a null terminator, and log it.
-     PW_LOG_DEBUG("The name is %s",
-                  pw::InlineString<kMaxNameLen>(name).c_str());
+     PW_LOG_DEBUG("The name is %s", pw::InlineString<kMaxNameLen>(name).c_str());
    }
 
 An example of when to prefer :cpp:class:`pw::StringBuilder` is when
@@ -185,7 +182,7 @@ capacity for the string.
 
    // Initialize from a C string.
    pw::InlineString<32> inline_string = "Literally";
-   inline_string.append('?', 3);   // contains "Literally???"
+   inline_string.append('?', 3);  // contains "Literally???"
 
    // Supports copying into known-capacity strings.
    pw::InlineString<64> other = inline_string;
@@ -216,16 +213,11 @@ Build a string inside an pw::InlineString with a pw::StringBuilder
 :cpp:class:`pw::StringBuilder` can build a string in a
 :cpp:type:`pw::InlineString`:
 
-.. code-block:: c++
-
-   #include "pw_string/string.h"
-
-   void DoFoo() {
-     InlineString<32> inline_str;
-     StringBuilder sb(inline_str);
-     sb << 123 << "456";
-     // inline_str contains "456"
-   }
+.. literalinclude:: ./examples/build_inlinestring_with_stringbuilder_test.cc
+   :language: cpp
+   :dedent:
+   :start-after: // DOCSTAG: [build-inlinestring-with-stringbuilder]
+   :end-before: // DOCSTAG: [build-inlinestring-with-stringbuilder]
 
 Pass an pw::InlineString object as a parameter
 ==============================================
@@ -243,7 +235,7 @@ use the ``pw::InlineString<>`` type, shown in the examples below:
    // Note that the first argument is a generically-sized InlineString.
    void RemoveSuffix(pw::InlineString<>& string, std::string_view suffix) {
      if (string.ends_with(suffix)) {
-        string.resize(string.size() - suffix.size());
+       string.resize(string.size() - suffix.size());
      }
    }
 
@@ -265,17 +257,11 @@ Known size strings
 :cpp:type:`pw::InlineString` operations on known-size strings may be used in
 ``constexpr`` expressions.
 
-.. code-block:: c++
-
-   static constexpr pw::InlineString<64> kMyString = [] {
-     pw::InlineString<64> string;
-
-     for (int i = 0; i < 10; ++i) {
-       string += "Hello";
-     }
-
-     return string;
-   }();
+.. literalinclude:: ./examples/known_size_string_test.cc
+   :language: cpp
+   :dedent:
+   :start-after: // DOCSTAG: [known_size_string]
+   :end-before: // DOCSTAG: [known_size_string]
 
 Initialization of pw::InlineString objects
 ===========================================
@@ -300,6 +286,8 @@ the same namespace as the custom type. For example:
 
 .. code-block:: cpp
 
+   #include "pw_string/string_builder.h"
+
    namespace my_project {
 
    struct MyType {
@@ -307,7 +295,8 @@ the same namespace as the custom type. For example:
      const char* bar;
    };
 
-   pw::StringBuilder& operator<<(pw::StringBuilder& sb, const MyType& value) {
+   inline pw::StringBuilder& operator<<(pw::StringBuilder& sb,
+                                        const MyType& value) {
      return sb << "MyType(" << value.foo << ", " << value.bar << ')';
    }
 

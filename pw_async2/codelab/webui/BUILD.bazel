@@ -1,0 +1,192 @@
+# Copyright 2025 The Pigweed Authors
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may not
+# use this file except in compliance with the License. You may obtain a copy of
+# the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations under
+# the License.
+
+load("@aspect_bazel_lib//lib:directory_path.bzl", "directory_path")
+load("@aspect_rules_js//js:defs.bzl", "js_binary", "js_run_binary")
+load("@npm//:defs.bzl", "npm_link_all_packages")
+load("@rules_cc//cc:cc_library.bzl", "cc_library")
+load("//pw_build:compatibility.bzl", "incompatible_with_mcu")
+load("//pw_build:pw_cc_blob_library.bzl", "pw_cc_blob_info", "pw_cc_blob_library")
+load("//pw_unit_test:pw_cc_test.bzl", "pw_cc_test")
+
+package(default_visibility = ["//pw_async2/codelab:__subpackages__"])
+
+licenses(["notice"])
+
+npm_link_all_packages(name = "node_modules")
+
+directory_path(
+    name = "rollup_entry_point",
+    directory = ":node_modules/rollup/dir",
+    path = "dist/bin/rollup",
+    target_compatible_with = incompatible_with_mcu(),
+)
+
+js_binary(
+    name = "rollup_bin",
+    entry_point = ":rollup_entry_point",
+    target_compatible_with = incompatible_with_mcu(),
+)
+
+# Bundle the web app using Rollup
+js_run_binary(
+    name = "webui_js",
+    srcs = [
+        "rollup.config.js",
+        "tsconfig.json",
+        "www/main.ts",
+        ":node_modules",
+    ],
+    outs = ["www/main.js"],
+    args = [
+        "-c",
+        "rollup.config.js",
+    ],
+    chdir = package_name(),
+    target_compatible_with = incompatible_with_mcu(),
+    tool = ":rollup_bin",
+    visibility = ["//visibility:private"],
+)
+
+pw_cc_blob_info(
+    name = "main_js_blob",
+    file_path = ":webui_js",
+    symbol_name = "main_js",
+    visibility = ["//visibility:private"],
+)
+
+pw_cc_blob_info(
+    name = "main_css_blob",
+    file_path = "www/main.css",
+    symbol_name = "main_css",
+    visibility = ["//visibility:private"],
+)
+
+pw_cc_blob_info(
+    name = "index_html_blob",
+    file_path = "www/index.html",
+    symbol_name = "index_html",
+    visibility = ["//visibility:private"],
+)
+
+pw_cc_blob_library(
+    name = "webui_resources",
+    blobs = [
+        ":main_js_blob",
+        ":main_css_blob",
+        ":index_html_blob",
+    ],
+    namespace = "codelab::webui::resources",
+    out_header = "webui/resources.h",
+    visibility = ["//visibility:private"],
+)
+
+cc_library(
+    name = "websocket_frame_protocol",
+    srcs = [
+        "cc/websocket_frame_protocol.cc",
+    ],
+    hdrs = [
+        "cc/websocket_frame_protocol.h",
+    ],
+    implementation_deps = [
+        "//pw_assert:check",
+        "//pw_bytes:bit",
+        "//pw_log",
+        "//pw_status",
+    ],
+    strip_include_prefix = "cc/",
+    deps = [
+        "//pw_bytes",
+        "//pw_result",
+        "//pw_span",
+    ],
+)
+
+pw_cc_test(
+    name = "websocket_frame_protocol_test",
+    srcs = ["cc/websocket_frame_protocol_test.cc"],
+    deps = [
+        ":websocket_frame_protocol",
+        "//pw_bytes",
+        "//pw_fuzzer:fuzztest",
+        "//pw_hex_dump:log_bytes",
+        "//pw_log",
+        "//pw_result",
+        "//pw_span",
+        "//pw_status",
+    ],
+)
+
+cc_library(
+    name = "websocket_http_upgrade",
+    srcs = [
+        "cc/websocket_http_upgrade.cc",
+    ],
+    hdrs = [
+        "cc/websocket_http_upgrade.h",
+    ],
+    implementation_deps = [
+        "//pw_base64",
+        "//pw_status",
+        "//pw_string:builder",
+        "@mbedtls",
+    ],
+    strip_include_prefix = "cc/",
+    deps = [
+        "//pw_bytes",
+        "//pw_result",
+        "//pw_span",
+    ],
+)
+
+pw_cc_test(
+    name = "websocket_http_upgrade_test",
+    srcs = ["cc/websocket_http_upgrade_test.cc"],
+    deps = [
+        ":websocket_http_upgrade",
+        "//pw_bytes",
+        "//pw_fuzzer:fuzztest",
+        "//pw_hex_dump:log_bytes",
+        "//pw_log",
+        "//pw_result",
+        "//pw_span",
+        "//pw_status",
+    ],
+)
+
+cc_library(
+    name = "webui_server",
+    srcs = ["cc/webui_server.cc"],
+    hdrs = ["cc/public/webui/webui_server.h"],
+    implementation_deps = [
+        ":websocket_frame_protocol",
+        ":websocket_http_upgrade",
+        ":webui_resources",
+        "//pw_assert:check",
+        "//pw_function",
+        "//pw_hex_dump:log_bytes",
+        "//pw_log",
+        "//pw_preprocessor",
+        "//pw_result",
+        "//pw_span",
+        "//pw_status",
+        "//pw_stream:socket_stream",
+        "//pw_string:builder",
+        "//pw_sync:interrupt_spin_lock",
+        "//pw_sync:lock_annotations",
+    ],
+    strip_include_prefix = "cc/public",
+    visibility = ["//pw_async2/codelab:__subpackages__"],
+)

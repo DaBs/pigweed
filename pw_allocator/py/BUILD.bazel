@@ -12,20 +12,21 @@
 # License for the specific language governing permissions and limitations under
 # the License.
 
-load("@rules_python//python:defs.bzl", "py_library")
-load("//pw_build:python.bzl", "pw_py_binary")
+load("//pw_build:python.bzl", "pw_py_binary", "pw_py_library")
 
 package(default_visibility = ["//visibility:public"])
 
-py_library(
+pw_py_library(
     name = "pw_allocator",
     srcs = [
         "pw_allocator/__init__.py",
         "pw_allocator/benchmarks.py",
+        "pw_allocator/heap_viewer.py",
     ],
     imports = ["."],
     deps = [
         "//pw_cli/py:pw_cli",
+        "@pigweed_python_packages//coloredlogs",
     ],
 )
 

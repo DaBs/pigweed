@@ -35,6 +35,7 @@
 #include "pw_bluetooth_sapphire/internal/host/hci-spec/constants.h"
 #include "pw_bluetooth_sapphire/internal/host/hci-spec/defaults.h"
 #include "pw_bluetooth_sapphire/internal/host/hci-spec/util.h"
+#include "pw_bluetooth_sapphire/internal/host/hci/advertising_packet_filter.h"
 #include "pw_bluetooth_sapphire/internal/host/hci/fake_local_address_delegate.h"
 #include "pw_bluetooth_sapphire/internal/host/hci/legacy_low_energy_scanner.h"
 #include "pw_bluetooth_sapphire/internal/host/hci/low_energy_connection.h"
@@ -49,6 +50,7 @@
 #include "pw_bluetooth_sapphire/internal/host/testing/fake_controller.h"
 #include "pw_bluetooth_sapphire/internal/host/testing/fake_peer.h"
 #include "pw_bluetooth_sapphire/internal/host/testing/inspect.h"
+#include "pw_bluetooth_sapphire/internal/host/testing/test_packets.h"
 #include "pw_bluetooth_sapphire/internal/host/transport/fake_acl_connection.h"
 
 namespace bt::gap {
@@ -89,6 +91,12 @@ class LowEnergyConnectionManagerTest : public TestingBase {
   ~LowEnergyConnectionManagerTest() override = default;
 
  protected:
+  struct PeriodicAdvertisingSyncTransfer {
+    hci::SyncId sync_id;
+    hci_spec::ConnectionHandle connection_handle;
+    uint16_t service_data;
+  };
+
   void SetUp() override {
     TestingBase::SetUp();
 
@@ -115,7 +123,10 @@ class LowEnergyConnectionManagerTest : public TestingBase {
     gatt_ = std::make_unique<gatt::testing::FakeLayer>(dispatcher());
     sm_factory_ = std::make_unique<TestSmFactory>();
 
-    hci::LowEnergyScanner::PacketFilterConfig packet_filter_config(false, 0);
+    hci::AdvertisingPacketFilter::Config packet_filter_config(
+        false,
+        0,
+        hci::AdvertisingPacketFilter::Config::DeliveryMode::kImmediate);
 
     address_manager_ = std::make_unique<LowEnergyAddressManager>(
         kAdapterAddress,
@@ -129,6 +140,15 @@ class LowEnergyConnectionManagerTest : public TestingBase {
                                                       dispatcher());
     discovery_manager_ = std::make_unique<LowEnergyDiscoveryManager>(
         scanner_.get(), peer_cache_.get(), packet_filter_config, dispatcher());
+
+    PeriodicAdvertisingSyncManager::TransferSyncFn transfer_sync_fn =
+        [this](hci::SyncId sync_id,
+               hci_spec::ConnectionHandle handle,
+               uint16_t service_data,
+               auto) {
+          sync_transfers_.push_back({sync_id, handle, service_data});
+        };
+
     conn_mgr_ = std::make_unique<LowEnergyConnectionManager>(
         transport()->GetWeakPtr(),
         &addr_delegate_,
@@ -139,7 +159,9 @@ class LowEnergyConnectionManagerTest : public TestingBase {
         discovery_manager_->GetWeakPtr(),
         fit::bind_member<&TestSmFactory::CreateSm>(sm_factory_.get()),
         adapter_state_,
-        dispatcher());
+        dispatcher(),
+        lease_provider(),
+        std::move(transfer_sync_fn));
 
     test_device()->set_connection_state_callback(
         fit::bind_member<
@@ -186,6 +208,13 @@ class LowEnergyConnectionManagerTest : public TestingBase {
 
   TestSm::WeakPtr TestSmByHandle(hci_spec::ConnectionHandle handle) {
     return sm_factory_->GetTestSm(handle);
+  }
+
+  AdapterState& adapter_state() { return adapter_state_; }
+
+  const std::vector<PeriodicAdvertisingSyncTransfer>&
+  periodic_advertising_sync_transfers() const {
+    return sync_transfers_;
   }
 
  private:
@@ -251,6 +280,8 @@ class LowEnergyConnectionManagerTest : public TestingBase {
 
   PeerList connected_peers_;
   PeerList canceled_peers_;
+
+  std::vector<PeriodicAdvertisingSyncTransfer> sync_transfers_;
 
   BT_DISALLOW_COPY_AND_ASSIGN_ALLOW_MOVE(LowEnergyConnectionManagerTest);
 };
@@ -3867,6 +3898,10 @@ TEST_F(LowEnergyConnectionManagerTest, Inspect) {
       AllOf(NodeMatches(NameMatches("connections")),
             ChildrenMatch(::testing::IsEmpty()));
 
+  auto empty_last_disconnected_matcher =
+      AllOf(NodeMatches(NameMatches("last_disconnected")),
+            ChildrenMatch(::testing::IsEmpty()));
+
   auto conn_mgr_property_matcher = PropertyList(
       UnorderedElementsAre(UintIs("disconnect_explicit_disconnect_count", 0),
                            UintIs("disconnect_link_error_count", 0),
@@ -3878,13 +3913,13 @@ TEST_F(LowEnergyConnectionManagerTest, Inspect) {
                            UintIs("outgoing_connection_success_count", 0),
                            IntIs("recent_connection_failures", 0)));
 
-  auto conn_mgr_during_connecting_matcher =
-      AllOf(NodeMatches(AllOf(NameMatches("low_energy_connection_manager"),
-                              conn_mgr_property_matcher)),
-            ChildrenMatch(
-                UnorderedElementsAre(requests_matcher,
-                                     empty_connections_matcher,
-                                     outbound_connector_matcher_attempt_0)));
+  auto conn_mgr_during_connecting_matcher = AllOf(
+      NodeMatches(AllOf(NameMatches("low_energy_connection_manager"),
+                        conn_mgr_property_matcher)),
+      ChildrenMatch(UnorderedElementsAre(requests_matcher,
+                                         empty_connections_matcher,
+                                         outbound_connector_matcher_attempt_0,
+                                         empty_last_disconnected_matcher)));
 
   auto hierarchy = inspect::ReadFromVmo(inspector.DuplicateVmo());
   EXPECT_THAT(hierarchy.value(),
@@ -3902,7 +3937,8 @@ TEST_F(LowEnergyConnectionManagerTest, Inspect) {
             PropertyList(UnorderedElementsAre(
                 StringIs("peer_id", peer->identifier().ToString()),
                 StringIs("peer_address", peer->address().ToString()),
-                IntIs("ref_count", 1)))));
+                IntIs("ref_count", 1),
+                IntIs("@time", 0)))));
 
   auto connections_matcher = AllOf(NodeMatches(NameMatches("connections")),
                                    ChildrenMatch(ElementsAre(conn_matcher)));
@@ -3918,14 +3954,56 @@ TEST_F(LowEnergyConnectionManagerTest, Inspect) {
                            UintIs("outgoing_connection_success_count", 1),
                            IntIs("recent_connection_failures", 0)));
 
-  auto conn_mgr_after_connecting_matcher =
-      AllOf(NodeMatches(conn_mgr_property_matcher_after_connecting),
-            ChildrenMatch(UnorderedElementsAre(empty_requests_matcher,
-                                               connections_matcher)));
+  auto conn_mgr_after_connecting_matcher = AllOf(
+      NodeMatches(conn_mgr_property_matcher_after_connecting),
+      ChildrenMatch(UnorderedElementsAre(empty_requests_matcher,
+                                         connections_matcher,
+                                         empty_last_disconnected_matcher)));
 
   hierarchy = inspect::ReadFromVmo(inspector.DuplicateVmo());
   EXPECT_THAT(hierarchy.value(),
               ChildrenMatch(ElementsAre(conn_mgr_after_connecting_matcher)));
+
+  // Delay disconnect so connection has non-zero duration.
+  RunFor(std::chrono::seconds(1));
+  conn_handle.reset();
+  RunUntilIdle();
+
+  auto empty_connections_after_disconnect_matcher =
+      AllOf(NodeMatches(NameMatches("connections")),
+            ChildrenMatch(::testing::IsEmpty()));
+
+  auto last_disconnected_matcher =
+      AllOf(NodeMatches(NameMatches("last_disconnected")),
+            ChildrenMatch(ElementsAre(NodeMatches(
+                AllOf(NameMatches("0"),
+                      PropertyList(UnorderedElementsAre(
+                          StringIs("peer_id", peer->identifier().ToString()),
+                          IntIs("connected_@time", 0),
+                          IntIs("@time", 1'000'000'000),
+                          StringIs("reason", "zero ref"))))))));
+
+  auto conn_mgr_property_matcher_after_disconnect = PropertyList(
+      UnorderedElementsAre(UintIs("disconnect_explicit_disconnect_count", 0),
+                           UintIs("disconnect_link_error_count", 0),
+                           UintIs("disconnect_remote_disconnection_count", 0),
+                           UintIs("disconnect_zero_ref_count", 1),
+                           UintIs("incoming_connection_failure_count", 0),
+                           UintIs("incoming_connection_success_count", 0),
+                           UintIs("outgoing_connection_failure_count", 0),
+                           UintIs("outgoing_connection_success_count", 1),
+                           IntIs("recent_connection_failures", 0)));
+
+  auto conn_mgr_after_disconnect_matcher =
+      AllOf(NodeMatches(conn_mgr_property_matcher_after_disconnect),
+            ChildrenMatch(
+                UnorderedElementsAre(empty_requests_matcher,
+                                     empty_connections_after_disconnect_matcher,
+                                     last_disconnected_matcher)));
+
+  hierarchy = inspect::ReadFromVmo(inspector.DuplicateVmo());
+  EXPECT_THAT(hierarchy.value(),
+              ChildrenMatch(ElementsAre(conn_mgr_after_disconnect_matcher)));
 
   // LECM must be destroyed before the inspector to avoid a page fault on
   // destruction of inspect properties (they try to update the inspect VMO,
@@ -4609,6 +4687,120 @@ TEST_F(LowEnergyConnectionManagerTest, ConnectAndOpenL2capNonBondable) {
   EXPECT_TRUE(conn_handle->security().authenticated());
   EXPECT_TRUE(conn_handle->security().secure_connections());
   EXPECT_EQ(conn_handle->bondable_mode(), sm::BondableMode::NonBondable);
+}
+
+TEST_F(LowEnergyConnectionManagerTest,
+       IsoStreamManagerNotCreatedIfNotSupported) {
+  auto* peer = peer_cache()->NewPeer(kAddress0, /*connectable=*/true);
+  auto fake_peer = std::make_unique<FakePeer>(kAddress0, dispatcher());
+  test_device()->AddPeer(std::move(fake_peer));
+
+  std::unique_ptr<LowEnergyConnectionHandle> conn_handle;
+  auto callback = [&conn_handle](auto result) {
+    ASSERT_EQ(fit::ok(), result);
+    conn_handle = std::move(result).value();
+  };
+  conn_mgr()->Connect(peer->identifier(), callback, kConnectionOptions);
+  RunUntilIdle();
+  EXPECT_EQ(1u, connected_peers().size());
+  ASSERT_TRUE(conn_handle);
+
+  int reject_count = 0;
+  test_device()->set_le_cis_reject_callback(
+      [&](hci_spec::ConnectionHandle) { ++reject_count; });
+
+  // CIS request should not be rejected because there is no IsoStreamManager.
+  DynamicByteBuffer request_packet =
+      testing::LECisRequestEventPacket(conn_handle->handle(),
+                                       /*cis_connection_handle=*/5,
+                                       /*cig_id=*/6,
+                                       /*cis_id=*/7);
+  test_device()->SendCommandChannelPacket(request_packet);
+  RunUntilIdle();
+  EXPECT_EQ(reject_count, 0);
+}
+
+class LowEnergyConnectionManagerIsoSupportedTest
+    : public LowEnergyConnectionManagerTest,
+      public ::testing::WithParamInterface<hci_spec::LESupportedFeature> {
+ public:
+  void SetUp() override {
+    adapter_state().low_energy_state.set_supported_features(
+        static_cast<uint64_t>(GetParam()));
+    LowEnergyConnectionManagerTest::SetUp();
+  }
+};
+
+TEST_P(LowEnergyConnectionManagerIsoSupportedTest, IsoStreamManagerCreated) {
+  auto* peer = peer_cache()->NewPeer(kAddress0, /*connectable=*/true);
+  auto fake_peer = std::make_unique<FakePeer>(kAddress0, dispatcher());
+  test_device()->AddPeer(std::move(fake_peer));
+
+  std::unique_ptr<LowEnergyConnectionHandle> conn_handle;
+  auto callback = [&conn_handle](auto result) {
+    ASSERT_EQ(fit::ok(), result);
+    conn_handle = std::move(result).value();
+  };
+  conn_mgr()->Connect(peer->identifier(), callback, kConnectionOptions);
+  RunUntilIdle();
+  EXPECT_EQ(1u, connected_peers().size());
+  ASSERT_TRUE(conn_handle);
+
+  hci_spec::ConnectionHandle cis_handle = 5;
+  int reject_count = 0;
+  test_device()->set_le_cis_reject_callback(
+      [&](hci_spec::ConnectionHandle handle) {
+        ++reject_count;
+        EXPECT_EQ(handle, cis_handle);
+      });
+
+  // CIS request should be rejected.
+  DynamicByteBuffer request_packet =
+      testing::LECisRequestEventPacket(conn_handle->handle(),
+                                       /*cis_connection_handle=*/cis_handle,
+                                       /*cig_id=*/6,
+                                       /*cis_id=*/7);
+  test_device()->SendCommandChannelPacket(request_packet);
+  RunUntilIdle();
+  EXPECT_EQ(reject_count, 1);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    CisFeatureBits,
+    LowEnergyConnectionManagerIsoSupportedTest,
+    ::testing::Values(
+        hci_spec::LESupportedFeature::kConnectedIsochronousStreamPeripheral,
+        hci_spec::LESupportedFeature::kConnectedIsochronousStreamCentral));
+
+TEST_F(LowEnergyConnectionManagerTest, TransferPeriodicAdvertisingSync) {
+  auto* peer = peer_cache()->NewPeer(kAddress0, /*connectable=*/true);
+  EXPECT_TRUE(peer->temporary());
+  auto fake_peer = std::make_unique<FakePeer>(kAddress0, dispatcher());
+  test_device()->AddPeer(std::move(fake_peer));
+
+  std::unique_ptr<LowEnergyConnectionHandle> conn_handle;
+  auto callback = [&conn_handle](auto result) {
+    ASSERT_EQ(fit::ok(), result);
+    conn_handle = std::move(result).value();
+    EXPECT_TRUE(conn_handle->active());
+  };
+
+  EXPECT_TRUE(connected_peers().empty());
+  conn_mgr()->Connect(peer->identifier(), callback, kConnectionOptions);
+  RunUntilIdle();
+  EXPECT_EQ(1u, connected_peers().size());
+  ASSERT_TRUE(conn_handle);
+
+  const hci::SyncId kSyncId(1);
+  const uint16_t kServiceData = 0x0809;
+  conn_handle->TransferPeriodicAdvertisingSync(
+      kSyncId, kServiceData, [](auto) {});
+  ASSERT_EQ(periodic_advertising_sync_transfers().size(), 1u);
+  EXPECT_EQ(periodic_advertising_sync_transfers()[0].sync_id, kSyncId);
+  EXPECT_EQ(periodic_advertising_sync_transfers()[0].service_data,
+            kServiceData);
+  EXPECT_EQ(periodic_advertising_sync_transfers()[0].connection_handle,
+            conn_handle->handle());
 }
 
 }  // namespace

@@ -16,7 +16,6 @@ import("//build_overrides/pigweed.gni")
 
 import("$dir_pw_build/module_config.gni")
 import("$dir_pw_build/target_types.gni")
-import("$dir_pw_docgen/docs.gni")
 import("$dir_pw_unit_test/test.gni")
 
 declare_args() {
@@ -40,7 +39,7 @@ pw_source_set("config") {
   public = [ "public/pw_chrono_embos/config.h" ]
   public_configs = [ ":public_include_path" ]
   public_deps = [
-    "$dir_pw_third_party/embos",
+    "$pw_external_embos",
     dir_pw_polyfill,
     pw_chrono_embos_CONFIG,
   ]
@@ -61,7 +60,7 @@ pw_source_set("system_clock") {
     ":config",
     "$dir_pw_chrono:epoch",
     "$dir_pw_chrono:system_clock.facade",
-    "$dir_pw_third_party/embos",
+    "$pw_external_embos",
   ]
   sources = [ "system_clock.cc" ]
   deps = [
@@ -86,7 +85,7 @@ pw_source_set("system_timer") {
     "$dir_pw_chrono:system_clock",
     "$dir_pw_chrono:system_timer.facade",
     "$dir_pw_function",
-    "$dir_pw_third_party/embos",
+    "$pw_external_embos",
   ]
   deps = [
     "$dir_pw_assert",
@@ -95,10 +94,6 @@ pw_source_set("system_timer") {
   ]
   allow_circular_includes_from = [ "$dir_pw_chrono:system_timer.facade" ]
   sources = [ "system_timer.cc" ]
-}
-
-pw_doc_group("docs") {
-  sources = [ "docs.rst" ]
 }
 
 pw_test_group("tests") {

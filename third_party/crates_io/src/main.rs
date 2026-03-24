@@ -12,14 +12,12 @@
 // License for the specific language governing permissions and limitations under
 // the License.
 
-use std::{
-    collections::{HashMap, HashSet},
-    path::PathBuf,
-};
+use std::collections::{HashMap, HashSet};
+use std::fs;
+use std::path::PathBuf;
 
 use clap::Parser;
 use serde::Deserialize;
-use std::fs;
 
 mod aliases;
 
@@ -33,6 +31,8 @@ struct Args {
 pub struct Config {
     manifests: HashSet<String>,
     bazel_aliases: HashMap<String, Mapping>,
+    #[serde(default)]
+    extra_targets: HashMap<String, Vec<String>>,
 }
 
 #[derive(Deserialize)]

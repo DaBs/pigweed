@@ -58,6 +58,7 @@ pw_cc_test(
 pw_cc_test(
     name = "status_with_size_test",
     srcs = ["status_with_size_test.cc"],
+    features = ["-conversion_warnings"],
     deps = [":pw_status"],
 )
 
@@ -70,6 +71,7 @@ pw_cc_test(
 filegroup(
     name = "doxygen",
     srcs = [
+        "public/pw_status/internal/config.h",
         "public/pw_status/status.h",
         "public/pw_status/status_with_size.h",
         "public/pw_status/try.h",

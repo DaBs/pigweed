@@ -19,9 +19,12 @@
 
 #include "pw_allocator/config.h"
 #include "pw_allocator/internal/managed_ptr.h"
+#include "pw_allocator/layout.h"
 #include "pw_preprocessor/compiler.h"
 
 namespace pw {
+
+/// @submodule{pw_allocator,core}
 
 /// A `std::unique_ptr<T>`-like type that integrates with `pw::Deallocator`.
 ///
@@ -56,18 +59,54 @@ class UniquePtr : public ::pw::allocator::internal::ManagedPtr<T> {
     }
   }
 
+  // Not copyable.
+  UniquePtr(const UniquePtr&) = delete;
+  UniquePtr& operator=(const UniquePtr&) = delete;
+
   /// Creates an empty (`nullptr`) instance.
   ///
   /// NOTE: Instances of this type are most commonly constructed using
   /// `Allocator::MakeUnique`.
   constexpr UniquePtr(std::nullptr_t) noexcept : UniquePtr() {}
 
+  /// Constructs a `UniquePtr` from an already-allocated value.
+  ///
+  /// The deallocator MUST be able to deallocate the given `value`. Typically,
+  /// this implies it is the same object that allocated the value.
+  ///
+  /// This constructor "adopts" the value, that is, it assumes responsibility
+  /// for its lifetime. Callers should not access the value directly after this
+  /// call, and MUST not deallocate the value directly or pass it to another
+  /// managed pointer.
+  ///
+  /// NOTE: Instances of this type are most commonly constructed using
+  /// `MakeUnique`. Prefer that method when possible.
+  ///
+  /// @{
+  UniquePtr(element_type* value, Deallocator& deallocator)
+      : Base(value), deallocator_(&deallocator) {
+    static_assert(!allocator::internal::is_unbounded_array_v<T>,
+                  "UniquePtr for unbounded array type must provide size");
+    if constexpr (allocator::internal::is_bounded_array_v<T>) {
+      size_ = std::extent_v<T>;
+    }
+  }
+
+  UniquePtr(element_type* value, size_t size, Deallocator& deallocator)
+      : Base(value), size_(size), deallocator_(&deallocator) {
+    static_assert(
+        allocator::internal::is_unbounded_array_v<T>,
+        "UniquePtr must not provide size unless type is an unbounded array");
+  }
+  /// @}
+
   /// Move-constructs a `UniquePtr<T>` from a `UniquePtr<U>`.
   ///
   /// This allows not only pure move construction where `T == U`, but also
   /// converting construction where `T` is a base class of `U`, like
   /// `UniquePtr<Base> base(deallocator.MakeUnique<Child>());`.
-  template <typename U>
+  template <typename U,
+            typename = std::enable_if_t<std::is_assignable_v<T*&, U*>>>
   UniquePtr(UniquePtr<U>&& other) noexcept {
     *this = std::move(other);
   }
@@ -81,7 +120,8 @@ class UniquePtr : public ::pw::allocator::internal::ManagedPtr<T> {
   ///
   /// This allows not only pure move assignment where `T == U`, but also
   /// converting assignment where `T` is a base class of `U`.
-  template <typename U>
+  template <typename U,
+            typename = std::enable_if_t<std::is_assignable_v<T*&, U*>>>
   UniquePtr& operator=(UniquePtr<U>&& other) noexcept;
 
   /// Sets this `UniquePtr` to null, freeing any currently-held value.
@@ -89,6 +129,50 @@ class UniquePtr : public ::pw::allocator::internal::ManagedPtr<T> {
   /// After this function returns, this `UniquePtr` will be in an "empty"
   /// (`nullptr`) state until a new value is assigned.
   UniquePtr& operator=(std::nullptr_t) noexcept;
+
+  /// Explicit conversion operator for downcasting.
+  ///
+  /// If an arbitrary type `A` derives from another type `B`, a unique pointer
+  /// to `A` can be automatically upcast when moving to one of type `B`. This
+  /// operator performs the reverse operation with an explicit cast.
+  ///
+  /// @code{.cpp}
+  /// pw::UniquePtr<A> a1 = allocator.MakeUnique<A>();
+  /// pw::UniquePtr<B> b = std::move(a1);
+  /// pw::UniquePtr<A> a2 = static_cast<pw::UniquePtr<A>>(std::move(b));
+  /// @endcode
+  template <typename U,
+            typename = std::enable_if_t<std::is_assignable_v<T*&, U*>>>
+  constexpr explicit operator UniquePtr<U>() && {
+    Deallocator& deallocator = *deallocator_;
+    return UniquePtr<U>(static_cast<U*>(Release()), deallocator);
+  }
+
+  [[nodiscard]] friend constexpr bool operator==(const UniquePtr& lhs,
+                                                 std::nullptr_t) {
+    return lhs.Equals(nullptr);
+  }
+  [[nodiscard]] friend constexpr bool operator==(std::nullptr_t,
+                                                 const UniquePtr& rhs) {
+    return rhs.Equals(nullptr);
+  }
+  [[nodiscard]] friend constexpr bool operator==(const UniquePtr& lhs,
+                                                 const UniquePtr& rhs) {
+    return lhs.Equals(rhs) && lhs.control_block_ == rhs.control_block_;
+  }
+
+  [[nodiscard]] friend constexpr bool operator!=(const UniquePtr& lhs,
+                                                 std::nullptr_t) {
+    return !lhs.Equals(nullptr);
+  }
+  [[nodiscard]] friend constexpr bool operator!=(std::nullptr_t,
+                                                 const UniquePtr& rhs) {
+    return !rhs.Equals(nullptr);
+  }
+  [[nodiscard]] friend constexpr bool operator!=(const UniquePtr& lhs,
+                                                 const UniquePtr& rhs) {
+    return !(lhs == rhs);
+  }
 
   /// Returns the number of elements allocated.
   ///
@@ -125,28 +209,9 @@ class UniquePtr : public ::pw::allocator::internal::ManagedPtr<T> {
   template <typename>
   friend class UniquePtr;
 
-  /// Private constructor that is public only for use with `emplace` and
-  /// other in-place construction functions.
-  ///
-  /// Constructs a `UniquePtr` from an already-allocated value.
-  ///
-  /// NOTE: Instances of this type are most commonly constructed using
-  /// `Deallocator::MakeUnique`.
-  UniquePtr(element_type* value, Deallocator* deallocator)
-      : Base(value), deallocator_(deallocator) {}
-
-  /// Private constructor that is public only for use with `emplace` and
-  /// other in-place construction functions.
-  ///
-  /// Constructs a `UniquePtr` from an already-allocated value and size.
-  ///
-  /// NOTE: Instances of this type are most commonly constructed using
-  /// `Deallocator::MakeUnique`.
-  UniquePtr(element_type* value, size_t size, Deallocator* deallocator)
-      : Base(value), size_(size), deallocator_(deallocator) {}
-
   /// Copies details from another object without releasing it.
-  template <typename U>
+  template <typename U,
+            typename = std::enable_if_t<std::is_assignable_v<T*&, U*>>>
   void CopyFrom(const UniquePtr<U>& other);
 
   /// The number of elements allocated. This will not be present in the case
@@ -168,10 +233,12 @@ using UniquePtr = PW_ALLOCATOR_DEPRECATED ::pw::UniquePtr<T>;
 
 }  // namespace allocator
 
+/// @}
+
 // Template method implementations.
 
 template <typename T>
-template <typename U>
+template <typename U, typename>
 UniquePtr<T>& UniquePtr<T>::operator=(UniquePtr<U>&& other) noexcept {
   Reset();
   CopyFrom(other);
@@ -189,6 +256,9 @@ template <typename T>
 typename UniquePtr<T>::element_type* UniquePtr<T>::Release() noexcept {
   element_type* value = Base::Release();
   deallocator_ = nullptr;
+  if constexpr (std::is_array_v<T>) {
+    size_ = 0;
+  }
   return value;
 }
 
@@ -200,12 +270,14 @@ void UniquePtr<T>::Reset() noexcept {
   if (!Base::HasCapability(deallocator_, allocator::kSkipsDestroy)) {
     if constexpr (std::is_array_v<T>) {
       Base::Destroy(size_);
+      size_ = 0;
     } else {
       Base::Destroy();
     }
   }
   Deallocator* deallocator = deallocator_;
-  Base::Deallocate(deallocator, Release());
+  auto* ptr = const_cast<std::remove_const_t<element_type>*>(Release());
+  Base::Deallocate(deallocator, ptr);
 }
 
 template <typename T>
@@ -218,10 +290,13 @@ void UniquePtr<T>::Swap(UniquePtr<T>& other) {
 }
 
 template <typename T>
-template <typename U>
+template <typename U, typename>
 void UniquePtr<T>::CopyFrom(const UniquePtr<U>& other) {
+  static_assert(std::is_array_v<T> == std::is_array_v<U>);
   Base::CopyFrom(other);
-  size_ = other.size_;
+  if constexpr (std::is_array_v<T>) {
+    size_ = other.size_;
+  }
   deallocator_ = other.deallocator_;
 }
 

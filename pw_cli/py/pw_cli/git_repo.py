@@ -290,6 +290,18 @@ class GitRepo:
             self._git('log', '--format=%aI', '-n1', commit)
         )
 
+    def commit_files(self, commit: str = 'HEAD') -> list[str]:
+        """Returns the modified files of the specified commit.
+
+        Defaults to ``HEAD`` if no commit specified.
+
+        Returns:
+            List of file paths as strings.
+        """
+        return self._git(
+            'show', '--name-only', '--pretty=format:', commit
+        ).splitlines()
+
     def commit_hash(
         self,
         commit: str = 'HEAD',
@@ -324,12 +336,75 @@ class GitRepo:
         match = regex.search(message)
         return match.group(1) if match else None
 
+    def commit_issues(self, commit: str = 'HEAD') -> list[int] | None:
+        """Returns the Buganizer issues associated to a commit.
+
+        Defaults to ``HEAD`` if no commit specified.
+
+        Returns:
+            A list of Buganizer issues numbers as integers or ``None``.
+        """
+        lines = self.commit_message(commit).splitlines()
+        issues = []
+        for line in lines:
+            line = line.lower()
+            for prefix in ["bug:", "fixed:", "fixes:"]:
+                if not line.startswith(prefix):
+                    continue
+                value = line.replace(prefix, "").strip()
+                items = value.split(",") if "," in value else [value]
+                for item in items:
+                    item = item.strip()
+                    if "/" in item:
+                        tokens = item.split("/")
+                        index = len(tokens) - 1
+                        item = tokens[index]
+                    try:
+                        issue_number = int(item)
+                    except ValueError:
+                        continue
+                    issues.append(issue_number)
+        return issues if len(issues) > 0 else None
+
     def commit_parents(self, commit: str = 'HEAD') -> list[str]:
         args = ['log', '--pretty=%P', '-n', '1', commit]
         return self._git(*args).split()
 
+    def commit_review_url(self, commit: str = 'HEAD') -> str | None:
+        """Returns the Gerrit change review URL of the specified commit.
+
+        Defaults to ``HEAD`` if no commit specified.
+
+        Returns:
+            Review URL as a string, or ``None`` if it does not exist.
+        """
+        message = self.commit_message(commit)
+        regex = re.compile(
+            'Reviewed-on: (.*)',
+            re.MULTILINE,
+        )
+        match = regex.search(message)
+        return match.group(1) if match else None
+
+    def commits(self, start: datetime, end: datetime | None) -> list[str]:
+        """Returns the commits that occurred in the specified time frame."""
+        date_format = "%Y-%m-%dT%H:%M:%S"
+        start_formatted = start.strftime(date_format)
+        args = [
+            'log',
+            '--pretty=format:%h',
+            '--since={}'.format(start_formatted),
+        ]
+        if end is not None:
+            end_formatted = end.strftime(date_format)
+            args.append('--until={}'.format(end_formatted))
+        return self._git(*args).split()
+
     def diff(self, *args) -> str:
         return self._git('diff', *args)
+
+    def show(self, *args) -> str:
+        return self._git('show', *args)
 
 
 class GitRepoFinder:
@@ -463,7 +538,7 @@ def find_git_repo(path_in_repo: Path, tool_runner: ToolRunner) -> GitRepo:
         GitError: The specified path does not live in a Git repository.
 
     Returns:
-        A GitRepo representing the the enclosing repository that tracks the
+        A GitRepo representing the enclosing repository that tracks the
         specified file or folder.
     """
     git_tool = _GitTool(

@@ -6,28 +6,30 @@ Projects
 .. pigweed-module-subpage::
    :name: pw_ide
 
-There are broadly two types of Pigweed projects that Pigweed's IDE tooling
-supports:
+Pigweed projects support :ref:`multiple build systems
+<docs-build-systems-overview>` and two methods of providing toolchains and a
+hermetic developer environment:
 
-* Bootstrap projects, in which a development environment is populated by
-  sourcing binary dependencies from CIPD, and is accessed by setting environment
-  variables via ``bootstrap`` and ``activate`` shell scripts. Usually, the build
-  system is GN or CMake.
-
-* Bazel projects, in which Bazel is the build system, Bazel manages development
+* **Bazel**, in which Bazel is the build system, Bazel manages development
   environment dependencies, and the ``bazel`` (or ``bazelisk``) command is the
   entry point into all tooling
 
-Other project configurations are possible, but these are the two that our IDE
-tooling recognizes and supports.
+* **Bootstrap**, in which a development environment is populated by sourcing
+  binary dependencies from CIPD, and is accessed by setting environment
+  variables via ``bootstrap`` and ``activate`` shell scripts. Usually, the build
+  system is GN or CMake.
+
+Pigweed IDE supports either or both of these in a project. For example, Pigweed
+itself has a GN build, supported by Bootstrap tooling, as well as a Bazel build,
+supported by Bazel tooling. Pigweed IDE will provide code intelligence for both.
 
 .. _module-pw_ide-design-projects-project-root:
 
 -----------------
 Project structure
 -----------------
-For both project types, we look for the presence of a ``pigweed.json`` file to
-indicate the root of the project directory.
+Pigweed IDE looks for the presence of a ``pigweed.json`` file to indicate the
+root of the project directory.
 
 .. _module-pw_ide-design-projects-bootstrap:
 
@@ -89,12 +91,11 @@ Bazel projects
 ==============
 This project structure has the following properties:
 
-* Development tools and dependences are managed by Bazel. There are multiple
-  mechanisms for this, including
-  `WORKSPACE <https://bazel.build/concepts/build-ref#workspace>`_ and
-  `bzlmod <https://docs.bazel.build/versions/5.1.0/bzlmod.html>`_. Regardless of
-  the mechanism used, Bazel manages the tools and dependencies, and their
-  location on disk.
+* Development tools and dependencies are managed by Bazel.
+  `bzlmod <https://docs.bazel.build/versions/5.1.0/bzlmod.html>`_ uses a few
+  forms of version resolution to ensure all tooling and external resources are
+  available when they're needed. Regardless of the mechanism used, Bazel manages
+  the tools and dependencies, and their location on disk.
 
 * The Bazel environment is created and updated by running a Bazel build command.
 

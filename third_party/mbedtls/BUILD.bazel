@@ -13,24 +13,55 @@
 # the License.
 
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
+load("//pw_build:compatibility.bzl", "incompatible_with_mcu")
 
 package(
     default_visibility = ["//visibility:public"],
 )
 
-# Config targets.
-cc_library(
+alias(
     name = "default_config",
+    actual = select({
+        # If not using a big OS, use the default MCU config.
+        "@platforms//os:none": "//third_party/mbedtls:mcu_config",
+        "//conditions:default": "//third_party/mbedtls:host_config",
+    }),
+)
+
+cc_library(
+    name = "mcu_config",
     hdrs = [
-        "configs/config_default.h",
+        "configs/config_pigweed.h",
+    ],
+    defines = [
+        "MBEDTLS_CONFIG_FILE='\"config_pigweed.h\"'",
+    ],
+    strip_include_prefix = "configs",
+    tags = ["noclangtidy"],
+)
+
+cc_library(
+    name = "host_config",
+    hdrs = [
+        "configs/config_pigweed.h",
+        "configs/config_pigweed_host.h",
+    ],
+    defines = [
+        "MBEDTLS_CONFIG_FILE='\"config_pigweed_host.h\"'",
+    ],
+    strip_include_prefix = "configs",
+    tags = ["noclangtidy"],
+    target_compatible_with = incompatible_with_mcu(),
+)
+
+cc_library(
+    name = "pigweed_deprecated_mbedtls_config",
+    hdrs = [
         "configs/config_pigweed_common.h",
     ],
     defines = [
-        'MBEDTLS_CONFIG_FILE=\\"configs/config_default.h\\"',
-    ] + select({
-        "@platforms//os:none": [],
-        "//conditions:default": ["_PW_MBEDTLS_IS_HOST=1"],
-    }),
-    strip_include_prefix = ".",
+        "MBEDTLS_CONFIG_FILE='\"config_pigweed_common.h\"'",
+    ],
+    strip_include_prefix = "configs",
     tags = ["noclangtidy"],
 )

@@ -22,9 +22,12 @@
 
 #include "pw_polyfill/static_assert.h"
 
-/// @defgroup pw_preprocessor_internal
+/// @module{pw_preprocessor}
 
-/// @defgroup pw_preprocessor_compiler
+/// @defgroup pw_preprocessor_internal Internal
+/// @{
+
+/// @defgroup pw_preprocessor_compiler Compiler
 /// @{
 
 /// Marks a struct or class as packed.
@@ -87,13 +90,13 @@
   __attribute__((format(_PW_PRINTF_FORMAT_TYPE, format_index, parameter_index)))
 
 /// When compiling for host using MinGW, use gnu_printf() rather than printf()
-/// to support %z format specifiers.
+/// to support %z format specifiers only if available (non-clang compilers).
 /// @ingroup pw_preprocessor_internal
-#ifdef __USE_MINGW_ANSI_STDIO
+#if defined(__USE_MINGW_ANSI_STDIO) && !defined(__clang__)
 #define _PW_PRINTF_FORMAT_TYPE gnu_printf
 #else
 #define _PW_PRINTF_FORMAT_TYPE printf
-#endif  // __USE_MINGW_ANSI_STDIO
+#endif  // defined(__USE_MINGW_ANSI_STDIO) && !defined(__clang__)
 
 /// Places a variable in the specified linker section.
 #ifdef __APPLE__
@@ -269,39 +272,6 @@
 #else
 #define PW_ATTRIBUTE_LIFETIME_BOUND
 #endif  // PW_ATTRIBUTE_LIFETIME_BOUND
-
-/// `PW_ADD_OVERFLOW` adds two integers while checking for overflow.
-///
-/// Returns true if the result of `a + b` overflows the type of `out`; otherwise
-/// stores the result in `out` and returns false.
-///
-/// It's recommended to use @cpp_func{pw::CheckedAdd} or
-/// @cpp_func{pw::CheckedIncrement} instead.
-///
-/// See also `PW_CHECK_ADD`.
-#define PW_ADD_OVERFLOW(a, b, out) __builtin_add_overflow(a, b, out)
-
-/// `PW_SUB_OVERFLOW` subtracts an integer from another while checking for
-/// overflow.
-///
-/// Returns true if the result of `a - b` overflows the type of `out`; otherwise
-/// stores the result in `out` and returns false.
-///
-/// It's recommended to use @cpp_func{pw::CheckedSub} or
-/// @cpp_func{pw::CheckedDecrement} instead.
-///
-/// See also `PW_CHECK_SUB`.
-#define PW_SUB_OVERFLOW(a, b, out) __builtin_sub_overflow(a, b, out)
-
-/// `PW_MUL_OVERFLOW` multiplies two integers while checking for overflow.
-///
-/// Returns true if the result of `a * b` overflows the type of `out`; otherwise
-/// stores the result in `out` and returns false.
-///
-/// It's recommended to use @cpp_func{pw::CheckedMul} instead.
-///
-/// See also `PW_CHECK_MUL`.
-#define PW_MUL_OVERFLOW(a, b, out) __builtin_mul_overflow(a, b, out)
 
 /// Evaluates to 1 if `__VA_OPT__` is supported, regardless of the C or C++
 /// standard in use.

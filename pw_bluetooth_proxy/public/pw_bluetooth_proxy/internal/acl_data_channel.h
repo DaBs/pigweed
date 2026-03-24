@@ -18,18 +18,14 @@
 
 #include "pw_bluetooth/hci_data.emb.h"
 #include "pw_bluetooth/hci_events.emb.h"
+#include "pw_bluetooth_proxy/direction.h"
 #include "pw_bluetooth_proxy/internal/hci_transport.h"
-#include "pw_bluetooth_proxy/internal/l2cap_aclu_signaling_channel.h"
-#include "pw_bluetooth_proxy/internal/l2cap_leu_signaling_channel.h"
-#include "pw_bluetooth_proxy/internal/l2cap_signaling_channel.h"
 #include "pw_bluetooth_proxy/internal/logical_transport.h"
-#include "pw_bluetooth_proxy/internal/multibuf_writer.h"
+#include "pw_bluetooth_proxy/internal/mutex.h"
+#include "pw_containers/intrusive_map.h"
 #include "pw_containers/vector.h"
-#include "pw_multibuf/allocator.h"
 #include "pw_multibuf/multibuf.h"
-#include "pw_result/result.h"
 #include "pw_sync/lock_annotations.h"
-#include "pw_sync/mutex.h"
 
 namespace pw::bluetooth::proxy {
 
@@ -41,15 +37,30 @@ namespace pw::bluetooth::proxy {
 // buffers.
 class AclDataChannel {
  public:
-  // Direction a packet is traveling on ACL transport.
-  enum class Direction : bool {
-    kFromController,
-    kFromHost,
-  };
-  // Must match the number of Direction enumerators.
-  static constexpr size_t kNumDirections = 2;
+  /// The delegate interface for an ACL connection. This is implemented by
+  /// L2capLogicalLink.
+  class ConnectionDelegate
+      : public IntrusiveMap<uint16_t, ConnectionDelegate>::Item {
+   public:
+    struct HandleAclDataReturn {
+      /// True if the packet was consumed and should not be forwarded.
+      bool handled;
+      /// If this ACL packet was the last fragment of a fragmented PDU, an ACL
+      /// packet containing the recombined PDU should be returned if it was not
+      /// consumed and needs to be forwarded.
+      std::optional<multibuf::MultiBuf> recombined_buffer;
+    };
 
-  static const char* ToString(Direction direction);
+    virtual ~ConnectionDelegate() = default;
+
+    /// Called by AclDataChannel when an ACL packet for this connection is sent
+    /// from the host or received from the controller.
+    virtual HandleAclDataReturn HandleAclData(
+        Direction direction, emboss::AclDataFrameWriter& acl) = 0;
+
+    // The connection handle.
+    virtual uint16_t key() const = 0;
+  };
 
   // Used to `SendAcl` packets.
   class SendCredit {
@@ -79,18 +90,24 @@ class AclDataChannel {
   };
 
   AclDataChannel(HciTransport& hci_transport,
-                 L2capChannelManager& l2cap_channel_manager,
                  uint16_t le_acl_credits_to_reserve,
-                 uint16_t br_edr_acl_credits_to_reserve)
+                 uint16_t br_edr_acl_credits_to_reserve,
+                 Closure on_tx_credits_fn)
       : hci_transport_(hci_transport),
-        l2cap_channel_manager_(l2cap_channel_manager),
         le_credits_(le_acl_credits_to_reserve),
-        br_edr_credits_(br_edr_acl_credits_to_reserve) {}
+        br_edr_credits_(br_edr_acl_credits_to_reserve),
+        on_tx_credits_fn_(std::move(on_tx_credits_fn)) {}
 
   AclDataChannel(const AclDataChannel&) = delete;
   AclDataChannel& operator=(const AclDataChannel&) = delete;
   AclDataChannel(AclDataChannel&&) = delete;
   AclDataChannel& operator=(AclDataChannel&&) = delete;
+
+  // Handle HCI ACL data packet from the controller.
+  void HandleAclFromController(H4PacketWithHci&& h4_packet);
+
+  // Handle HCI ACL data packet from the host.
+  void HandleAclFromHost(H4PacketWithH4&& h4_packet);
 
   // Returns the max number of active ACL connections supported.
   static constexpr size_t GetMaxNumAclConnections() { return kMaxConnections; }
@@ -98,6 +115,16 @@ class AclDataChannel {
   // Revert to uninitialized state, clearing credit reservation and connections,
   // but not the number of credits to reserve nor HCI transport.
   void Reset();
+
+  /// Registers a connection delegate.
+  /// @returns `OkStatus()` on success. On failure returns:
+  /// * @ALREADY_EXISTS: A delegate is already registered for the connection.
+  Status RegisterConnection(ConnectionDelegate& delegate);
+
+  /// Unregisters a connection delegate.
+  /// @returns `OkStatus()` on success. On failure returns:
+  /// * @NOT_FOUND: The delegate was not found.
+  Status UnregisterConnection(ConnectionDelegate& delegate);
 
   void ProcessReadBufferSizeCommandCompleteEvent(
       emboss::ReadBufferSizeCommandCompleteEventWriter read_buffer_event);
@@ -118,22 +145,13 @@ class AclDataChannel {
   // credits that are associated with our credit-allocated connections.
   void HandleNumberOfCompletedPacketsEvent(H4PacketWithHci&& h4_packet);
 
-  // Reclaim any credits we have associated with the removed connection and
-  // notify `L2capChannelManager` of disconnection. This function just processes
-  // the event; it does not handle forwarding it on.
-  void ProcessDisconnectionCompleteEvent(pw::span<uint8_t> hci_span);
+  // Reclaim any credits we have associated with the removed connection.
+  void ProcessDisconnectionCompleteEvent(uint16_t connection_handle,
+                                         emboss::StatusCode reason);
 
-  // Create new tracked connection and pass on to host.
-  void HandleConnectionCompleteEvent(H4PacketWithHci&& h4_packet);
-
-  // Create new tracked connection and pass on to host.
-  void HandleLeConnectionCompleteEvent(H4PacketWithHci&& h4_packet);
-
-  // Create new tracked connection and pass on to host.
-  void HandleLeEnhancedConnectionCompleteV1Event(H4PacketWithHci&& h4_packet);
-
-  // Create new tracked connection and pass on to host.
-  void HandleLeEnhancedConnectionCompleteV2Event(H4PacketWithHci&& h4_packet);
+  // Create new tracked connection.
+  void HandleConnectionCompleteEvent(uint16_t connection_handle,
+                                     AclTransportType transport);
 
   /// Indicates whether the proxy has the capability of sending ACL packets.
   /// Note that this indicates intention, so it can be true even if the proxy
@@ -173,27 +191,28 @@ class AclDataChannel {
   pw::Status CreateAclConnection(uint16_t connection_handle,
                                  AclTransportType transport);
 
-  // Returns the signaling channel for this link if `connection_handle`
-  // references a tracked connection and `local_cid` matches its id.
-  L2capSignalingChannel* FindSignalingChannel(uint16_t connection_handle,
-                                              uint16_t local_cid);
+  // Returns the max ACL payload size if the Read Buffer Size command complete
+  // event was received.
+  std::optional<uint16_t> MaxDataPacketLengthForTransport(
+      AclTransportType transport) const;
 
-  // Handles an ACL Data frame.
-  // Returns true if the frame was handled and is consumed by the proxy.
-  // Returns false if the frame should be passed on to the other side.
-  bool HandleAclData(AclDataChannel::Direction direction,
-                     emboss::AclDataFrameWriter& acl);
+  // Returns true if an ACL connection exists with the handle
+  // `connection_handle`.
+  bool HasAclConnection(uint16_t connection_handle);
 
  private:
+  /// Source of an ACL packet sent to the controller.
+  enum class PacketSource : uint8_t {
+    /// Packet was sent from the host (and passed through by proxy).
+    kHost,
+    /// Packet was sent by the proxy.
+    kProxy,
+  };
+
   // An active logical link on ACL logical transport.
-  // TODO: https://pwbug.dev/360929142 - Encapsulate all logic related to this
-  // within a new LogicalLinkManager class?
   class AclConnection {
    public:
-    AclConnection(AclTransportType transport,
-                  uint16_t connection_handle,
-                  uint16_t num_pending_packets,
-                  L2capChannelManager& l2cap_channel_manager);
+    AclConnection(AclTransportType transport, uint16_t connection_handle);
 
     AclConnection(const AclConnection&) = delete;
     AclConnection& operator=(const AclConnection&) = delete;
@@ -202,76 +221,29 @@ class AclDataChannel {
 
     uint16_t connection_handle() const { return connection_handle_; }
 
-    uint16_t num_pending_packets() const { return num_pending_packets_; }
+    uint16_t num_proxy_pending_packets() const {
+      return num_proxy_pending_packets_;
+    }
+
+    uint16_t num_host_pending_packets() const {
+      return num_host_pending_packets_;
+    }
 
     AclTransportType transport() const { return transport_; }
 
-    void set_num_pending_packets(uint16_t new_val) {
-      num_pending_packets_ = new_val;
-    }
+    /// Record a packet being sent to the controller.
+    void RecordPacket(PacketSource source);
 
-    L2capSignalingChannel* signaling_channel() {
-      if (transport_ == AclTransportType::kLe) {
-        return &leu_signaling_channel_;
-      } else {
-        return &aclu_signaling_channel_;
-      }
-    }
-
-    // Returns true if recombination is active
-    // (currently receiving and recombining fragments).
-    bool RecombinationActive(Direction direction) {
-      return bool(get_recombination_buffer(direction));
-    }
-
-    // Starts a new recombination session.
-    //
-    // Precondition: Recombination must not already be active
-    // (RecombinationActive must be false).
-    //
-    // Returns:
-    // * FAILED_PRECONDITION if recombination is already active.
-    // * Any error from MultiBufWriter::Create(), namely RESOURCE_EXHAUSTED.
-    // * OK if recombination is started.
-    pw::Status StartRecombination(
-        Direction direction,
-        multibuf::MultiBufAllocator& multibuf_allocator,
-        size_t size);
-
-    // Adds a fragment of data to the recombination buffer.
-    //
-    // Precondition: Recombination must be active
-    // (RecombinationActive must be true).
-    //
-    // Returns:
-    // * FAILED_PRECONDITION if recombination is not active.
-    // * Any error from MultiBufWriter::Write(), namely RESOURCE_EXHAUSTED.
-    // * OK if the data was written, with value:
-    //   * If recombination is incomplete, returns an empty MultiBuf.
-    //   * If recombination is complete, returns a nonempty MultiBuf with the
-    //     recombined data and ends recombination.
-    pw::Result<multibuf::MultiBuf> RecombineFragment(
-        Direction direction, pw::span<const uint8_t> data);
-
-    // Ends recombination.
-    void EndRecombination(Direction direction);
+    /// Reclaim a credit for a packet that has completed.
+    /// This will decide whether to give the credit to the host or proxy.
+    PacketSource ReclaimCredit();
 
    private:
     AclTransportType transport_;
     uint16_t connection_handle_;
-    uint16_t num_pending_packets_;
-    L2capLeUSignalingChannel leu_signaling_channel_;
-    // TODO: https://pwbug.dev/379172336 - Create correct signaling channel
-    // type based on link type.
-    L2capAclUSignalingChannel aclu_signaling_channel_;
-
-    std::array<std::optional<MultiBufWriter>, kNumDirections>
-        recombination_buffers_;
-
-    MultiBufWriter* get_recombination_buffer(Direction direction) {
-      auto& recomb = recombination_buffers_[cpp23::to_underlying(direction)];
-      return recomb ? recomb.operator->() : nullptr;
-    }
+    uint16_t num_proxy_pending_packets_ = 0;
+    uint16_t num_host_pending_packets_ = 0;
+    PacketSource last_reclaimed_ = PacketSource::kProxy;
   };
 
   class Credits {
@@ -303,6 +275,8 @@ class AclDataChannel {
     // If this class has already had credits reserved from the controller.
     bool Initialized() const { return proxy_max_ > 0; }
 
+    uint16_t controller_max_packets() const { return controller_max_packets_; }
+
    private:
     const uint16_t to_reserve_;
     // The local number of HCI ACL Data packets that we have reserved for
@@ -311,23 +285,30 @@ class AclDataChannel {
     // The number of HCI ACL Data packets that we have sent to the controller
     // and have not yet completed.
     uint16_t proxy_pending_ = 0;
+    // The maximum number of HCI ACL Data packets the controller can hold.
+    uint16_t controller_max_packets_ = 0;
   };
+
+  // Handles an ACL Data frame.
+  // Returns true if the frame was handled and is consumed by the proxy.
+  // Returns false if the frame should be passed on to the other side.
+  bool HandleAclData(Direction direction, pw::span<uint8_t> buffer);
+
+  // Guards interactions with ACL connection objects.
+  mutable internal::Mutex connection_mutex_ PW_ACQUIRED_BEFORE(credit_mutex_);
 
   // Returns pointer to AclConnection with provided `connection_handle` in
   // `acl_connections_`. Returns nullptr if no such connection exists.
   //
   // Pointer is assured valid only as long as `mutex_` is held.
   AclConnection* FindAclConnection(uint16_t connection_handle)
-      PW_EXCLUSIVE_LOCKS_REQUIRED(mutex_);
+      PW_EXCLUSIVE_LOCKS_REQUIRED(connection_mutex_);
 
   Credits& LookupCredits(AclTransportType transport)
-      PW_EXCLUSIVE_LOCKS_REQUIRED(mutex_);
+      PW_EXCLUSIVE_LOCKS_REQUIRED(credit_mutex_);
 
   const Credits& LookupCredits(AclTransportType transport) const
-      PW_EXCLUSIVE_LOCKS_REQUIRED(mutex_);
-
-  void HandleLeConnectionCompleteEvent(uint16_t connection_handle,
-                                       emboss::StatusCode status);
+      PW_EXCLUSIVE_LOCKS_REQUIRED(credit_mutex_);
 
   // Data members
 
@@ -338,19 +319,30 @@ class AclDataChannel {
   // Reference to the transport owned by the host.
   HciTransport& hci_transport_;
 
-  // TODO: https://pwbug.dev/360929142 - Remove this circular dependency.
-  L2capChannelManager& l2cap_channel_manager_;
-
   // Credit allocation will happen inside a mutex since it crosses thread
-  // boundaries. The mutex also guards interactions with ACL connection objects.
-  mutable pw::sync::Mutex mutex_;
+  // boundaries.
+  mutable internal::Mutex credit_mutex_ PW_ACQUIRED_AFTER(connection_mutex_);
 
-  Credits le_credits_ PW_GUARDED_BY(mutex_);
-  Credits br_edr_credits_ PW_GUARDED_BY(mutex_);
+  Credits le_credits_ PW_GUARDED_BY(credit_mutex_);
+  Credits br_edr_credits_ PW_GUARDED_BY(credit_mutex_);
+
+  std::optional<uint16_t> max_acl_data_packet_length_
+      PW_GUARDED_BY(credit_mutex_);
+  std::optional<uint16_t> max_le_acl_data_packet_length_
+      PW_GUARDED_BY(credit_mutex_);
 
   // List of credit-allocated ACL connections.
   pw::Vector<AclConnection, kMaxConnections> acl_connections_
-      PW_GUARDED_BY(mutex_);
+      PW_GUARDED_BY(connection_mutex_);
+
+  // This separate mutex is required because the delegate may call SendAcl() and
+  // acquire the connection_mutex_ inside of delegate callbacks.
+  internal::Mutex delegates_mutex_ PW_ACQUIRED_BEFORE(connection_mutex_);
+  IntrusiveMap<uint16_t, ConnectionDelegate> connection_delegates_
+      PW_GUARDED_BY(delegates_mutex_);
+
+  // Called after ACL TX credits are received.
+  const Closure on_tx_credits_fn_;
 
   // Instantiated in acl_data_channel.cc for
   // `emboss::LEReadBufferSizeV1CommandCompleteEventWriter` and

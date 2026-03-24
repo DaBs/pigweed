@@ -29,15 +29,24 @@ namespace pw::uart {
 
 // Deinitialize the DMA channels and USART.
 void DmaUartMcuxpressoNonBlocking::Deinit() {
+  std::lock_guard lock(interrupt_lock_);
+
   if (!initialized_) {
     return;
   }
+
+  DoCancelWriteLockHeld();
+  DoCancelFlushOutputLockHeld();
+
+  DoCancelReadLockHeld();
+  // Cancel read into ring buffer as DoCancelRead starts it again.
+  USART_TransferAbortReceiveDMA(config_.usart_base, &uart_dma_handle_);
 
   config_.tx_dma_ch.Disable();
   config_.rx_dma_ch.Disable();
 
   USART_Deinit(config_.usart_base);
-  clock_tree_element_controller_.Release().IgnoreError();
+  clock_tree_element_.Release().IgnoreError();
   initialized_ = false;
 }
 
@@ -46,6 +55,13 @@ DmaUartMcuxpressoNonBlocking::~DmaUartMcuxpressoNonBlocking() { Deinit(); }
 // Initialize the USART and DMA channels based on the configuration
 // specified during object creation.
 Status DmaUartMcuxpressoNonBlocking::Init() {
+  {
+    std::lock_guard lock(interrupt_lock_);
+    if (initialized_) {
+      return Status::FailedPrecondition();
+    }
+  }
+
   if (config_.usart_base == nullptr) {
     return Status::InvalidArgument();
   }
@@ -62,13 +78,13 @@ Status DmaUartMcuxpressoNonBlocking::Init() {
   defconfig.enableTx = true;
   defconfig.enableRx = true;
 
-  PW_TRY(clock_tree_element_controller_.Acquire());
+  PW_TRY(clock_tree_element_.Acquire());
   flexcomm_clock_freq_ =
       CLOCK_GetFlexcommClkFreq(FLEXCOMM_GetInstance(config_.usart_base));
   status_t status =
       USART_Init(config_.usart_base, &defconfig, flexcomm_clock_freq_);
   if (status != kStatus_Success) {
-    clock_tree_element_controller_.Release().IgnoreError();
+    clock_tree_element_.Release().IgnoreError();
     return Status::Internal();
   }
 
@@ -78,6 +94,7 @@ Status DmaUartMcuxpressoNonBlocking::Init() {
   rx_data_.data_copied = 0;
   rx_data_.ring_buffer_read_idx = 0;
   rx_data_.ring_buffer_write_idx = 0;
+  rx_data_.data_loss = false;
 
   {
     // We need exclusive access to INPUTMUX registers, as it is used by many DMA
@@ -92,13 +109,13 @@ Status DmaUartMcuxpressoNonBlocking::Init() {
     INPUTMUX_EnableSignal(
         INPUTMUX, config_.tx_input_mux_dmac_ch_request_en, true);
     INPUTMUX_Deinit(INPUTMUX);
+
+    config_.tx_dma_ch.Enable();
+    config_.rx_dma_ch.Enable();
+
+    // Initialized enough for Deinit code to handle any errors from here.
+    initialized_ = true;
   }
-
-  config_.tx_dma_ch.Enable();
-  config_.rx_dma_ch.Enable();
-
-  // Initialized enough for Deinit code to handle any errors from here.
-  initialized_ = true;
 
   status = USART_TransferCreateHandleDMA(config_.usart_base,
                                          &uart_dma_handle_,
@@ -127,8 +144,11 @@ Status DmaUartMcuxpressoNonBlocking::Init() {
 }
 
 Status DmaUartMcuxpressoNonBlocking::DoEnable(bool enable) {
-  if (enable == initialized_) {
-    return OkStatus();
+  {
+    std::lock_guard lock(interrupt_lock_);
+    if (enable == initialized_) {
+      return OkStatus();
+    }
   }
 
   if (enable) {
@@ -169,8 +189,11 @@ void DmaUartMcuxpressoNonBlocking::TriggerReadDmaIntoRingBuffer() {
                rx_data_.ring_buffer_write_idx + rx_data_.transfer.dataSize,
                rx_data_.transfer.dataSize);
 
-  USART_TransferReceiveDMA(
-      config_.usart_base, &uart_dma_handle_, &rx_data_.transfer);
+  // This should only fail if we try and start a transfer when already started,
+  // which would be a bug in this driver.
+  PW_CHECK(USART_TransferReceiveDMA(config_.usart_base,
+                                    &uart_dma_handle_,
+                                    &rx_data_.transfer) == kStatus_Success);
 }
 
 // Trigger a RX DMA into the user buffer.
@@ -192,8 +215,11 @@ void DmaUartMcuxpressoNonBlocking::TriggerReadDmaIntoUserBuffer() {
                rx_data_.request.write_idx + rx_data_.transfer.dataSize,
                rx_data_.transfer.dataSize);
 
-  USART_TransferReceiveDMA(
-      config_.usart_base, &uart_dma_handle_, &rx_data_.transfer);
+  // This should only fail if we try and start a transfer when already started,
+  // which would be a bug in this driver.
+  PW_CHECK(USART_TransferReceiveDMA(config_.usart_base,
+                                    &uart_dma_handle_,
+                                    &rx_data_.transfer) == kStatus_Success);
 }
 
 // Trigger a TX DMA from the user's buffer.
@@ -208,8 +234,11 @@ void DmaUartMcuxpressoNonBlocking::TriggerWriteDma() {
   tx_data_.transfer.dataSize =
       std::min(bytes_remaining, kUsartDmaMaxTransferCount);
 
-  USART_TransferSendDMA(
-      config_.usart_base, &uart_dma_handle_, &tx_data_.transfer);
+  // This should only fail if we try and start a transfer when already started,
+  // which would be a bug in this driver.
+  PW_CHECK(USART_TransferSendDMA(config_.usart_base,
+                                 &uart_dma_handle_,
+                                 &tx_data_.transfer) == kStatus_Success);
 }
 
 // Clear the RX DMA idle interrupt flag and returns whether the flag was set.
@@ -256,6 +285,16 @@ Status DmaUartMcuxpressoNonBlocking::DoRead(
   // We must grab the interrupt lock before reading the `valid` flag to avoid
   // racing with `TxRxCompletionCallback()`.
   std::lock_guard lock(interrupt_lock_);
+
+  if (!initialized_) {
+    return Status::FailedPrecondition();
+  }
+
+  // Has the ring buffer overflowed?
+  if (rx_data_.data_loss) {
+    PW_TRY(DoClearPendingReceiveBytesLockHeld());
+    return Status::DataLoss();
+  }
 
   if (rx_data_.request.valid) {
     return Status::Unavailable();
@@ -430,6 +469,10 @@ Status DmaUartMcuxpressoNonBlocking::DoWrite(
 
   std::lock_guard lock(interrupt_lock_);
 
+  if (!initialized_) {
+    return Status::FailedPrecondition();
+  }
+
   if (tx_data_.request.valid) {
     return Status::Unavailable();
   }
@@ -483,8 +526,11 @@ void DmaUartMcuxpressoNonBlocking::HandleCompletedRxIntoRingBuffer() {
   rx_data_.ring_buffer_write_idx += rx_data_.transfer.dataSize;
   rx_data_.data_received += rx_data_.transfer.dataSize;
 
-  PW_DCHECK_UINT_LE(rx_data_.data_received - rx_data_.data_copied,
-                    rx_data_.ring_buffer.size_bytes());
+  // Has the ring buffer overflowed?
+  if (rx_data_.data_received - rx_data_.data_copied >
+      rx_data_.ring_buffer.size_bytes()) {
+    rx_data_.data_loss = true;
+  }
   PW_DCHECK_UINT_LE(rx_data_.ring_buffer_write_idx,
                     rx_data_.ring_buffer.size_bytes());
   if (rx_data_.ring_buffer_write_idx == rx_data_.ring_buffer.size_bytes()) {
@@ -517,7 +563,9 @@ void DmaUartMcuxpressoNonBlocking::TxRxCompletionCallback(status_t status) {
     } else {
       TriggerReadDmaIntoRingBuffer();
     }
-  } else if (status == kStatus_USART_TxIdle && tx_data_.request.valid) {
+  }
+
+  if (status == kStatus_USART_TxIdle && tx_data_.request.valid) {
     // TX transaction complete
     // This codepath runs only when there is a valid TX request, as writes only
     // come from the user.
@@ -537,7 +585,10 @@ void DmaUartMcuxpressoNonBlocking::TxRxCompletionCallback(status_t status) {
 
 bool DmaUartMcuxpressoNonBlocking::DoCancelRead() {
   std::lock_guard lock(interrupt_lock_);
+  return DoCancelReadLockHeld();
+}
 
+bool DmaUartMcuxpressoNonBlocking::DoCancelReadLockHeld() {
   if (!rx_data_.request.valid) {
     return false;
   }
@@ -595,7 +646,10 @@ bool DmaUartMcuxpressoNonBlocking::DoCancelRead() {
 
 bool DmaUartMcuxpressoNonBlocking::DoCancelWrite() {
   std::lock_guard lock(interrupt_lock_);
+  return DoCancelWriteLockHeld();
+}
 
+bool DmaUartMcuxpressoNonBlocking::DoCancelWriteLockHeld() {
   if (!tx_data_.request.valid) {
     return false;
   }
@@ -651,20 +705,32 @@ size_t DmaUartMcuxpressoNonBlocking::DoConservativeReadAvailable() {
 
 Status DmaUartMcuxpressoNonBlocking::DoClearPendingReceiveBytes() {
   std::lock_guard lock(interrupt_lock_);
+  return DoClearPendingReceiveBytesLockHeld();
+}
+
+Status DmaUartMcuxpressoNonBlocking::DoClearPendingReceiveBytesLockHeld() {
+  if (!initialized_) {
+    return OkStatus();
+  }
 
   if (rx_data_.request.valid) {
-    // It doesn't make sense to clear the receive buffer when a read request
-    // is in flight.
     return Status::FailedPrecondition();
   }
 
-  // Note: This only clears the ring buffer, not any bytes from the current
-  // DMA transaction. Those bytes could be quite old, and this function could
-  // be improved to also cancel the in-flight RX transfer.
-  size_t bytes_pending = rx_data_.data_received - rx_data_.data_copied;
-  rx_data_.ring_buffer_read_idx += bytes_pending;
-  rx_data_.ring_buffer_read_idx %= rx_data_.ring_buffer.size();
-  rx_data_.data_copied = rx_data_.data_received;
+  // We know a DMA into the ring buffer is in-flight because we are in a
+  // critical section and rx_data_.request.valid is false.
+  // Cancel the in-flight DMA.
+  USART_TransferAbortReceiveDMA(config_.usart_base, &uart_dma_handle_);
+
+  // Reset the ring buffer state.
+  rx_data_.data_received = 0;
+  rx_data_.data_copied = 0;
+  rx_data_.ring_buffer_read_idx = 0;
+  rx_data_.ring_buffer_write_idx = 0;
+  rx_data_.data_loss = false;
+
+  // Restart the DMA.
+  TriggerReadDmaIntoRingBuffer();
 
   return OkStatus();
 }
@@ -738,6 +804,10 @@ Status DmaUartMcuxpressoNonBlocking::DoFlushOutput(
 
 bool DmaUartMcuxpressoNonBlocking::DoCancelFlushOutput() {
   std::lock_guard lock(interrupt_lock_);
+  return DoCancelFlushOutputLockHeld();
+}
+
+bool DmaUartMcuxpressoNonBlocking::DoCancelFlushOutputLockHeld() {
   return CompleteFlushRequest(Status::Cancelled());
 }
 

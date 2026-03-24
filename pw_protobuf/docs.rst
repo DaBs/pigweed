@@ -1,3 +1,5 @@
+.. TODO: b/442224704 - Migrate the C/C++ API reference content to Doxygen
+
 .. _module-pw_protobuf:
 
 ===========
@@ -8,12 +10,6 @@ pw_protobuf
 
 ``pw_protobuf`` provides an expressive interface for encoding and decoding
 the Protocol Buffer wire format with a lightweight code and data footprint.
-
-.. note::
-
-   The protobuf module is a work in progress. Wire format encoding and decoding
-   is supported, though the APIs are not final. C++ code generation exists for
-   encoding and decoding, but not yet optimized for in-memory decoding.
 
 --------
 Overview
@@ -33,9 +29,7 @@ other in your code, depending on point of use requirements:
 This has a few benefits. The primary one is that it allows the core proto
 serialization and deserialization libraries to be relatively small.
 
-.. TODO: b/388905812 - Re-enable the size report.
-.. .. include:: size_report/protobuf_overview
-.. include:: ../size_report_notice
+.. include:: size_report/protobuf_overview
 
 To demonstrate these layers, we use the following protobuf message definition
 in the examples:
@@ -106,11 +100,8 @@ Which can be encoded with the code:
    #include "example_protos/customer.pwpb.h"
 
    pw::Status EncodeCustomer(Customer::StreamEncoder& encoder) {
-     return encoder.Write({
-       age = 33,
-       name = "Joe Bloggs",
-       status = Customer::Status::INACTIVE
-     });
+     return encoder.Write(
+         {age = 33, name = "Joe Bloggs", status = Customer::Status::INACTIVE});
    }
 
 And decoded into a struct with the code:
@@ -214,11 +205,8 @@ length of the value for that field.
 
    std::byte buffer[Customer::kMaxEncodedSizeBytes];
    Customer::MemoryEncoder encoder(buffer);
-   const auto status = encoder.Write({
-     age = 22,
-     name = "Wolfgang Bjornson",
-     status = Customer::Status::ACTIVE
-   });
+   const auto status = encoder.Write(
+       {age = 22, name = "Wolfgang Bjornson", status = Customer::Status::ACTIVE});
 
    // Always check the encoder status or return values from Write calls.
    if (!status.ok()) {
@@ -239,7 +227,7 @@ constant in your own code), you can simply add it to the generated
 
    #include "example_protos/store.pwpb.h"
 
-   const std::byte image_data[kMaxImageDataSize] = { ... };
+   const std::byte image_data[kMaxImageDataSize] = {/*...*/};
 
    Store::Message store{};
    // Calling SetEncoder means we must always extend the buffer size.
@@ -479,7 +467,7 @@ structure, the following additional methods are also generated in the typed
      pw::Result<int32_t> ReadAge();
 
      pw::StatusWithSize ReadName(pw::span<char>);
-     BytesReader GetNameReader(); // Read name as a stream of bytes.
+     BytesReader GetNameReader();  // Read name as a stream of bytes.
 
      pw::Result<Customer::Status> ReadStatus();
    };
@@ -648,17 +636,16 @@ cast the enumerated type.
 
 .. code-block:: c++
 
-   #include "pw_protobuf/encoder.h"
    #include "example_protos/customer.pwpb.h"
+   #include "pw_protobuf/encoder.h"
 
    Status EncodeCustomer(pw::protobuf::StreamEncoder& encoder) {
-     PW_TRY(encoder.WriteInt32(static_cast<uint32_t>(Customer::Fields::kAge),
-                               33));
+     PW_TRY(encoder.WriteInt32(static_cast<uint32_t>(Customer::Fields::kAge), 33));
      PW_TRY(encoder.WriteString(static_cast<uint32_t>(Customer::Fields::kName),
                                 "Joe Bloggs"sv));
-     PW_TRY(encoder.WriteUint32(
-         static_cast<uint32_t>(Customer::Fields::kStatus),
-         static_cast<uint32_t>(Customer::Status::INACTIVE)));
+     PW_TRY(
+         encoder.WriteUint32(static_cast<uint32_t>(Customer::Fields::kStatus),
+                             static_cast<uint32_t>(Customer::Status::INACTIVE)));
    }
 
 Decoding
@@ -718,9 +705,29 @@ through the fields and checking the field numbers, along with casting types.
 
 Find APIs
 ---------
+Sometimes, only a single field from a serialized message needs to be read. In
+these cases, setting up a decoder and iterating through the message is a lot of
+boilerplate. ``pw_protobuf`` provides convenient :cc:`Find APIs
+<pw_protobuf_find>` which handle this for you.
 
-.. doxygenfile:: pw_protobuf/public/pw_protobuf/find.h
+.. note::
 
+   Each call to ``Find*()`` linearly scans through the message. If you
+   have to read multiple fields, it is more efficient to instantiate your own
+   decoder as described above.
+
+.. code-block:: cpp
+
+   pw::Status PrintCustomerAge(pw::ConstByteSpan serialized_customer) {
+     pw::Result<uint32_t> age =
+         pw::protobuf::FindUint32(serialized_customer, Customer::Fields::kAge);
+     if (!age.ok()) {
+       return age.status();
+     }
+
+     PW_LOG_INFO("Customer's age is %u", *age);
+     return pw::OkStatus();
+   }
 
 Handling of packages
 ====================
@@ -1058,9 +1065,9 @@ that can hold the set of values encoded by it, following these rules.
   .. code-block:: c++
 
      namespace Register {
-       static constexpr size_t kCashInMaxSize = 32;
-       static constexpr size_t kCashOutMaxSize = 64;
-     }
+     inline constexpr size_t kCashInMaxSize = 32;
+     inline constexpr size_t kCashOutMaxSize = 64;
+     }  // namespace Register
 
      struct Register::Message {
        std::array<int32_t, kCashInMaxSize> cash_in;
@@ -1088,9 +1095,9 @@ that can hold the set of values encoded by it, following these rules.
   .. code-block:: c++
 
      namespace Product {
-       static constexpr size_t kSkuMaxSize = 8;
-       static constexpr size_t kSerialNumberMaxSize = 64;
-     }
+     inline constexpr size_t kSkuMaxSize = 8;
+     inline constexpr size_t kSerialNumberMaxSize = 64;
+     }  // namespace Product
 
      struct Product::Message {
        std::array<std::byte, kSkuMaxSize> sku;
@@ -1117,7 +1124,7 @@ that can hold the set of values encoded by it, following these rules.
   .. code-block:: c++
 
      namespace Employee {
-       static constexpr size_t kNameMaxSize = 128;
+     inline constexpr size_t kNameMaxSize = 128;
      }
 
      struct Employee::Message {
@@ -1149,8 +1156,10 @@ that can hold the set of values encoded by it, following these rules.
   .. code-block:: c++
 
      struct Store::Message {
-       pw::protobuf::Callback<Store::StreamEncoder, Store::StreamDecoder> nearest_store;
-       pw::protobuf::Callback<Store::StreamEncoder, Store::StreamDecoder> employee_numbers;
+       pw::protobuf::Callback<Store::StreamEncoder, Store::StreamDecoder>
+           nearest_store;
+       pw::protobuf::Callback<Store::StreamEncoder, Store::StreamDecoder>
+           employee_numbers;
        pw::protobuf::Callback<Store::StreamEncoder, Store::StreamDecoder> directions;
        pw::protobuf::Callback<Store::StreamEncoder, Store::StreamDecoder> address;
        pw::protobuf::Callback<Store::StreamEncoder, Store::StreamDecoder> employees;
@@ -1186,7 +1195,7 @@ that can hold the set of values encoded by it, following these rules.
        pw::protobuf::OneOf<OnlineOrder::StreamEncoder,
                            OnlineOrder::StreamDecoder,
                            OnlineOrder::Fields>
-         delivery;
+           delivery;
      };
 
   Encoding a ``oneof`` field is identical to using a regular field callback.
@@ -1212,21 +1221,21 @@ that can hold the set of values encoded by it, following these rules.
   .. code-block:: c++
 
      OnlineOrder::Message message;
-     message.delivery.SetDecoder(
-         [this](OnlineOrder::Fields field, OnlineOrder::StreamDecoder& decoder) {
-           switch (field) {
-             case OnlineOrder::Fields::kShippingAddress:
-               PW_TRY(decoder.GetShippingAddressDecoder().Read(&this->shipping_address));
-               break;
-             case OnlineOrder::Fields::kPickupDate:
-               PW_TRY(decoder.GetPickupDateDecoder().Read(&this->pickup_date));
-               break;
-             default:
-               return pw::Status::DataLoss();
-           }
+     message.delivery.SetDecoder([this](OnlineOrder::Fields field,
+                                        OnlineOrder::StreamDecoder& decoder) {
+       switch (field) {
+         case OnlineOrder::Fields::kShippingAddress:
+           PW_TRY(decoder.GetShippingAddressDecoder().Read(&this->shipping_address));
+           break;
+         case OnlineOrder::Fields::kPickupDate:
+           PW_TRY(decoder.GetPickupDateDecoder().Read(&this->pickup_date));
+           break;
+         default:
+           return pw::Status::DataLoss();
+       }
 
-           return pw::OkStatus();
-         });
+       return pw::OkStatus();
+     });
 
 Message structures can be copied, but doing so will clear any assigned
 callbacks. To preserve functions applied to callbacks, ensure that the message
@@ -1358,19 +1367,19 @@ the example below.
      CONTENT = 1,
    };
 
-   enum class Function::Fields_ uint32_t {
-     NONE = 0,
-     COMPLEX_NUMBERS = 1,
-     INTEGERS_MOD_5 = 2,
-     MEROMORPHIC_FUNCTIONS_ON_COMPLEX_PLANE = 3,
-     OTHER = 4,
+   enum class Function::Fields_ uint32_t{
+       NONE = 0,
+       COMPLEX_NUMBERS = 1,
+       INTEGERS_MOD_5 = 2,
+       MEROMORPHIC_FUNCTIONS_ON_COMPLEX_PLANE = 3,
+       OTHER = 4,
 
-     kNone = NONE,
-     kComplexNumbers = COMPLEX_NUMBERS,
-     kIntegersMod5 = INTEGERS_MOD_5,
-     kMeromorphicFunctionsOnComplexPlane =
-         MEROMORPHIC_FUNCTIONS_ON_COMPLEX_PLANE,
-     kOther = OTHER,
+       kNone = NONE,
+       kComplexNumbers = COMPLEX_NUMBERS,
+       kIntegersMod5 = INTEGERS_MOD_5,
+       kMeromorphicFunctionsOnComplexPlane =
+           MEROMORPHIC_FUNCTIONS_ON_COMPLEX_PLANE,
+       kOther = OTHER,
    };
 
    struct Function::Message {
@@ -1425,7 +1434,7 @@ generated ``Message`` structure into an in-memory buffer.
    // Writes a proto response to the provided buffer, returning the encode
    // status and number of bytes written.
    pw::StatusWithSize WriteProtoResponse(pw::ByteSpan response) {
-     MyProto::Message message{}
+     MyProto::Message message {}
      message.magic_number = 0x1a1a2b2b;
      message.favorite_food = "cookies";
      message.calories = 600;
@@ -1517,8 +1526,7 @@ calling ``Write()`` on a nested encoder.
 
 Nested submessages
 ==================
-Code generated ``GetFieldEncoder`` methods are provided that return a correctly
-typed ``StreamEncoder`` or ``MemoryEncoder`` for the message.
+The examples in this section use the following protobuf definition:
 
 .. code-block:: protobuf
 
@@ -1526,19 +1534,45 @@ typed ``StreamEncoder`` or ``MemoryEncoder`` for the message.
      Animal pet = 1;
    }
 
-Note that the accessor method is named for the field, while the returned encoder
-is named for the message type.
+There are two methods for encoding nested submessages:
 
-.. cpp:function:: Animal::StreamEncoder Owner::StreamEncoder::GetPetEncoder()
+1. :ref:`pw_protobuf-encoding-nested_submessages-nested_encoder` -- This is
+   the original method of writing submessages. It performs encoding in a
+   single pass and requires an appropriately sized scratch buffer.
+
+2. :ref:`pw_protobuf-encoding-nested_submessages-multipass_encoder` -- This
+   method performs encoding in two passes to avoid the need for a scratch
+   buffer.
+
+
+.. _pw_protobuf-encoding-nested_submessages-nested_encoder:
+
+Nested encoder
+--------------
+Code-generated ``GetFieldEncoder`` methods are provided that return a
+correctly-typed ``StreamEncoder`` or ``MemoryEncoder`` for the message.
+The accessor method is named for the field, while the returned encoder
+is named for the message type. For example:
+
+.. code-block:: c++
+
+   Owner::StreamEncoder owner(writer, temp_buffer);
+
+   {
+     Animal::StreamEncoder pet = owner.GetPetEncoder();
+     pet.WriteName("Rufus");
+     pet.WriteAge(8);
+     // submessage is closed when the nested encoder is destroyed.
+   }
 
 A lower-level API method returns an untyped encoder, which only provides the
 lower-level API methods. This can be cast to a typed encoder if needed.
 
 .. cpp:function:: pw::protobuf::StreamEncoder pw::protobuf::StreamEncoder::GetNestedEncoder(uint32_t field_number, EmptyEncoderBehavior empty_encoder_behavior = EmptyEncoderBehavior::kWriteFieldNumber)
 
-(The optional `empty_encoder_behavior` parameter allows the user to disable
-writing the tag number for the nested encoder, if no data was written to
-that nested decoder.)
+(The optional ``empty_encoder_behavior`` parameter allows the user to disable
+writing the tag number for the nested encoder, if no data was written to that
+nested decoder.)
 
 .. warning::
    When a nested submessage is created, any use of the parent encoder that
@@ -1546,7 +1580,12 @@ that nested decoder.)
    encoder, destroy the submessage encoder first.
 
 Buffering
----------
+^^^^^^^^^
+
+.. note::
+   This section applies only to the original "Nested encoder" method of
+   encoding submessages.
+
 Writing proto messages with nested submessages requires buffering due to
 limitations of the proto format. Every proto submessage must know the size of
 the submessage before its final serialization can begin. A streaming encoder can
@@ -1615,6 +1654,67 @@ yourself, your destination buffer might need additional space.
    ``Status::ResourceExhausted()``. Always check the results of ``Write`` calls
    or the encoder status to ensure success, as otherwise the encoded data will
    be invalid.
+
+.. _pw_protobuf-encoding-nested_submessages-multipass_encoder:
+
+Two-pass encoder
+----------------
+The two-pass encoder method accepts a lambda (or other callable) which is
+passed a typed encoder for writing the submessage fields:
+
+.. code-block:: c++
+
+   Owner::StreamEncoder owner(writer, {});  // No scratch buffer needed.
+   owner.WritePetMessage([](Animal::StreamEncoder& pet) {
+     // This lambda is invoked twice, so it must
+     // write the same fields each invocation.
+     pet.WriteName("Rufus");
+     pet.WriteAge(8);
+   });
+
+.. tip::
+   * You can use ``auto``  in the lambda parameter to avoid referencing the
+     potentially verbose submessage encoder type.
+
+   * The callable argument is defined in such a way that normal
+     ``pw::Function`` limitations are bypassed, so you are free to capture as
+     many values in the lambda as needed to write the submessage.
+
+   .. code-block:: c++
+
+      std::string_view name = "Rufus";
+      uint32_t age = 8;
+
+      Owner::StreamEncoder owner(writer, {});
+      // Using by-ref capture default [&] and auto& stream ref.
+      owner.WritePetMessage([&](auto& pet) {
+        pet.WriteName(name);
+        pet.WriteAge(age);
+      });
+
+The two-pass encoder works as follows to avoid the need for a scratch buffer:
+
+1. The callable is invoked once with an encoder that only counts the number of
+   encoded bytes in the entire submessage. No data is actually written to the
+   underlying stream during this pass.
+
+2. The submessage tag (field number and size) are written to the underlying
+   stream.
+
+3. The callable is invoked again with a different encoder that actually writes
+   the encoded data to the underlying stream.
+
+.. warning::
+
+   The callable must write the exact same fields, with the exact same values,
+   in the same order, on both invocations.
+
+   If the data being written might change during writing, the caller is
+   expected to capture a snapshot of the data prior to encoding, or implement
+   some type of explicit synchronization (e.g. mutex/semaphore/etc).
+
+   Failure to do so may silently corrupt the output data and/or produce an
+   error result.
 
 Scalar Fields
 =============
@@ -1695,12 +1795,11 @@ code generated API, and the second implemented by hand.
 
 .. code-block:: c++
 
-   constexpr std::array<int32_t, 5> numbers = { 4, 8, 15, 16, 23, 42 };
+   constexpr std::array<int32_t, 5> numbers = {4, 8, 15, 16, 23, 42};
 
    my_proto_encoder.WriteNumbers(numbers);
    my_proto_encoder.WritePackedInt32(
-       static_cast<uint32_t>(MyProto::Fields::kNumbers),
-       numbers);
+       static_cast<uint32_t>(MyProto::Fields::kNumbers), numbers);
 
 Enumerations
 ============
@@ -1719,9 +1818,8 @@ and the second implemented by hand.
 .. code-block:: c++
 
    my_proto_encoder.WriteAward(MyProto::Award::SILVER);
-   my_proto_encoder.WriteUint32(
-       static_cast<uint32_t>(MyProto::Fields::kAward),
-       static_cast<uint32_t>(MyProto::Award::SILVER));
+   my_proto_encoder.WriteUint32(static_cast<uint32_t>(MyProto::Fields::kAward),
+                                static_cast<uint32_t>(MyProto::Award::SILVER));
 
 Repeated Fields
 ---------------
@@ -1763,13 +1861,17 @@ stream.
 
 Bytes
 =====
-Bytes fields provide the ``WriteData`` code generated method.
+Bytes fields have multiple code generated methods provided.
+The ``write_func`` callback version allows direct writes to the underlying
+stream, eliminating the need for a temporary copy buffer.
 
-.. cpp:function:: Status MyProto::StreamEncoder::WriteData(ConstByteSpan)
+.. cpp:function:: Status MyProto::StreamEncoder::WriteFoo(ConstByteSpan)
+.. cpp:function:: Status MyProto::StreamEncoder::WriteFoo(size_t num_bytes, const pw::Function<pw::Status(pw::stream::Writer&)> write_func);
 
-This can be freely intermixed with the lower-level API method.
+These can be freely intermixed with the lower-level API method.
 
 .. cpp:function:: Status pw::protobuf::StreamEncoder::WriteBytes(uint32_t field_number, ConstByteSpan)
+.. cpp:function:: Status pw::protobuf::StreamEncoder::WriteBytes(size_t num_bytes, const pw::Function<pw::Status(pw::stream::Writer&)> write_func);
 
 And with the API method that can write bytes from another stream.
 
@@ -2059,13 +2161,34 @@ that return the enumeration as the appropriate generated type.
 .. cpp:function:: constexpr bool MyProto::IsValidEnum(MyProto::Enum value)
 
    Validates the value encoded in the wire format against the known set of
-   enumerates.
+   enumerators.
 
-.. cpp:function:: constexpr const char* MyProto::EnumToString(MyProto::Enum value)
+.. cpp:function:: constexpr const char* MyProto::EnumToString(MyProto::Enum value, const char* invalid = "")
 
-   Returns the string representation of the enum value. For example,
-   ``FooToString(Foo::kBarBaz)`` returns ``"BAR_BAZ"``. Returns the empty string
-   if the value is not a valid value.
+   Returns the string representation of the enum value, in UPPER_SNAKE_CASE.
+   Returns ``invalid`` (which defaults to an empty string) if the value is not a
+   valid enumerator.
+
+   Examples:
+
+   * ``FooToString(Foo::kBarBaz)`` returns ``"BAR_BAZ"``.
+
+   * ``FooToString(static_cast<Foo>(666), "cheese")`` returns ``"cheese"``
+     (assuming 666 is an invalid Foo enumerator).
+
+.. cpp:var:: inline constexpr std::array<Enum, 7> kEnumValues
+
+   An array of all enumerator values.
+
+   Example usage:
+
+   .. code-block:: c++
+
+      for (const Enum value : MyProto::kEnumValues) {
+      }
+
+   These can be used with ``EnumToString()`` to produce the enumerator names as
+   strings, with no overhead due to its ``constexpr`` implementation.
 
 To read enumerations with the lower-level API, you would need to cast the
 retured value from the ``uint32_t``.
@@ -2276,7 +2399,7 @@ different fields in a proto message:
    if (!integer.ok()) {
      // handle parsing error. i.e. return integer.status().
    }
-   uint32_t integer_value = integer.value(); // obtained the value
+   uint32_t integer_value = integer.value();  // obtained the value
 
    // Parse a string field
    String str = message.AsString(2);
@@ -2297,7 +2420,7 @@ different fields in a proto message:
    stream::IntervalReader bytes_reader = bytes.GetBytesReader();
 
    // Parse nested message `Nested nested = 4;`
-   Message nested = message.AsMessage(4).
+   Message nested = message.AsMessage(4);
    // Get the fields in the nested message.
    String nested_str = nested.AsString(1);
    Bytes nested_bytes = nested.AsBytes(2);
@@ -2394,7 +2517,6 @@ single fields directly.
        ...
      }
    }
-
 
 .. Note::
   The helper API are currently in-development and may not remain stable.

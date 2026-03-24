@@ -78,6 +78,10 @@ DEFAULT_KEY_BINDINGS: dict[str, list[str]] = {
     'window-manager.enlarge-split': ['escape .'],  # Alt-. (mnemonic: Alt >)
     'window-manager.focus-prev-pane': ['escape c-p'],  # Ctrl-Alt-p
     'window-manager.focus-next-pane': ['escape c-n'],  # Ctrl-Alt-n
+    'window-manager.focus-pane-up': ['c-w k'],
+    'window-manager.focus-pane-down': ['c-w j'],
+    'window-manager.focus-pane-left': ['c-w h'],
+    'window-manager.focus-pane-right': ['c-w l'],
     'window-manager.balance-window-panes': ['c-u'],
     'python-repl.copy-output-selection': ['c-c'],
     'python-repl.copy-all-output': ['escape c-c'],
@@ -151,9 +155,9 @@ def create_key_bindings(console_app) -> KeyBindings:
         console_app.repl_pane.ctrl_c()
 
     @register('global.exit-no-confirmation', key_bindings)
-    def quit_no_confirm(event):
+    def quit_no_confirm(_event):
         """Quit without confirmation."""
-        event.app.exit()
+        console_app.exit_console()
 
     @register(
         'global.exit-with-confirmation',

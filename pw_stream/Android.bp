@@ -18,12 +18,11 @@ package {
 
 cc_library_static {
     name: "pw_stream",
-    cpp_std: "c++20",
-    vendor_available: true,
-    export_include_dirs: ["public"],
     defaults: [
         "pw_android_common_backends",
+        "pw_android_common_target_support",
     ],
+    export_include_dirs: ["public"],
     export_header_lib_headers: [
         "pw_assert",
         "pw_log",
@@ -32,7 +31,6 @@ cc_library_static {
         "pw_assert",
         "pw_log",
     ],
-    host_supported: true,
     srcs: [
         "memory_stream.cc",
     ],
@@ -56,11 +54,9 @@ cc_library_static {
 
 cc_library_static {
     name: "pw_stream_std_file_stream",
-    cpp_std: "c++20",
-    vendor_available: true,
-    host_supported: true,
     defaults: [
         "pw_android_common_backends",
+        "pw_android_common_target_support",
     ],
     export_header_lib_headers: [
         "pw_assert",
@@ -90,5 +86,26 @@ cc_library_static {
         "pw_span",
         "pw_stream",
         "pw_toolchain",
+    ],
+}
+
+cc_library {
+    name: "pw_stream_interval_reader",
+    srcs: [
+        "interval_reader.cc"
+    ],
+    defaults: [
+        "pw_android_common_backends",
+        "pw_android_common_target_support",
+    ],
+    header_libs: [
+        "pw_assert",
+    ],
+    export_include_dirs: [
+        "public",
+    ],
+    whole_static_libs: [
+        "pw_bytes",
+        "pw_stream"
     ],
 }

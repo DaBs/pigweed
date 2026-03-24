@@ -1,372 +1,288 @@
-.. _module-pw_async2-quickstart-guides:
+.. _module-pw_async2-guides:
 
-===================
-Quickstart & guides
-===================
+======
+Guides
+======
 .. pigweed-module-subpage::
    :name: pw_async2
 
-.. _module-pw_async2-quickstart:
+This guide covers cross-cutting usage topics such as
+:ref:`module-pw_async2-guides-unit-testing`.
 
-----------
-Quickstart
-----------
-.. _//pw_async2/examples/count.cc: https://cs.opensource.google/pigweed/pigweed/+/main:pw_async2/examples/count.cc
-.. _//pw_async2/examples/BUILD.bazel: https://cs.opensource.google/pigweed/pigweed/+/main:pw_async2/examples/BUILD.bazel
-.. _//pw_async2/examples/BUILD.gn: https://cs.opensource.google/pigweed/pigweed/+/main:pw_async2/examples/BUILD.gn
+---------------------
+Core component guides
+---------------------
+All of the ``pw_async2`` core components have their own dedicated guides.
 
-This quickstart outlines the general workflow for integrating ``pw_async2``
-into a project. It's based on the following files in upstream Pigweed:
+Tasks
+=====
+See :ref:`module-pw_async2-tasks`.
 
-* `//pw_async2/examples/count.cc`_
-* `//pw_async2/examples/BUILD.bazel`_
-* `//pw_async2/examples/BUILD.gn`_
+Channels
+========
+See :ref:`module-pw_async2-channels`.
 
-The example app can be built and run in upstream Pigweed with the
-following command:
+Dispatchers
+===========
+See :ref:`module-pw_async2-dispatcher`.
+
+Futures
+=======
+See :ref:`module-pw_async2-futures`.
+
+.. _module-pw_async2-guides-callbacks:
+
+----------------------------------------------
+Integrating with existing, callback-based code
+----------------------------------------------
+See :ref:`module-pw_async2-tasks-callbacks`.
+
+.. _module-pw_async2-guides-interrupts:
+
+-------------------------
+Interacting with hardware
+-------------------------
+A common use case for ``pw_async2`` is interacting with hardware that uses
+interrupts. The following example demonstrates this by creating a fake UART
+device with an asynchronous reading interface and a separate thread that
+simulates hardware interrupts.
+
+The example can be :ref:`built and run in upstream Pigweed <docs-contributing>`
+with the following command:
 
 .. code-block:: sh
 
-   bazelisk run //pw_async2/examples:count --config=cxx20
+   bazelisk run //pw_async2/examples:interrupt
 
-.. _module-pw_async2-quickstart-rules:
+``FakeUart`` simulates an interrupt-driven UART with an asynchronous interface
+for reading bytes. The ``ReadByte`` method returns a ``ValueFuture`` that
+resolves when a byte is available. The ``HandleReceiveInterrupt`` method would
+be called from an ISR to resolve pending futures or queue data. (In the example,
+this is simulated via keyboard input.)
 
-1. Set up build rules
-=====================
-All ``pw_async2`` projects must add a dependency on the ``dispatcher`` target.
-This target defines the :cpp:class:`pw::async2::Task` class, an asynchronous
-unit of work analogous to a thread, as well as the
-:cpp:class:`pw::async2::Dispatcher` class, an event loop used to run ``Task``
-instances to completion.
-
-.. tab-set::
-
-   .. tab-item:: Bazel
-
-      Add a dependency on ``@pigweed//pw_async2:dispatcher`` in ``BUILD.bazel``:
-
-      .. literalinclude:: examples/BUILD.bazel
-         :language: py
-         :linenos:
-         :emphasize-lines: 10
-         :start-after: count-example-start
-         :end-before: count-example-end
-
-   .. tab-item:: GN
-
-      Add a dependency on ``$dir_pw_async2:dispatcher`` in ``BUILD.gn``:
-
-      .. literalinclude:: examples/BUILD.gn
-         :language: py
-         :linenos:
-         :emphasize-lines: 7
-         :start-after: count-example-start
-         :end-before: count-example-end
-
-.. _module-pw_async2-quickstart-dependencies:
-
-2. Inject dependencies
-======================
-Interfaces which wish to add new tasks to the event loop should accept and
-store a ``Dispatcher&`` reference.
-
-.. literalinclude:: examples/count.cc
+.. literalinclude:: examples/interrupt.cc
    :language: cpp
    :linenos:
-   :start-after: examples-constructor-start
-   :end-before: examples-constructor-end
+   :start-after: [pw_async2-examples-interrupt-uart]
+   :end-before: [pw_async2-examples-interrupt-uart]
 
-This allows the interface to call ``dispatcher->Post(some_task)`` in order to
-run asynchronous work on the dispatcher's event loop.
+A reader task obtains a future from the UART and polls it until it receives
+data.
 
-.. _module-pw_async2-quickstart-oneshot:
-
-3. Post one-shot work to the dispatcher
-=======================================
-Simple, one-time work can be queued on the dispatcher via
-:cpp:func:`pw::async2::EnqueueHeapFunc`.
-
-.. _module-pw_async2-quickstart-tasks:
-
-4. Post tasks to the dispatcher
-===============================
-Async work that involves a series of asynchronous operations should be
-made into a task. This can be done by either implementing a custom task
-(see :ref:`module-pw_async2-guides-implementing-tasks`) or
-by writing a C++20 coroutine (see :cpp:class:`pw::async2::Coro`) and storing it
-in a :cpp:class:`pw::async2::CoroOrElseTask`.
-
-.. literalinclude:: examples/count.cc
+.. literalinclude:: examples/interrupt.cc
    :language: cpp
    :linenos:
-   :start-after: examples-task-start
-   :end-before: examples-task-end
+   :start-after: [pw_async2-examples-interrupt-reader]
+   :end-before: [pw_async2-examples-interrupt-reader]
 
-The resulting task must either be stored somewhere that has a lifetime longer
-than the async operations (such as in a static or as a member of a long-lived
-class) or dynamically allocated using :cpp:func:`pw::async2::AllocateTask`.
+This example shows how to bridge the gap between low-level, interrupt-driven
+hardware and the high-level, cooperative multitasking model of ``pw_async2``.
 
-Finally, the interface instructs the dispatcher to run the task by invoking
-:cpp:func:`pw::async2::Dispatcher::Post`.
+Full source code for this example: :cs:`pw_async2/examples/interrupt.cc`
 
-See `//pw_async2/examples/count.cc`_ to view the complete example.
+.. _module-pw_async2-guides-unit-testing:
 
-.. _module-pw_async2-quickstart-toolchain:
+------------
+Unit testing
+------------
+Unit testing ``pw_async2`` code is different from testing non-async code. You
+must run async code from a :cc:`Task <pw::async2::Task>` on a
+:cc:`Dispatcher <pw::async2::Dispatcher>`.
 
-5. Build with an appropriate toolchain
-======================================
-If using coroutines, remember to build your project with a toolchain
-that supports C++20 at minimum (the first version of C++ with coroutine
-support). For example, in upstream Pigweed a ``--config=cxx20`` must be
-provided when building and running the example:
+To test ``pw_async2`` code:
 
-.. tab-set::
+#. Add a dependency on ``//pw_async2:testing``.
+#. Declare a :cc:`pw::async2::DispatcherForTest`.
+#. Create a task to run the async code under test. Either implement
+   :cc:`Task <pw::async2::Task>` or use
+   :cc:`FuncTask <pw::async2::FuncTask>` to wrap a lambda.
+#. Post the task to the dispatcher.
+#. Call :cc:`RunUntilStalled <pw::async2::RunnableDispatcher::RunUntilStalled>`
+   to execute the task until it can make no further progress, or
+   :cc:`RunToCompletion <pw::async2::RunnableDispatcher::RunToCompletion>` if
+   all tasks should complete.
 
-   .. tab-item:: Bazel
+The following example shows the basic structure of a ``pw_async2`` unit test.
 
-      .. code-block:: sh
+.. literalinclude:: examples/unit_test.cc
+   :language: c++
+   :start-after: pw_async2-minimal-test
+   :end-before: pw_async2-minimal-test
 
-         bazelisk build //pw_async2/examples:count --config=cxx20
+It is usually necessary to run the test task multiple times to advance async
+code through its states. This improves coverage and ensures that wakers are
+stored and woken properly.
 
-Other examples
-==============
-.. _quickstart/bazel: https://cs.opensource.google/pigweed/quickstart/bazel
-.. _//apps/blinky/: https://cs.opensource.google/pigweed/quickstart/bazel/+/main:apps/blinky/
-.. _//modules/blinky/: https://cs.opensource.google/pigweed/quickstart/bazel/+/main:modules/blinky/
+To run the test task multiple times:
 
-To see another example of ``pw_async2`` working in a minimal project,
-check out the following directories of Pigweed's `quickstart/bazel`_ repo:
+#. Post the task to the dispatcher.
+#. Call :cc:`RunUntilStalled()
+   <pw::async2::RunnableDispatcher::RunUntilStalled>`.
+#. Perform actions to allow the task to advance.
+#. Call :cc:`RunUntilStalled()
+   <pw::async2::RunnableDispatcher::RunUntilStalled>` again.
+#. Repeat until the task runs to completion, calling :cc:`RunToCompletion()
+   <pw::async2::RunnableDispatcher::RunToCompletion>` when the task should
+   complete.
 
-* `//apps/blinky/`_
-* `//modules/blinky/`_
+The example below runs a task multiple times to test waiting for a
+``FortuneTeller`` class to produce a fortune.
 
-.. _module-pw_async2-guides:
+.. literalinclude:: examples/unit_test.cc
+   :language: c++
+   :start-after: pw_async2-multi-step-test
+   :end-before: pw_async2-multi-step-test
 
-------
-Guides
-------
+Full source code for this example: :cs:`pw_async2/examples/unit_test.cc`
 
-.. _module-pw_async2-guides-implementing-tasks:
+.. _module-pw_async2-guides-time:
 
-Implementing tasks
-==================
-:cpp:class:`pw::async2::Task` instances complete one or more asynchronous
-operations. They are the top-level "thread" primitives of ``pw_async2``.
+---------------------------------------------
+Interacting with timers, delays, and timeouts
+---------------------------------------------
+Asynchronous systems often need to interact with time, for example to implement
+timeouts, delays, or periodic tasks. ``pw_async2`` provides a flexible and
+testable mechanism for this through the :cc:`TimeProvider
+<pw::async2::TimeProvider>` interface. ``TimeProvider<SystemClock>`` is
+commonly used when interacting with the system's built-in ``time_point`` and
+``duration`` types.
 
-You can use one of the concrete subclasses of ``Task`` that Pigweed provides:
+:cc:`TimeProvider <pw::async2::TimeProvider>` allows for easily waiting for a
+timeout or deadline using the :cc:`WaitFor <pw::async2::TimeProvider::WaitFor>`
+and :cc:`WaitUntil <pw::async2::TimeProvider::WaitUntil>` methods.
+Additionally, you can test code that uses :cc:`TimeProvider
+<pw::async2::TimeProvider>` for timing with simulated time using
+:cc:`SimulatedTimeProvider <pw::async2::SimulatedTimeProvider>`. Doing so helps
+avoid timing-dependent test flakes and helps ensure that tests are fast since
+they don't need to wait for real-world time to elapse.
 
-* :cpp:class:`pw::async2::CoroOrElseTask`: Delegates to a provided
-  coroutine and executes an ``or_else`` handler function on failure.
-* :cpp:class:`pw::async2::PendFuncTask`: Delegates to a provided
-  function.
-* :cpp:class:`pw::async2::PendableAsTask`: Delegates to a type
-  with a :cpp:func:`pw::async2::Pend` method.
-* :cpp:func:`pw::async2::AllocateTask`: Creates a concrete subclass of
-  ``Task``, just like ``PendableAsTask``, but the created task is
-  dynamically allocated and frees the associated memory upon
-  completion.
+.. _module-pw_async2-guides-time-and-timers-time-provider:
 
-Or you can subclass ``Task`` yourself. See :cpp:class:`pw::async2::Task`
-for more guidance on subclassing.
+TimeProvider, timer factory
+===========================
+The :cc:`TimeProvider <pw::async2::TimeProvider>` is an abstract
+interface that acts as a factory for timers. Its key responsibilities are:
 
-.. _module-pw_async2-guides-tasks:
+* **Providing the current time**: The ``now()`` method returns the current
+  time according to a specific clock.
+* **Creating timers**: The ``WaitUntil(timestamp)`` and ``WaitFor(delay)``
+  methods return a :cc:`TimeFuture <pw::async2::TimeFuture>` object.
 
-How a dispatcher manages tasks
+This design is friendly to dependency injection. By providing different
+implementations of ``TimeProvider``, code that uses timers can be tested with a
+simulated clock (like ``pw::chrono::SimulatedClock``), allowing for fast and
+deterministic tests without real-world delays. For production code, the
+:cc:`GetSystemTimeProvider() <pw::async2::GetSystemTimeProvider>`
+function returns a global ``TimeProvider`` that uses the configured system
+clock.
+
+.. _module-pw_async2-guides-time-and-timers-time-future:
+
+TimeFuture, time-bound futures
 ==============================
-The purpose of a :cpp:class:`pw::async2::Dispatcher` is to keep track of a set
-of :cpp:class:`pw::async2::Task` objects and run them to completion. The
-dispatcher is essentially a scheduler for cooperatively-scheduled
-(non-preemptive) threads (tasks).
+A :cc:`TimeFuture <pw::async2::TimeFuture>` is a future that completes at a
+specific time. A task can ``Pend`` on a ``TimeFuture`` to suspend itself until
+the time designated by the future. When the time is reached, the
+``TimeProvider`` wakes the task, and its next poll of the ``TimeFuture`` will
+return ``Ready(timestamp)``.
 
-While a dispatcher is running, it waits for one or more tasks to waken and then
-advances each task by invoking its :cpp:func:`pw::async2::Task::DoPend` method.
-The ``DoPend`` method is typically implemented manually by users, though it is
-automatically provided by coroutines.
+.. _module-pw_async2-guides-time-and-timers-example:
 
-If the task is able to complete, ``DoPend`` will return ``Ready``, in which case
-the task is then deregistered from the dispatcher.
+Example
+=======
+Here is an example of a task that logs a message, sleeps for one second, and
+then logs another message.
 
-If the task is unable to complete, ``DoPend`` must return ``Pending`` and arrange
-for the task to be woken up when it is able to make progress again. Once the
-task is rewoken, the task is re-added to the ``Dispatcher`` queue. The
-dispatcher will then invoke ``DoPend`` once more, continuing the cycle until
-``DoPend`` returns ``Ready`` and the task is completed.
+.. code-block:: cpp
 
-The following sequence diagram summarizes the basic workflow:
+   #include "pw_async2/dispatcher.h"
+   #include "pw_async2/system_time_provider.h"
+   #include "pw_async2/task.h"
+   #include "pw_chrono/system_clock.h"
+   #include "pw_log/log.h"
 
-.. mermaid::
+   using namespace std::chrono_literals;
 
-   sequenceDiagram
-       participant e as External Event e.g. Interrupt
-       participant d as Dispatcher
-       participant t as Task
-       e->>t: Init Task
-       e->>d: Register task via Dispatcher::Post(Task)
-       d->>d: Add task to queue
-       d->>t: Run task via Task::DoPend()
-       t->>t: Task is waiting for data and can't yet complete
-       t->>e: Arrange for rewake via PW_ASYNC_STORE_WAKER
-       t->>d: Indicate that task is not complete via Pending()
-       d->>d: Remove task from queue
-       d->>d: Go to sleep because task queue is empty
-       e->>e: The data that the task needs has arrived
-       e->>d: Rewake via Waker::Wake()
-       d->>d: Re-add task to queue
-       d->>t: Run task via Task::DoPend()
-       t->>t: Task runs to completion
-       t->>d: Indicate that task is complete via Ready()
-       d->>d: Deregister the task
+   class LoggingTask : public pw::async2::Task {
+    public:
+     LoggingTask() : state_(State::kLogFirstMessage) {}
 
-.. _module-pw_async2-guides-pendables:
+    private:
+     enum class State {
+       kLogFirstMessage,
+       kSleeping,
+       kLogSecondMessage,
+       kDone,
+     };
 
-Implementing invariants for pendable functions
-==============================================
-.. _invariants: https://stackoverflow.com/a/112088
+     Poll<> DoPend(Context& cx) override {
+       while (true) {
+         switch (state_) {
+           case State::kLogFirstMessage:
+             PW_LOG_INFO("Hello, async world!");
+             future_ = GetSystemTimeProvider().WaitFor(1s);
+             state_ = State::kSleeping;
+             continue;
 
-Any ``Pend``-like function or method similar to
-:cpp:func:`pw::async2::Task::DoPend` that can pause when it's not able
-to make progress on its task is known as a **pendable function**. When
-implementing a pendable function, make sure that you always uphold the
-following `invariants`_:
+           case State::kSleeping:
+             if (future_.Pend(cx).IsPending()) {
+               return Pending();
+             }
+             state_ = State::kLogSecondMessage;
+             continue;
 
-* :ref:`module-pw_async2-guides-pendables-incomplete`
-* :ref:`module-pw_async2-guides-pendables-complete`
+           case State::kLogSecondMessage:
+             PW_LOG_INFO("Goodbye, async world!");
+             state_ = State::kDone;
+             continue;
 
-.. note:: Exactly which APIs are considered pendable?
+           case State::kDone:
+             return Ready();
+         }
+       }
+     }
 
-   If it has the signature ``(Context&, ...) -> Poll<T>``,
-   then it's a pendable function.
+     State state_;
+     pw::async2::TimeFuture<pw::chrono::SystemClock> future_;
+   };
 
-.. _module-pw_async2-guides-pendables-incomplete:
+.. _module-pw_async2-guides-timeouts:
 
-Arranging future completion of incomplete tasks
------------------------------------------------
-When your pendable function can't yet complete:
+Timing out Futures
+==================
+See :ref:`module-pw_async2-futures-timeout`.
 
-#. Do one of the following to make sure the task rewakes when it's ready to
-   make more progress:
+.. _module-pw_async2-guides-combinators:
 
-   * Delegate waking to a subtask. Arrange for that subtask's
-     pendable function to wake this task when appropriate.
+-------------------------------------------
+Composing async operations with combinators
+-------------------------------------------
+Combinators allow for the composition of multiple futures:
 
-   * Arrange an external wakeup. Use :c:macro:`PW_ASYNC_STORE_WAKER`
-     to store the task's waker somewhere, and then call
-     :cpp:func:`pw::async2::Waker::Wake` from an interrupt or another thread
-     once the event that the task is waiting for has completed.
+* :cc:`Join <pw::async2::Join>`: Waits for *all* of a set of futures to
+  complete, returning a tuple of their results.
+* :cc:`Select <pw::async2::Select>`: Waits for the *first* of a set of
+  futures to complete, returning its result.
 
-   * Re-enqueue the task with :cpp:func:`pw::async2::Context::ReEnqueue`.
-     This is a rare case. Usually, you should just create an immediately
-     invoked ``Waker``.
+.. _module-pw_async2-guides-aliases:
 
-#. Make sure to return :cpp:type:`pw::async2::Pending` to signal that the task
-   is incomplete.
+------------
+Poll aliases
+------------
+``pw_async2`` provides the following aliases to simplify common return types:
 
-In other words, whenever your pendable function returns
-:cpp:type:`pw::async2::Pending`, you must guarantee that
-:cpp:func:`pw::async2::Context::Wake` is called once in the future.
+.. csv-table::
+   :header: "Alias", "Definition"
 
-For example, one implementation of a delayed task might arrange for its ``Waker``
-to be woken by a timer once some time has passed. Another case might be a
-messaging library which calls ``Wake()`` on the receiving task once a sender has
-placed a message in a queue.
+   :cc:`PollResult <pw::async2::PollResult>`, ``Poll<pw::Result<T>>``
+   :cc:`PollOptional <pw::async2::PollOptional>`, ``Poll<std::optional<T>>``
 
-.. _module-pw_async2-guides-pendables-complete:
+---------------------
+Configuring pw_async2
+---------------------
+``pw_async2`` offers compile-time configuration options to adapt to different
+platforms and constraints.
 
-Cleaning up complete tasks
---------------------------
-When your pendable function has completed, make sure to return
-:cpp:type:`pw::async2::Ready` to signal that the task is complete.
-
-.. _module-pw_async2-guides-passing-data:
-
-Passing data between tasks
-==========================
-Astute readers will have noticed that the ``Wake`` method does not take any
-arguments, and ``DoPoll`` does not provide the task being polled with any
-values!
-
-Unlike callback-based interfaces, tasks (and the libraries they use)
-are responsible for storage of the inputs and outputs of events. A common
-technique is for a task implementation to provide storage for outputs of an
-event. Then, upon completion of the event, the outputs will be stored in the
-task before it is woken. The task will then be invoked again by the
-dispatcher and can then operate on the resulting values.
-
-This common pattern is implemented by the
-:cpp:class:`pw::async2::OnceSender` and
-:cpp:class:`pw::async2::OnceReceiver` types (and their ``...Ref`` counterparts).
-These interfaces allow a task to asynchronously wait for a value:
-
-.. tab-set::
-
-   .. tab-item:: Manual ``Task`` State Machine
-
-      .. literalinclude:: examples/once_send_recv.cc
-         :language: cpp
-         :linenos:
-         :start-after: [pw_async2-examples-once-send-recv-manual]
-         :end-before: [pw_async2-examples-once-send-recv-manual]
-
-   .. tab-item:: Coroutine Function
-
-      .. literalinclude:: examples/once_send_recv.cc
-         :language: cpp
-         :linenos:
-         :start-after: [pw_async2-examples-once-send-recv-coro]
-         :end-before: [pw_async2-examples-once-send-recv-coro]
-
-More primitives (such as ``MultiSender`` and ``MultiReceiver``) are in-progress.
-Users who find that they need other async primitives are encouraged to
-contribute them upstream to ``pw::async2``!
-
-.. _module-pw_async2-guides-coroutines:
-
-Coroutines
-==========
-C++20 users can define tasks using coroutines!
-
-.. literalinclude:: examples/basic.cc
-   :language: cpp
-   :linenos:
-   :start-after: [pw_async2-examples-basic-coro]
-   :end-before: [pw_async2-examples-basic-coro]
-
-Any value with a ``Poll<T> Pend(Context&)`` method can be passed to
-``co_await``, which will return with a ``T`` when the result is ready. The
-:cpp:class:`pw::async2::PendFuncAwaitable` class can also be used to
-``co_await`` on a provided delegate function.
-
-To return from a coroutine, ``co_return <expression>`` must be used instead of
-the usual ``return <expression>`` syntax. Because of this, the
-:c:macro:`PW_TRY` and :c:macro:`PW_TRY_ASSIGN` macros are not usable within
-coroutines. :c:macro:`PW_CO_TRY` and :c:macro:`PW_CO_TRY_ASSIGN` should be
-used instead.
-
-For a more detailed explanation of Pigweed's coroutine support, see
-:cpp:class:`pw::async2::Coro`.
-
-.. _module-pw_async2-guides-timing:
-
-Timing
-======
-When using ``pw::async2``, timing functionality should be injected
-by accepting a :cpp:class:`pw::async2::TimeProvider` (most commonly
-``TimeProvider<SystemClock>`` when using the system's built-in ``time_point``
-and ``duration`` types).
-
-:cpp:class:`pw::async2::TimeProvider` allows for easily waiting
-for a timeout or deadline using the
-:cpp:func:`pw::async2::TimePoint::WaitFor` and
-:cpp:func:`pw::async2::TimePoint::WaitUntil` methods.
-
-Additionally, code which uses :cpp:class:`pw::async2::TimeProvider` for timing
-can be tested with simulated time using
-:cpp:class:`pw::async2::SimulatedTimeProvider`. Doing so helps avoid
-timing-dependent test flakes and helps ensure that tests are fast since they
-don't need to wait for real-world time to elapse.
-
-.. _module-pw_async2-guides-faqs:
-
----------------------------------
-Frequently asked questions (FAQs)
----------------------------------
+- :cc:`PW_ASYNC2_LOG_LEVEL` sets the log level for ``pw_async2``.
+- :cc:`PW_ASYNC2_DEBUG_WAIT_REASON` controls whether to include debug
+  information for blocked tasks.

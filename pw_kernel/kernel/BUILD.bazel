@@ -12,7 +12,8 @@
 # License for the specific language governing permissions and limitations under
 # the License.
 
-load("@rules_rust//rust:defs.bzl", "rust_library")
+load("@bazel_skylib//rules:common_settings.bzl", "bool_flag")
+load("@rules_rust//rust:defs.bzl", "rust_doc", "rust_library")
 
 package(default_visibility = ["//visibility:public"])
 
@@ -21,49 +22,117 @@ CORTEX_M_DEPS = [
     "@rust_crates//:cortex-m-rt",
 ]
 
+RISCV_DEPS = [
+    "@rust_crates//:riscv",
+]
+
 rust_library(
     name = "kernel",
     srcs = [
-        "arch/arm_cortex_m/exceptions.rs",
-        "arch/arm_cortex_m/features.rs",
-        "arch/arm_cortex_m/mod.rs",
-        "arch/arm_cortex_m/regs/mod.rs",
-        "arch/arm_cortex_m/regs/mpu.rs",
-        "arch/arm_cortex_m/regs/nvic.rs",
-        "arch/arm_cortex_m/regs/systick.rs",
-        "arch/arm_cortex_m/spinlock.rs",
-        "arch/arm_cortex_m/threads.rs",
-        "arch/arm_cortex_m/timer.rs",
-        "arch/host/mod.rs",
-        "arch/host/spinlock.rs",
-        "arch/mod.rs",
+        "interrupt_controller.rs",
         "lib.rs",
         "panic.rs",
         "scheduler.rs",
-        "sync/mod.rs",
+        "scheduler/algorithm.rs",
+        "scheduler/locks.rs",
+        "scheduler/priority.rs",
+        "scheduler/priority_bitmask.rs",
+        "scheduler/thread.rs",
+        "scheduler/timer.rs",
+        "sync.rs",
+        "sync/event.rs",
+        "sync/mutex.rs",
         "sync/spinlock.rs",
         "target.rs",
-    ],
+        "trace.rs",
+    ] + select({
+        "//pw_kernel/userspace:userspace_build_enabled": [
+            "object.rs",
+            "object/buffer.rs",
+            "object/channel.rs",
+            "object/interrupt.rs",
+            "object/wait_group.rs",
+            "syscall.rs",
+        ],
+        "//conditions:default": [],
+    }),
     crate_features = select({
-        "@pigweed//pw_build/constraints/arm:cortex-m0": ["arch_arm_cortex_m"],
-        "@pigweed//pw_build/constraints/arm:cortex-m3": ["arch_arm_cortex_m"],
-        "@pigweed//pw_build/constraints/arm:cortex-m33": ["arch_arm_cortex_m"],
+        "//pw_kernel/userspace:userspace_build_enabled": ["user_space"],
+        "//conditions:default": [],
+    }) + select({
+        ":tracing_enabled": ["tracing"],
+        "//conditions:default": [],
+    }) + select({
+        "@platforms//cpu:armv8-m": ["arch_arm_cortex_m"],
+        "@platforms//cpu:riscv32": ["arch_riscv"],
         "//conditions:default": [
             "arch_host",
             "std_panic_handler",
         ],
     }),
-    proc_macro_deps = ["@rust_crates//:paste"],
-    tags = ["kernel"],
-    deps = [
-        "//pw_kernel/lib/foreign_box",
-        "//pw_kernel/lib/list",
-        "//pw_kernel/lib/regs",
-        "@pigweed//pw_log/rust:pw_log",
+    edition = "2024",
+    proc_macro_deps = [
+        "@rust_crates//:paste",
     ] + select({
-        "@pigweed//pw_build/constraints/arm:cortex-m0": CORTEX_M_DEPS,
-        "@pigweed//pw_build/constraints/arm:cortex-m3": CORTEX_M_DEPS,
-        "@pigweed//pw_build/constraints/arm:cortex-m33": CORTEX_M_DEPS,
+        "@platforms//cpu:armv8-m": ["//pw_kernel/macros:arm_cortex_m_macro"],
+        "@platforms//cpu:riscv32": ["//pw_kernel/macros:riscv_macro"],
         "//conditions:default": [],
     }),
+    tags = ["kernel"],
+    deps = [
+        "//pw_kernel/config:kernel_config",
+        "//pw_kernel/lib/foreign_box",
+        "//pw_kernel/lib/list",
+        "//pw_kernel/lib/log_if",
+        "//pw_kernel/lib/magic_values",
+        "//pw_kernel/lib/memory_config",
+        "//pw_kernel/lib/pw_assert",
+        "//pw_kernel/lib/pw_atomic",
+        "//pw_kernel/lib/pw_cast",
+        "//pw_kernel/lib/pw_kernel_tracing",
+        "//pw_kernel/lib/regs",
+        "//pw_kernel/lib/time",
+        "//pw_kernel/subsys/console",
+        "//pw_kernel/syscall:syscall_defs",
+        "//pw_log/rust:pw_log",
+        "//pw_status/rust:pw_status",
+        "@rust_crates//:bitflags",
+    ] + select({
+        "@platforms//cpu:armv8-m": CORTEX_M_DEPS,
+        "@platforms//cpu:riscv32": RISCV_DEPS,
+        "//conditions:default": [],
+    }),
+)
+
+rust_doc(
+    name = "kernel_doc",
+    crate = ":kernel",
+    rustdoc_flags = [
+        "--document-private-items",
+    ] + select({
+        "//pw_kernel/userspace:userspace_build_enabled": ["--cfg=feature=\"user_space\""],
+        "//conditions:default": [],
+    }) + select({
+        # Arch feature selection will be removed when arch support moves out of
+        # the kernel crate.
+        "@platforms//cpu:armv8-m": ["--cfg=feature=\"arch_arm_cortex_m\""],
+        "@platforms//cpu:riscv32": ["--cfg=feature=\"arch_riscv\""],
+        "//conditions:default": [
+            "--cfg=feature=\"arch_host\"",
+            "--cfg=feature=\"std_panic_handler\"",
+        ],
+    }),
+    tags = ["kernel"],
+)
+
+bool_flag(
+    name = "tracing",
+    build_setting_default = False,
+)
+
+config_setting(
+    name = "tracing_enabled",
+    flag_values = {
+        ":tracing": "true",
+    },
 )

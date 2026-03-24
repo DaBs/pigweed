@@ -30,10 +30,6 @@ To deploy ``pw_status``, depend on the library:
            ]
          }
 
-      This assumes that your Bazel ``WORKSPACE`` has a `repository
-      <https://bazel.build/concepts/build-ref#repositories>`_ named ``@pigweed``
-      that points to the upstream Pigweed repository.
-
    .. tab-item:: GN
 
       Add ``$dir_pw_status`` to the ``deps`` list in your ``pw_executable()``
@@ -82,8 +78,8 @@ Then use the status object or try macros:
 
 .. code-block:: cpp
 
-   #include "pw_status/try.h"
    #include "pw_status/status.h"
+   #include "pw_status/try.h"
 
    pw::Status MyOperation() {
      PW_TRY(SubOp1());
@@ -124,11 +120,11 @@ intended behavior of "latching" to the first error.
       }
       return overall_status;
 
-:cpp:class:`pw::Status` has a :cpp:func:`pw::Status::Update()` helper function
+:cc:`pw::Status` has a :cc:`pw::Status::Update` helper function
 that does exactly this to reduce visual clutter and succinctly highlight the
 intended behavior.
 
-.. admonition:: **Yes**: Track status with :cpp:func:`pw::Status::Update()`
+.. admonition:: **Yes**: Track status with :cc:`pw::Status::Update`
    :class: checkmark
 
    .. code-block:: cpp
@@ -149,11 +145,11 @@ intended behavior.
 ----------------------------------
 Jointly reporting status with size
 ----------------------------------
-``pw::StatusWithSize`` (``pw_status/status_with_size.h``) is a convenient,
-efficient class for reporting a status along with an unsigned integer value.
-It is similar to the ``pw::Result<T>`` class, but it stores both a size and a
-status, regardless of the status value, and only supports a limited range (27
-bits).
+:cc:`pw::StatusWithSize` (``pw_status/status_with_size.h``) is a
+convenient, efficient class for reporting a status along with an unsigned
+integer value.  It is similar to the ``pw::Result<T>`` class, but it stores both
+a size and a status, regardless of the status value, and only supports a limited
+range (27 bits).
 
 ``pw::StatusWithSize`` values may be created with functions similar to
 ``pw::Status``. For example:
@@ -163,13 +159,13 @@ bits).
    #include "pw_status/status_with_size.h"
 
    // An OK StatusWithSize with a size of 123.
-   StatusWithSize(123)
+   StatusWithSize(123);
 
    // A NOT_FOUND StatusWithSize with a size of 0.
-   StatusWithSize::NotFound()
+   StatusWithSize::NotFound();
 
    // A RESOURCE_EXHAUSTED StatusWithSize with a size of 10.
-   StatusWithSize::ResourceExhausted(10)
+   StatusWithSize::ResourceExhausted(10);
 
 ``pw::StatusWithSize`` is useful for cases where an operation may partially
 complete - for example read operations may read some number of bytes into an
@@ -180,10 +176,11 @@ Reducing error handling boilerplate
 -----------------------------------
 Manual error handling through return codes is easy to understand and
 straightforward to write, but leads to verbose code. To reduce boilerplate,
-Pigweed has the ``PW_TRY`` (``pw_status/try.h``) macro, easing development of
-functions checking or returning ``pw::Status`` and ``pw::StatusWithSize``
-objects. The ``PW_TRY`` and ``PW_TRY_WITH_SIZE`` macros call a function and do
-an early return if the function's return status is not :c:enumerator:`OK`.
+Pigweed has the :cc:`PW_TRY` (``pw_status/try.h``) macro, easing
+development of functions checking or returning :cc:`pw::Status` and
+:cc:`pw::StatusWithSize` objects. The ``PW_TRY`` and
+:cc:`PW_TRY_WITH_SIZE` macros call a function and do an early return if
+the function's return status is not :c:enumerator:`OK`.
 
 Example:
 
@@ -203,15 +200,15 @@ Example:
      // Do something, only executed if both functions above return OK.
    }
 
-``PW_TRY_ASSIGN`` is for working with ``pw::StatusWithSize`` objects in in
+:cc:`PW_TRY_ASSIGN` is for working with ``pw::StatusWithSize`` objects in
 functions that return Status. It is similar to ``PW_TRY`` with the addition of
 assigning the size from the ``pw::StatusWithSize`` on ok.
 
 .. code-block:: cpp
 
    Status PwTryAssignExample() {
-     size_t size_value
-     PW_TRY_ASSIGN(size_value, FunctionThatReturnsStatusWithSize());
+     size_t size_value PW_TRY_ASSIGN(size_value,
+                                     FunctionThatReturnsStatusWithSize());
 
      // Do something that uses size_value. size_value is only assigned and this
      // following code executed if the PW_TRY_ASSIGN function above returns OK.

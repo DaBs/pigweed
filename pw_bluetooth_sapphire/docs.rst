@@ -253,9 +253,7 @@ Roadmap
 
    fuchsia
    size_report
-   reference
 
 .. _fuchsia/prebuilt/bt-host: https://chrome-infra-packages.appspot.com/p/fuchsia/prebuilt/bt-host
 .. _fuchsia/prebuilt/bt-hci-virtual: https://chrome-infra-packages.appspot.com/p/fuchsia/prebuilt/bt-hci-virtual
 .. _pigweed-linux-bazel-bthost: https://ci.chromium.org/ui/p/pigweed/builders/pigweed.ci/pigweed-linux-bazel-bthost
-.. _GN presubmit step: https://cs.opensource.google/pigweed/pigweed/+/main:pw_presubmit/py/pw_presubmit/pigweed_presubmit.py?q=gn_chre_googletest_nanopb_sapphire_build

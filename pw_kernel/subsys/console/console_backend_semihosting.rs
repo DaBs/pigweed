@@ -13,17 +13,15 @@
 // the License.
 #![no_std]
 
+#[cfg(feature = "arch_arm_cortex_m")]
 use cortex_m_semihosting::hio::hstdout;
 use pw_status::{Error, Result};
+#[cfg(feature = "arch_riscv")]
+use riscv_semihosting::hio::hstdout;
 
-#[no_mangle]
-pub fn console_backend_write(buf: &[u8]) -> Result<usize> {
+#[unsafe(no_mangle)]
+pub fn console_backend_write_all(buf: &[u8]) -> Result<()> {
     let mut stdout = hstdout().map_err(|_| Error::Unavailable)?;
     stdout.write_all(buf).map_err(|_| Error::DataLoss)?;
-    Ok(buf.len())
-}
-
-#[no_mangle]
-pub fn console_backend_flush() -> Result<()> {
     Ok(())
 }

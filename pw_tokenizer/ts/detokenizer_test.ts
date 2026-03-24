@@ -33,6 +33,26 @@ const CSV4Col = `
 451d86ed,          ,"","Cat"
 `;
 
+const CSV_NestedHashedArgs = `
+00000001,          ,"D1","nested argument."
+00000002,          ,"","This is a \${D1}#00000001"
+00000003,          ,"","Hello $#0000000A!"
+0000000a,          ,"","World"
+64636261,          ,"D1","This is \${D2}#86fc33f3 and this is \${D3}#0d6bd33c."
+86fc33f3,          ,"D2","nested token 1"
+0d6bd33c,          ,"D3","nested token 2"
+74737271,          ,"D5","This is cool $#451d86ed"
+451d86ed,          ,"","$#45890213"
+45890213,          ,"","$#76834591"
+76834591,          ,"","and you found me!"
+00000001,          ,"doma in2","domains "
+34333231,          ,"d o m a i n 1","Weird \${domain 2}#00000001\${ domain3}#00000002"
+00000002,          ,"\t\t\tdomain        3","all around!"
+00000001,          ,"D4","crocodile"
+00000001,          ,"D4","alligator"
+00000002,          ,"D4",See ya later \${D4}#00000001!
+`;
+
 function generateFrame(text: string): Frame {
   const uintArray = new TextEncoder().encode(text);
   const encodedFrame = new Encoder().uiFrame(1, uintArray);
@@ -40,7 +60,7 @@ function generateFrame(text: string): Frame {
   return decodedFrames[0];
 }
 
-const generateTests = (description: string, csv: string) =>
+const generateTests3 = (description: string, csv: string) =>
   describe(description, () => {
     let detokenizer: Detokenizer;
 
@@ -50,21 +70,32 @@ const generateTests = (description: string, csv: string) =>
 
     it('parses a base64 correct frame properly', () => {
       const frame = generateFrame('$8zP8hg==');
-      expect(detokenizer.detokenizeBase64(frame)).toEqual('base64 token');
+      expect(detokenizer.detokenize(frame)).toEqual('base64 token');
     });
     it('parses a correct frame properly', () => {
       const frame = generateFrame('abcde');
       expect(detokenizer.detokenize(frame)).toEqual('regular token');
     });
+
+    it('decodes from uint8 array', () => {
+      const data = new TextEncoder().encode('abcde');
+      expect(detokenizer.detokenizeUint8Array(data)).toEqual('regular token');
+    });
+
+    it('decodes base64 from uint8 array', () => {
+      const data = new TextEncoder().encode('$8zP8hg==');
+      expect(detokenizer.detokenizeUint8Array(data)).toEqual('base64 token');
+    });
+
     it('failure to detokenize returns original string', () => {
       expect(detokenizer.detokenize(generateFrame('aabbcc'))).toEqual('aabbcc');
-      expect(detokenizer.detokenizeBase64(generateFrame('$8zP7hg=='))).toEqual(
+      expect(detokenizer.detokenize(generateFrame('$8zP7hg=='))).toEqual(
         '$8zP7hg==',
       );
     });
     it('recursive detokenize all nested base64 tokens', () => {
       expect(
-        detokenizer.detokenizeBase64(
+        detokenizer.detokenize(
           generateFrame(
             '$PNNrDQkkN1lZZFJRPT0lJGIxNFlsd2trTjFsWlpGSlJQVDBGUTJGdFpXeFlwSENkUHc9PQ==',
           ),
@@ -76,10 +107,11 @@ const generateTests = (description: string, csv: string) =>
 
     it('recursion detokenize with limits on max recursion', () => {
       expect(
-        detokenizer.detokenizeBase64(
+        detokenizer.detokenize(
           generateFrame(
             '$PNNrDQkkN1lZZFJRPT0lJGIxNFlsd2trTjFsWlpGSlJQVDBGUTJGdFpXeFlwSENkUHc9PQ==',
           ),
+          '',
           1,
         ),
       ).toEqual(
@@ -88,5 +120,105 @@ const generateTests = (description: string, csv: string) =>
     });
   });
 
-generateTests('Detokenize with 3 column database', CSV3Col);
-generateTests('Detokenize with 4 column database', CSV4Col);
+const generateTests4 = (description: string, csv: string) =>
+  describe(description, () => {
+    let detokenizer: Detokenizer;
+
+    beforeEach(() => {
+      detokenizer = new Detokenizer(csv);
+    });
+
+    it('parses a base64 correct frame properly', () => {
+      const frame = generateFrame('$8zP8hg==');
+      expect(detokenizer.detokenize(frame, 'bar')).toEqual('base64 token');
+    });
+    it('parses a correct frame properly', () => {
+      const frame = generateFrame('abcde');
+      expect(detokenizer.detokenize(frame, 'foo')).toEqual('regular token');
+    });
+    it('failure to detokenize returns original string', () => {
+      expect(detokenizer.detokenize(generateFrame('aabbcc'))).toEqual('aabbcc');
+      expect(detokenizer.detokenize(generateFrame('$8zP7hg=='))).toEqual(
+        '$8zP7hg==',
+      );
+    });
+    it('recursive detokenize all nested base64 tokens', () => {
+      expect(
+        detokenizer.detokenize(
+          generateFrame(
+            '$PNNrDQkkN1lZZFJRPT0lJGIxNFlsd2trTjFsWlpGSlJQVDBGUTJGdFpXeFlwSENkUHc9PQ==',
+          ),
+          'baz',
+        ),
+      ).toEqual(
+        'Regular Token: Cat and Nested Token: (token: Cat, string: Camel, int: 44, float: 1.2300000190734863)',
+      );
+    });
+
+    it('recursion detokenize with limits on max recursion', () => {
+      expect(
+        detokenizer.detokenize(
+          generateFrame(
+            '$PNNrDQkkN1lZZFJRPT0lJGIxNFlsd2trTjFsWlpGSlJQVDBGUTJGdFpXeFlwSENkUHc9PQ==',
+          ),
+          'baz',
+          1,
+        ),
+      ).toEqual(
+        'Regular Token: Cat and Nested Token: (token: $7YYdRQ==, string: Camel, int: 44, float: 1.2300000190734863)',
+      );
+    });
+  });
+
+const generateNestedTests = (description: string, csv: string) =>
+  describe(description, () => {
+    let detokenizer: Detokenizer;
+
+    beforeEach(() => {
+      detokenizer = new Detokenizer(csv);
+    });
+
+    it('parses an explicitly nested token with domain', () => {
+      const frame = generateFrame('\x02\0\0\0\0');
+      expect(detokenizer.detokenize(frame, '')).toEqual(
+        'This is a nested argument.',
+      );
+    });
+
+    it('parses another explicitly nested token with domain', () => {
+      const frame = generateFrame('\x03\0\0\0\0');
+      expect(detokenizer.detokenize(frame, '')).toEqual('Hello World!');
+    });
+
+    it('parses nested tokens with multiple domains in one sentence', () => {
+      const frame = generateFrame('\x61\x62\x63\x64');
+      expect(detokenizer.detokenize(frame, 'D1')).toEqual(
+        'This is nested token 1 and this is nested token 2.',
+      );
+    });
+
+    it('parses a nested token that leads to a database collision', () => {
+      const frame = generateFrame('\x02\0\0\0\0');
+      expect(detokenizer.detokenize(frame, 'D4')).toEqual(
+        'See ya later ${D4}#00000001!',
+      );
+    });
+
+    it('parses a deeply nested tokenized sentence', () => {
+      const frame = generateFrame('\x71\x72\x73\x74');
+      expect(detokenizer.detokenize(frame, 'D5')).toEqual(
+        'This is cool and you found me!',
+      );
+    });
+
+    it('parses nested tokens with domain whitespace', () => {
+      const frame = generateFrame('\x31\x32\x33\x34');
+      expect(detokenizer.detokenize(frame, 'domain1')).toEqual(
+        'Weird domains all around!',
+      );
+    });
+  });
+
+generateTests3('Detokenize with 3 column database', CSV3Col);
+generateTests4('Detokenize with 4 column database', CSV4Col);
+generateNestedTests('Detokenize with nested arguments', CSV_NestedHashedArgs);

@@ -17,6 +17,8 @@
 
 namespace pw::async {
 
+/// @module{pw_async}
+
 /// HeapDispatcher wraps an existing Dispatcher and allocates Task objects on
 /// the heap before posting them to the existing Dispatcher. After Tasks run,
 /// they are automatically freed.
@@ -24,6 +26,8 @@ class HeapDispatcher final : public FunctionDispatcher {
  public:
   HeapDispatcher(Dispatcher& dispatcher) : dispatcher_(dispatcher) {}
   ~HeapDispatcher() override = default;
+
+  Dispatcher& inner() const { return dispatcher_; }
 
   // FunctionDispatcher overrides:
   Status PostAt(TaskFunction&& task_func,

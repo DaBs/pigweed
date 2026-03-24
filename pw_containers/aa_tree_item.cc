@@ -14,11 +14,14 @@
 
 #include "pw_containers/internal/aa_tree_item.h"
 
+#include <algorithm>
+
 namespace pw::containers::internal {
 
 uint8_t AATreeItem::GetLevel() const {
-  return parent_.packed_value() | (left_.packed_value() << 2) |
-         (right_.packed_value() << 4);
+  return static_cast<uint8_t>(parent_.packed_value() |
+                              (left_.packed_value() << 2) |
+                              (right_.packed_value() << 4));
 }
 
 void AATreeItem::SetLevel(uint8_t level) {

@@ -118,13 +118,14 @@ void GoogleTestStyleEventHandler::TestCaseEnd(const TestCase& test_case,
 }
 
 void GoogleTestStyleEventHandler::TestCaseExpect(
-    const TestCase& test_case, const TestExpectation& expectation) {
+    const TestCase&, const TestExpectation& expectation) {
   if (!verbose_ && expectation.success) {
     return;
   }
 
   const char* result = expectation.success ? "Success" : "Failure";
-  WriteLine("%s:%d: %s", test_case.file_name, expectation.line_number, result);
+  WriteLine(
+      "%s:%d: %s", expectation.file_name, expectation.line_number, result);
   WriteLine("      Expected: %s", expectation.expression);
 
   Write("        Actual: ");

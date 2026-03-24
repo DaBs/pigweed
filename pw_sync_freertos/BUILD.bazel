@@ -28,13 +28,13 @@ cc_library(
     hdrs = [
         "public/pw_sync_freertos/binary_semaphore_inline.h",
         "public/pw_sync_freertos/binary_semaphore_native.h",
-        "public_overrides/pw_sync_backend/binary_semaphore_inline.h",
-        "public_overrides/pw_sync_backend/binary_semaphore_native.h",
+        "public_overrides/binary_semaphore/pw_sync_backend/binary_semaphore_inline.h",
+        "public_overrides/binary_semaphore/pw_sync_backend/binary_semaphore_native.h",
     ],
     implementation_deps = ["//pw_assert:check"],
     includes = [
         "public",
-        "public_overrides",
+        "public_overrides/binary_semaphore",
     ],
     target_compatible_with = [
         "//pw_build/constraints/rtos:freertos",
@@ -56,13 +56,13 @@ cc_library(
     hdrs = [
         "public/pw_sync_freertos/counting_semaphore_inline.h",
         "public/pw_sync_freertos/counting_semaphore_native.h",
-        "public_overrides/pw_sync_backend/counting_semaphore_inline.h",
-        "public_overrides/pw_sync_backend/counting_semaphore_native.h",
+        "public_overrides/counting_semaphore/pw_sync_backend/counting_semaphore_inline.h",
+        "public_overrides/counting_semaphore/pw_sync_backend/counting_semaphore_native.h",
     ],
     implementation_deps = ["//pw_assert:check"],
     includes = [
         "public",
-        "public_overrides",
+        "public_overrides/counting_semaphore",
     ],
     target_compatible_with = select({
         # Not compatible with this FreeRTOS config, because it does not enable
@@ -89,12 +89,12 @@ cc_library(
     hdrs = [
         "public/pw_sync_freertos/mutex_inline.h",
         "public/pw_sync_freertos/mutex_native.h",
-        "public_overrides/pw_sync_backend/mutex_inline.h",
-        "public_overrides/pw_sync_backend/mutex_native.h",
+        "public_overrides/mutex/pw_sync_backend/mutex_inline.h",
+        "public_overrides/mutex/pw_sync_backend/mutex_native.h",
     ],
     includes = [
         "public",
-        "public_overrides",
+        "public_overrides/mutex",
     ],
     target_compatible_with = [
         "//pw_build/constraints/rtos:freertos",
@@ -176,12 +176,12 @@ cc_library(
     ],
     hdrs = [
         "public/pw_sync_freertos/timed_mutex_inline.h",
-        "public_overrides/pw_sync_backend/timed_mutex_inline.h",
+        "public_overrides/timed_mutex/pw_sync_backend/timed_mutex_inline.h",
     ],
     implementation_deps = ["//pw_assert:check"],
     includes = [
         "public",
-        "public_overrides",
+        "public_overrides/timed_mutex",
     ],
     target_compatible_with = [
         "//pw_build/constraints/rtos:freertos",
@@ -203,13 +203,13 @@ cc_library(
     hdrs = [
         "public/pw_sync_freertos/interrupt_spin_lock_inline.h",
         "public/pw_sync_freertos/interrupt_spin_lock_native.h",
-        "public_overrides/pw_sync_backend/interrupt_spin_lock_inline.h",
-        "public_overrides/pw_sync_backend/interrupt_spin_lock_native.h",
+        "public_overrides/interrupt_spin_lock/pw_sync_backend/interrupt_spin_lock_inline.h",
+        "public_overrides/interrupt_spin_lock/pw_sync_backend/interrupt_spin_lock_native.h",
     ],
     implementation_deps = ["//pw_assert:check"],
     includes = [
         "public",
-        "public_overrides",
+        "public_overrides/interrupt_spin_lock",
     ],
     target_compatible_with = [
         "//pw_build/constraints/rtos:freertos",

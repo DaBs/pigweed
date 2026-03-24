@@ -42,8 +42,11 @@ SHA256
    std::byte digest[32];
 
    if (!pw::crypto::sha256::Sha256()
-       .Update(chunk1).Update(chunk2).Update(chunk...)
-       .Final().ok()) {
+            .Update(chunk1)
+            .Update(chunk2)
+            .Update(chunk...)
+            .Final()
+            .ok()) {
      // Handle errors.
    }
 
@@ -61,8 +64,8 @@ ECDSA
      // handle errors.
    }
 
-   if (!pw::crypto::ecdsa::VerifyP256Signature(public_key, digest,
-                                               signature).ok()) {
+   if (!pw::crypto::ecdsa::VerifyP256Signature(public_key, digest, signature)
+            .ok()) {
      // handle errors.
    }
 
@@ -76,14 +79,17 @@ ECDSA
    std::byte digest[32];
 
    if (!pw::crypto::sha256::Sha256()
-       .Update(chunk1).Update(chunk2).Update(chunkN)
-       .Final(digest).ok()) {
-       // Handle errors.
+            .Update(chunk1)
+            .Update(chunk2)
+            .Update(chunkN)
+            .Final(digest)
+            .ok()) {
+     // Handle errors.
    }
 
-   if (!pw::crypto::ecdsa::VerifyP256Signature(public_key, digest,
-                                               signature).ok()) {
-       // Handle errors.
+   if (!pw::crypto::ecdsa::VerifyP256Signature(public_key, digest, signature)
+            .ok()) {
+     // Handle errors.
    }
 
 ---
@@ -101,8 +107,12 @@ AES
 
    std::byte mac[16];
 
-   if (!pw::crypto::aes_cmac::Cmac(key).Update(chunk1).Update(chunk2)
-         .Update(chunk...).Final().ok()) {
+   if (!pw::crypto::aes_cmac::Cmac(key)
+            .Update(chunk1)
+            .Update(chunk2)
+            .Update(chunk...)
+            .Final()
+            .ok()) {
      // Handle errors.
    }
 
@@ -120,7 +130,54 @@ AES
    std::byte encrypted[16];
 
    if (!pw::crypto::unsafe::aes::EncryptBlock(key, message, encrypted).ok()) {
-       // Handle errors.
+     // Handle errors.
+   }
+
+----
+ECDH
+----
+1. Generating a keypair and computing a shared symmetric key.
+
+.. warning::
+   Ensure that the backend is initialized and configured correctly with a
+   cryptographically secure pseudo-random number generator (CSPRNG). The details
+   for doing this are specific to each backend.
+
+.. code-block:: cpp
+
+   #include "pw_crypto/ecdh.h"
+
+   // Import the public key from the other party.
+   PW_TRY_ASSIGN(auto public_key,
+                 pw::crypto::ecdh::P256PublicKey::Import(other_x,
+                                                         other_y,
+                                                         endian));
+   PW_TRY_ASSIGN(auto keypair, pw::crypto::ecdh::P256Keypair::Generate());
+
+   std::byte shared_key[32];
+   if (!keypair.ComputeDiffieHellman(public_key, shared_key)) {
+     // handle errors.
+   }
+
+2. Import a pre-existing keypair (for testing purposes) and computing a
+   shared symmetric key.
+
+.. code-block:: cpp
+
+   #include "pw_crypto/ecdh.h"
+
+   // Import the public key from the other party.
+   PW_TRY_ASSIGN(auto public_key,
+                 pw::crypto::ecdh::P256PublicKey::Import(other_x,
+                                                         other_y,
+                                                         endian));
+   PW_TRY_ASSIGN(
+       auto keypair,
+       pw::crypto::ecdh::P256Keypair::ImportForTesting(private_key, x, y, endian));
+
+   std::byte shared_key[32];
+   if (!keypair.ComputeDiffieHellman(public_key, shared_key)) {
+     // handle errors.
    }
 
 -------------
@@ -129,9 +186,9 @@ Configuration
 The crypto services offered by pw_crypto can be backed by different backend
 crypto libraries.
 
-Mbed TLS
-========
-The `Mbed TLS project <https://www.trustedfirmware.org/projects/mbed-tls/>`_
+MbedTLS
+=======
+The `MbedTLS project <https://www.trustedfirmware.org/projects/mbed-tls/>`_
 is a mature and full-featured crypto library that implements cryptographic
 primitives, X.509 certificate manipulation and the SSL/TLS and DTLS protocols.
 
@@ -140,8 +197,14 @@ The project also has good support for interfacing to cryptographic accelerators.
 The small code footprint makes the project suitable and popular for embedded
 systems.
 
-To select the Mbed TLS backend, the MbedTLS library needs to be installed and
-configured. If using GN, do,
+Enabling the MbedTLS Backend
+----------------------------
+
+To select the MbedTLS backend, the MbedTLS library needs to be installed and
+configured.
+
+GN
+^^
 
 .. code-block:: sh
 
@@ -152,12 +215,16 @@ configured. If using GN, do,
        pw_crypto_SHA256_BACKEND="//pw_crypto:sha256_mbedtls_v3"
        pw_crypto_ECDSA_BACKEND="//pw_crypto:ecdsa_mbedtls_v3"
        pw_crypto_AES_BACKEND="//pw_crypto:aes_mbedtls_v3"
+       pw_crypto_ECDH_BACKEND="//pw_crypto:ecdh_mbedtls_v3"
    '
 
    ninja -C out
 
-If using Bazel, add the Mbed TLS repository to your WORKSPACE and select
-appropriate backends by adding them to your project's `platform
+Bazel
+^^^^^
+
+If using Bazel, add a ``bazel_dep`` on MbedTLS to your ``MODULE.bazel`` file
+and select appropriate backends by adding them to your project's `platform
 <https://bazel.build/extending/platforms>`_:
 
 .. code-block:: python
@@ -165,15 +232,114 @@ appropriate backends by adding them to your project's `platform
    platform(
      name = "my_platform",
      flags = [
-        "@pigweed//pw_crypto:sha256_backend=@pigweed//pw_crypto:sha256_mbedtls_backend",
-        "@pigweed//pw_crypto:ecdsa_backend=@pigweed//pw_crypto:ecdsa_mbedtls_backend",
-        "@pigweed//pw_crypto:aes_backend=@pigweed//pw_crypto:aes_mbedtls_backend",
+        "@pigweed//pw_crypto:sha256_backend=@pigweed//pw_crypto:sha256_mbedtls",
+        "@pigweed//pw_crypto:ecdsa_backend=@pigweed//pw_crypto:ecdsa_mbedtls",
+        "@pigweed//pw_crypto:aes_backend=@pigweed//pw_crypto:aes_mbedtls",
+        "@pigweed//pw_crypto:ecdh_backend=@pigweed//pw_crypto:ecdh_mbedtls",
         # ... other flags
       ],
    )
 
-For optimal code size and/or performance, the Mbed TLS library can be configured
-per product. Mbed TLS configuration is achieved by turning on and off MBEDTLS_*
+Configuring MbedTLS
+-------------------
+
+MbedTLS is configured via setting compile-time flags in a `config.h` header.
+These flags are enumerated in the `MbedTLS docs <https://mbed-tls.readthedocs.io/projects/api/en/v3.6.0/api/file/mbedtls__config_8h/>`_.
+
+By default, Pigweed provides a default MbedTLS configuration for both MCU and
+host targets. However, projects making use of MbedTLS should strongly consider
+providing their own config.
+
+Bazel
+^^^^^
+
+The config file is set via the ``mbedtls//:mbedtls_config`` label flag.
+
+1. Create your ``config.h`` based on Pigweed's default config in ``third_party/mbedtls/config_pigweed.h``, or MbedTLS's `example configs <https://github.com/Mbed-TLS/mbedtls/tree/development/configs>`_.
+
+2. In your BUILD.bazel, define a library for your header:
+
+.. code-block:: python
+
+   cc_library(
+       name = "mbedtls_config",
+       hdrs = [
+           "my_config/my_mbedtls_config.h",
+       ],
+       strip_include_prefix = "my_config",
+       tags = ["noclangtidy"],
+       defines = [
+           "MBEDTLS_CONFIG_FILE='\"my_mbedtls_config.h\"'",
+       ]
+   )
+
+3. Set the label flag in your project's platform or `.bazelrc`:
+
+.. code-block:: python
+
+   ...
+   "@@mbedtls+//:mbedtls_config": "@mymodule//crypto:mbedtls_config",
+   ...
+
+Hardware Acceleration
+---------------------
+
+MbedTLS supports linking against `alternative implementations
+<https://mbed-tls.readthedocs.io/en/latest/kb/development/hw_acc_guidelines/>`_
+for many modules, such as entropy, AES, and SHA-2. These ``ALT`` functions are
+typically used to provide hardware-accelerated cryptography engines.
+
+Bazel
+^^^^^
+
+1.  Build your implementation against MbedTLS headers:
+
+.. code-block:: python
+
+   cc_library(
+       name = "sha256_alt",
+       hdrs = [ "sha256_alt.h" ],
+       deps = [
+           "@pigweed//targets:mcuxpresso_sdk",
+       ]
+   )
+
+   cc_library(
+       name = "mbedtls_sha256_hashcrypt",
+       srcs = [
+           "mbedtls_sha256_hashcrypt.cc",
+       ],
+       deps = [
+           ":sha256_alt",
+           "@mbedtls",
+           "@pigweed//targets:mcuxpresso_sdk",
+       ]
+   )
+
+2. Modify your MbedTLS config.h:
+
+.. code-block:: cpp
+
+   ...
+   #define MBEDTLS_SHA256_C
+   #define MBEDTLS_SHA256_ALT
+       ...
+
+3. Set platform label flags:
+
+.. code-block:: python
+
+   ...
+   "@@mbedtls+//:mbedtls_config": "@mymodule//crypto:mbedtls_config",
+   "@pigweed//pw_crypto:sha256_backend": "@pigweed//pw_crypto:sha256_mbedtls",
+   "@pigweed//pw_crypto:mbedtls_sha256_engine": "@mymodule//crypto:mbedtls_sha256_hashcrypt",
+   ...
+
+Configuration Tips
+------------------
+
+For optimal code size and/or performance, the MbedTLS library can be configured
+per product. MbedTLS configuration is achieved by turning on and off MBEDTLS_*
 options in a config.h file. See //third_party/mbedtls for how this is done.
 
 ``pw::crypto::sha256`` does not need any special configuration as it uses the
@@ -200,6 +366,51 @@ a code size of ~12KiB.
    #define MBEDTLS_ECP_NO_INTERNAL_RNG
    #define MBEDTLS_ECP_DP_SECP256R1_ENABLED
 
+If using ``pw::crypto::ecdh``, a CSPRNG must be set to provide
+cryptographically-secure randomness when generating keypairs. To do this,
+provide an instance of ``pw::crypto::ecdh::backend::Csprng`` to
+``pw::crypto::ecdh::backend::SetCsprng()``. MbedTLS MUST have been configured
+with an entropy pool that has collected sufficient (>128 bits estimated) entropy
+with one or more calls to
+
+.. code-block:: cpp
+
+   mbed_entropy_add_source(&entropy, ...)
+
+Then the following implementation can be used to provide a CTR DRBG as the
+CSPRNG for ECDH:
+
+.. code-block:: cpp
+
+   using MbedtlsCtrDrbg =
+       ::pw::crypto::ecdh::backend::Wrapper<mbedtls_ctr_drbg_context,
+                                            mbedtls_ctr_drbg_init,
+                                            mbedtls_ctr_drbg_free>;
+   class MbedtlsCsprng final : public ::pw::crypto::ecdh::backend::Csprng {
+    public:
+     MbedtlsCsprng(mbedtls_entropy_context* entropy,
+                   std::string_view personalization_string) {
+       PW_CHECK_INT_EQ(0,
+                       mbedtls_ctr_drbg_seed(ctr_drbg_.Get(),
+                                             mbedtls_entropy_func,
+                                             &entropy,
+                                             personalization_string.data(),
+                                             personalization_string.size()));
+     }
+
+     GenerateResult Generate(ByteSpan out) override {
+       if (mbedtls_ctr_drbg_random(ctr_drbg_.Get(),
+                                   reinterpret_cast<unsigned char*>(out.data()),
+                                   out.size()) != 0) {
+         return GenerateResult::kFailure;
+       }
+       return GenerateResult::kSuccess;
+     }
+
+    private:
+     MbedtlsCtrDrbg ctr_drbg_;
+   };
+
 .. _module-pw_crypto-boringssl:
 
 BoringSSL
@@ -222,11 +433,12 @@ configured. To do that:
    gn gen out --args='
        dir_pw_third_party_boringssl=getenv("PW_PACKAGE_ROOT")+"/boringssl"
        pw_crypto_AES_BACKEND="//pw_crypto:aes_boringssl"
+       pw_crypto_ECDH_BACKEND="//pw_crypto:ecdh_boringssl"
    '
 
    ninja -C out
 
-If using Bazel, add the BoringSSL repository to your WORKSPACE or MODULE.bazel
+If using Bazel, add the BoringSSL repository to your ``MODULE.bazel``
 and select appropriate backends by adding them to your project's `platform
 <https://bazel.build/extending/platforms>`_:
 
@@ -246,17 +458,9 @@ Size Reports
 Below are size reports for each crypto service. These vary across
 configurations.
 
-.. TODO: b/388905812 - Re-enable the size report.
-.. .. include:: size_report
-.. include:: ../size_report_notice
+.. include:: pw_crypto_size_report
 
 -------------
 API reference
 -------------
-.. doxygenfunction:: pw::crypto::ecdsa::VerifyP256Signature(ConstByteSpan public_key, ConstByteSpan digest, ConstByteSpan signature)
-.. doxygenfunction:: pw::crypto::sha256::Hash(ConstByteSpan message, ByteSpan out_digest)
-.. doxygenfunction:: pw::crypto::sha256::Hash(stream::Reader& reader, ByteSpan out_digest)
-.. doxygenvariable:: pw::crypto::sha256::kDigestSizeBytes
-.. doxygenfunction:: pw::crypto::sha256::Sha256::Final(ByteSpan out_digest)
-.. doxygenfunction:: pw::crypto::sha256::Sha256::Update(ConstByteSpan data)
-.. doxygenenum::     pw::crypto::sha256::Sha256State
+Moved: :cc:`pw_crypto`

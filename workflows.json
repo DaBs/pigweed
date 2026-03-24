@@ -1,0 +1,728 @@
+{
+  "configs": [
+    {
+      "name": "bazel_default",
+      "description": "Default bazel build configuration (usually host)",
+      "build_type": "bazel",
+      "args": [],
+      "env": {}
+    },
+    {
+      "name": "bazel_default_notest",
+      "description": "Default bazel build configuration (usually host)",
+      "build_type": "bazel",
+      "args": [],
+      "env": {},
+      "driver_options": {
+        "@type": "pw.build.proto.BazelDriverOptions",
+        "no_test": true
+      }
+    },
+    {
+      "name": "k_host_config",
+      "description": "Kernel host config",
+      "build_type": "bazel",
+      "args": [
+        "--config=k_host"
+      ],
+      "env": {}
+    }
+  ],
+  "output_specs": [],
+  "builds": [
+    {
+      "name": "all_host",
+      "use_config": "bazel_default",
+      "targets": [
+        "//...",
+        "//pw_toolchain:cpp_20_check"
+      ]
+    },
+    {
+      "name": "all_host_cpp17",
+      "build_config": {
+        "name": "bazel_default_cpp17",
+        "description": "Host C++17 build",
+        "build_type": "bazel",
+        "args": [
+          "--//pw_toolchain/cc:cxx_standard=17"
+        ]
+      },
+      "targets": [
+        "//...",
+        "//pw_toolchain:cpp_17_check"
+      ]
+    },
+    {
+      "name": "all_host_cpp23",
+      "build_config": {
+        "name": "bazel_default_cpp23",
+        "description": "Host C++23 build",
+        "build_type": "bazel",
+        "args": [
+          "--//pw_toolchain/cc:cxx_standard=23"
+        ]
+      },
+      "targets": [
+        "//..."
+      ]
+    },
+    {
+      "name": "docs",
+      "use_config": "bazel_default_notest",
+      "targets": [
+        "//docs"
+      ]
+    },
+    {
+      "name": "python_pylint",
+      "build_config": {
+        "name": "python_pylint_config",
+        "description": "pylint",
+        "build_type": "bazel",
+        "args": [
+          "--config=pylint"
+        ],
+        "driver_options": {
+          "@type": "pw.build.proto.BazelDriverOptions",
+          "no_test": true
+        }
+      },
+      "targets": [
+        "//..."
+      ]
+    },
+    {
+      "name": "python_mypy",
+      "build_config": {
+        "name": "python_mypy_config",
+        "description": "mypy",
+        "build_type": "bazel",
+        "args": [
+          "--config=mypy"
+        ],
+        "driver_options": {
+          "@type": "pw.build.proto.BazelDriverOptions",
+          "no_test": true
+        }
+      },
+      "targets": [
+        "//..."
+      ]
+    },
+    {
+      "name": "build_rp2040_tests",
+      "build_config": {
+        "name": "pico_rp2040",
+        "description": "Default Pi Pico build (rp2040)",
+        "build_type": "bazel",
+        "args": [
+          "--config=rp2040"
+        ],
+        "driver_options": {
+          "@type": "pw.build.proto.BazelDriverOptions",
+          "no_test": true
+        }
+      },
+      "targets": [
+        "//..."
+      ]
+    },
+    {
+      "name": "build_rp2350_tests",
+      "build_config": {
+        "name": "pico_rp2350",
+        "description": "Default Pi Pico build (rp2350)",
+        "build_type": "bazel",
+        "args": [
+          "--config=rp2350"
+        ],
+        "driver_options": {
+          "@type": "pw.build.proto.BazelDriverOptions",
+          "no_test": true
+        }
+      },
+      "targets": [
+        "//..."
+      ]
+    },
+    {
+      "name": "lm3s6965evb",
+      "build_config": {
+        "name": "lm3s6965evb_config",
+        "description": "lm3s6965evb build",
+        "build_type": "bazel",
+        "args": [
+          "--config=lm3s6965evb"
+        ]
+      },
+      "targets": [
+        "//pw_status/...",
+        "//pw_rust/examples/embedded_hello:hello",
+        "//pw_rust/examples/tokenized_logging"
+      ]
+    },
+    {
+      "name": "jni",
+      "build_config": {
+        "name": "jni_config",
+        "description": "jni build",
+        "build_type": "bazel",
+        "args": [
+          "--build_tag_filters=jni",
+          "--test_tag_filters=jni"
+        ]
+      },
+      "targets": [
+        "//..."
+      ]
+    },
+    {
+      "name": "rust_nightly",
+      "build_config": {
+        "name": "rust_nightly_config",
+        "description": "Pigweed with Nightly release of Rust",
+        "build_type": "bazel",
+        "args": [
+          "--@rules_rust//rust/toolchain/channel=nightly"
+        ]
+      },
+      "targets": [
+        "//..."
+      ]
+    },
+    {
+      "name": "googletest",
+      "build_config": {
+        "name": "googletest_config",
+        "description": "Use real Googletest",
+        "build_type": "bazel",
+        "args": [
+          "--config=googletest"
+        ]
+      },
+      "targets": [
+        "//..."
+      ]
+    },
+    {
+      "name": "clippy",
+      "build_config": {
+        "name": "clippy_config",
+        "description": "Run clippy checks",
+        "build_type": "bazel",
+        "args": [
+          "--aspects=@rules_rust//rust:defs.bzl%rust_clippy_aspect",
+          "--output_groups=clippy_checks"
+        ],
+        "driver_options": {
+          "@type": "pw.build.proto.BazelDriverOptions",
+          "no_test": true
+        }
+      },
+      "targets": [
+        "//..."
+      ]
+    },
+    {
+      "name": "clippy_nightly",
+      "build_config": {
+        "name": "clippy_nightly_config",
+        "description": "Run clippy checks",
+        "build_type": "bazel",
+        "args": [
+          "--@rules_rust//rust/toolchain/channel=nightly",
+          "--aspects=@rules_rust//rust:defs.bzl%rust_clippy_aspect",
+          "--output_groups=clippy_checks"
+        ],
+        "driver_options": {
+          "@type": "pw.build.proto.BazelDriverOptions",
+          "no_test": true
+        }
+      },
+      "targets": [
+        "//..."
+      ]
+    },
+    {
+      "name": "asan_fuzztest",
+      "build_config": {
+        "name": "asan_fuzztest_config",
+        "description": "ASAN Fuzztest",
+        "build_type": "bazel",
+        "args": [
+          "--config=asan",
+          "--config=fuzztest"
+        ],
+        "driver_options": {
+          "@type": "pw.build.proto.BazelDriverOptions",
+          "no_test": true
+        }
+      },
+      "targets": [
+        "//..."
+      ]
+    },
+    {
+      "name": "rpc_callback",
+      "build_config": {
+        "name": "rpc_callback_config",
+        "description": "RPC callback config enabled",
+        "build_type": "bazel",
+        "args": [
+          "--//pw_rpc:config_override=//pw_rpc:completion_request_callback_config_enabled"
+        ]
+      },
+      "targets": [
+        "//pw_rpc/..."
+      ]
+    },
+    {
+      "name": "grpc",
+      "build_config": {
+        "name": "grpc_config",
+        "description": "GRPC support",
+        "build_type": "bazel",
+        "args": [
+          "--platforms=//pw_grpc:test_platform"
+        ]
+      },
+      "targets": [
+        "//pw_grpc/..."
+      ]
+    },
+    {
+      "name": "k_host",
+      "use_config": "k_host_config",
+      "targets": [
+        "//pw_kernel/..."
+      ]
+    },
+    {
+      "name": "k_doctest",
+      "build_config": {
+        "name": "k_doctest_config",
+        "description": "Kernel doc test config",
+        "build_type": "bazel",
+        "args": [
+          "--config=k_doctest"
+        ],
+        "env": {}
+      },
+      "targets": [
+        "//pw_kernel/..."
+      ]
+    },
+    {
+      "name": "k_qemu_mps2_an505",
+      "build_config": {
+        "name": "k_qemu_mps2_an505_config",
+        "description": "QEMU MPS2 AN505 config",
+        "build_type": "bazel",
+        "args": [
+          "--config=k_qemu_mps2_an505"
+        ],
+        "env": {}
+      },
+      "targets": [
+        "//pw_kernel/..."
+      ]
+    },
+    {
+      "name": "k_qemu_virt_riscv32",
+      "build_config": {
+        "name": "k_qemu_virt_riscv32_config",
+        "description": "QEMU Virt RISC-V32 config",
+        "build_type": "bazel",
+        "args": [
+          "--config=k_qemu_virt_riscv32"
+        ],
+        "env": {}
+      },
+      "targets": [
+        "//pw_kernel/..."
+      ]
+    },
+    {
+      "name": "k_rp2350",
+      "build_config": {
+        "name": "k_rp2350_config",
+        "description": "Kernel RP2350 config",
+        "build_type": "bazel",
+        "args": [
+          "--config=k_rp2350"
+        ],
+        "env": {},
+        "driver_options": {
+          "@type": "pw.build.proto.BazelDriverOptions",
+          "no_test": true
+        }
+      },
+      "targets": [
+        "//pw_kernel/..."
+      ]
+    },
+    {
+      "name": "k_host_lint",
+      "build_config": {
+        "name": "k_host_lint_config",
+        "description": "Kernel host lint config",
+        "build_type": "bazel",
+        "args": [
+          "--config=k_lint",
+          "--config=k_host"
+        ],
+        "env": {},
+        "driver_options": {
+          "@type": "pw.build.proto.BazelDriverOptions",
+          "no_test": true
+        }
+      },
+      "targets": [
+        "//pw_kernel/..."
+      ]
+    },
+    {
+      "name": "k_qemu_mps2_an505_lint",
+      "build_config": {
+        "name": "k_qemu_mps2_an505_lint_config",
+        "description": "Kernel QEMU MPS2 AN505 host lint config",
+        "build_type": "bazel",
+        "args": [
+          "--config=k_lint",
+          "--config=k_qemu_mps2_an505"
+        ],
+        "env": {},
+        "driver_options": {
+          "@type": "pw.build.proto.BazelDriverOptions",
+          "no_test": true
+        }
+      },
+      "targets": [
+        "//pw_kernel/..."
+      ]
+    },
+    {
+      "name": "k_qemu_virt_riscv32_lint",
+      "build_config": {
+        "name": "k_k_qemu_virt_riscv32_lint_config",
+        "description": "Kernel QEMU virt_ristv32 lint config",
+        "build_type": "bazel",
+        "args": [
+          "--config=k_lint",
+          "--config=k_qemu_virt_riscv32"
+        ],
+        "env": {},
+        "driver_options": {
+          "@type": "pw.build.proto.BazelDriverOptions",
+          "no_test": true
+        }
+      },
+      "targets": [
+        "//pw_kernel/..."
+      ]
+    },
+    {
+      "name": "k_rp2350_lint",
+      "build_config": {
+        "name": "k_rp2350_lint_config",
+        "description": "Kernel PW RP2350 lint config",
+        "build_type": "bazel",
+        "args": [
+          "--config=k_lint",
+          "--config=k_rp2350"
+        ],
+        "env": {},
+        "driver_options": {
+          "@type": "pw.build.proto.BazelDriverOptions",
+          "no_test": true
+        }
+      },
+      "targets": [
+        "//pw_kernel/..."
+      ]
+    },
+    {
+      "name": "clang_tidy",
+      "build_config": {
+        "name": "clang_tidy_config",
+        "description": "Clang-Tidy config",
+        "build_type": "bazel",
+        "args": [
+          "--config=clang-tidy"
+        ],
+        "env": {},
+        "driver_options": {
+          "@type": "pw.build.proto.BazelDriverOptions",
+          "no_test": true
+        }
+      },
+      "targets": [
+        "//..."
+      ]
+    },
+    {
+      "name": "asan_build",
+      "build_config": {
+        "name": "asan_config",
+        "description": "ASAN config",
+        "build_type": "bazel",
+        "args": [
+          "--config=asan"
+        ],
+        "env": {}
+      },
+      "targets": [
+        "//..."
+      ]
+    },
+    {
+      "name": "asan_googletest",
+      "build_config": {
+        "name": "asan_googletest_config",
+        "description": "ASAN Googletest config",
+        "build_type": "bazel",
+        "args": [
+          "--config=asan",
+          "--config=googletest"
+        ],
+        "env": {}
+      },
+      "targets": [
+        "//..."
+      ]
+    },
+    {
+      "name": "tsan_build",
+      "build_config": {
+        "name": "tsan_config",
+        "description": "TSAN config",
+        "build_type": "bazel",
+        "args": [
+          "--config=tsan"
+        ],
+        "env": {}
+      },
+      "targets": [
+        "//..."
+      ]
+    },
+    {
+      "name": "tsan_googletest",
+      "build_config": {
+        "name": "tsan_googletest_config",
+        "description": "TSAN Googletest config",
+        "build_type": "bazel",
+        "args": [
+          "--config=tsan",
+          "--config=googletest"
+        ],
+        "env": {}
+      },
+      "targets": [
+        "//..."
+      ]
+    },
+    {
+      "name": "ubsan_build",
+      "build_config": {
+        "name": "ubsan_config",
+        "description": "UBSAN config",
+        "build_type": "bazel",
+        "args": [
+          "--config=ubsan"
+        ],
+        "env": {}
+      },
+      "targets": [
+        "//..."
+      ]
+    },
+    {
+      "name": "ubsan_googletest",
+      "build_config": {
+        "name": "ubsan_googletest_config",
+        "description": "UBSAN Googletest config",
+        "build_type": "bazel",
+        "args": [
+          "--config=ubsan",
+          "--config=googletest"
+        ],
+        "env": {}
+      },
+      "targets": [
+        "//..."
+      ]
+    }
+  ],
+  "tools": [
+    {
+      "name": "change",
+      "description": "Work with Gerrit changes and Git commits.",
+      "use_config": "bazel_default",
+      "target": "@pigweed//:change",
+      "type": "GENERAL"
+    },
+    {
+      "name": "format",
+      "description": "Find and fix code formatting issues",
+      "use_config": "bazel_default",
+      "analyzer_friendly_args": [
+        "--check"
+      ],
+      "target": "@pigweed//:format"
+    },
+    {
+      "name": "keep-sorted",
+      "description": "Keep specified lists sorted.",
+      "use_config": "bazel_default",
+      "target": "//pw_presubmit/py:keep_sorted"
+    },
+    {
+      "name": "pw_presubmit_checks",
+      "description": "Run checks that use the pw_presubmit framework",
+      "use_config": "bazel_default",
+      "target": "@pigweed//:presubmit",
+      "type": "ANALYZER"
+    },
+    {
+      "name": "compile_commands_integration_test",
+      "description": "Runs integration tests for pw_ide's compile commands generator",
+      "use_config": "bazel_default",
+      "target": "//pw_ide/py:integration_test",
+      "type": "ANALYZER"
+    },
+    {
+      "name": "compile_commands_performance_test",
+      "description": "Runs performance tests for pw_ide's compile commands generator",
+      "use_config": "bazel_default",
+      "target": "//pw_ide/py:performance_test",
+      "type": "ANALYZER"
+    },
+    {
+      "name": "push",
+      "description": "Upload the current git branch to Gerrit for review.",
+      "use_config": "bazel_default",
+      "target": "@pigweed//:push",
+      "type": "GENERAL"
+    },
+    {
+      "name": "review",
+      "description": "Review the commit at HEAD using Gemini",
+      "use_config": "bazel_default",
+      "target": "@pigweed//:review",
+      "type": "GENERAL"
+    },
+    {
+      "name": "watch",
+      "description": "Run Bazel commands when files change",
+      "use_config": "bazel_default",
+      "target": "@pigweed//:watch",
+      "type": "GENERAL"
+    },
+    {
+      "name": "changelog",
+      "description": "Update the pigweed.dev changelog",
+      "use_config": "bazel_default",
+      "target": "@pigweed//docs/sphinx/changelog/py:changelog",
+      "type": "GENERAL",
+      "analyzer_friendly_args": [
+        "--check"
+      ]
+    }
+  ],
+  "groups": [
+    {
+      "name": "presubmit",
+      "description": "Quick presubmit for validating code changes locally",
+      "analyzers": [
+        "format",
+        "pw_presubmit_checks"
+      ]
+    },
+    {
+      "name": "default",
+      "description": "Common builds/configurations",
+      "builds": [
+        "lm3s6965evb",
+        "jni",
+        "googletest",
+        "asan_fuzztest",
+        "rpc_callback",
+        "grpc",
+        "build_rp2040_tests",
+        "build_rp2350_tests"
+      ]
+    },
+    {
+      "name": "host",
+      "description": "Most common host builds/configurations",
+      "analyzers": [
+        "compile_commands_integration_test",
+        "compile_commands_performance_test"
+      ],
+      "builds": [
+        "all_host",
+        "all_host_cpp17",
+        "all_host_cpp23",
+        "docs"
+      ]
+    },
+    {
+      "name": "rust",
+      "description": "Rust builds/configurations",
+      "builds": [
+        "rust_nightly",
+        "clippy",
+        "clippy_nightly"
+      ]
+    },
+    {
+      "name": "python_checks",
+      "description": "Python pylint and mypy",
+      "builds": [
+        "python_pylint",
+        "python_mypy"
+      ]
+    },
+    {
+      "name": "kernel",
+      "description": "Kernel-related builds/configurations",
+      "builds": [
+        "k_host",
+        "k_doctest",
+        "k_qemu_mps2_an505",
+        "k_qemu_virt_riscv32",
+        "k_rp2350",
+        "k_host_lint",
+        "k_qemu_mps2_an505_lint",
+        "k_qemu_virt_riscv32_lint",
+        "k_rp2350_lint"
+      ]
+    },
+    {
+      "name": "asan",
+      "description": "ASAN-related builds",
+      "builds": [
+        "asan_build",
+        "asan_googletest"
+      ]
+    },
+    {
+      "name": "tsan",
+      "description": "TSAN-related builds",
+      "builds": [
+        "tsan_build",
+        "tsan_googletest"
+      ]
+    },
+    {
+      "name": "ubsan",
+      "description": "UBSAN-related builds",
+      "builds": [
+        "ubsan_build",
+        "ubsan_googletest"
+      ]
+    }
+  ]
+}

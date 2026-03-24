@@ -12,29 +12,31 @@
 # License for the specific language governing permissions and limitations under
 # the License.
 
-load("@aspect_bazel_lib//lib:directory_path.bzl", "directory_path")
-load("@aspect_rules_js//js:defs.bzl", "js_binary", "js_run_binary")
+load("@aspect_bazel_lib//lib:copy_to_bin.bzl", "copy_to_bin")
 load("@bazel_skylib//rules:copy_file.bzl", "copy_file")
-load("@hedron_compile_commands//:refresh_compile_commands.bzl", "refresh_compile_commands")
-load("@npm//:defs.bzl", "npm_link_all_packages")
+load("@bazel_skylib//rules:native_binary.bzl", "native_binary")
 load("@pigweed//pw_build:compatibility.bzl", "incompatible_with_mcu")
+load("@pigweed//pw_ide/bazel/compile_commands:pw_compile_commands_generator.bzl", "pw_compile_commands_generator")
 load("@rules_python//sphinxdocs:sphinx_docs_library.bzl", "sphinx_docs_library")
 
 licenses(["notice"])
 
-# Needed for releasing //pw_bluetooth_sapphire/fuchsia/bt_host.
-exports_files(
-    ["LICENSE"],
-    visibility = [":__subpackages__"],
-)
-
+# Files visible across Pigweed.
 exports_files(
     [
         "pigweed.json",
-        "PIGWEED_MODULES",
         "tsconfig.json",
+        # Needed for releasing //pw_bluetooth_sapphire/fuchsia/bt_host.
+        "LICENSE",
+        "PIGWEED_MODULES",
     ],
     visibility = [":__subpackages__"],
+)
+
+# Files that are enumerated so they can be referenced by flags.
+exports_files(
+    ["rustfmt.toml"],
+    visibility = ["//visibility:private"],
 )
 
 filegroup(
@@ -43,9 +45,39 @@ filegroup(
     visibility = [":__subpackages__"],
 )
 
+native_binary(
+    name = "pw",
+    src = "//pw_build/py:workflows_launcher",
+)
+
+alias(
+    name = "change",
+    actual = "//pw_change/py:change",
+)
+
 alias(
     name = "watch",
     actual = "//pw_watch/py:bazel",
+)
+
+alias(
+    name = "format",
+    actual = "//pw_presubmit/py:format",
+)
+
+alias(
+    name = "push",
+    actual = "//pw_change/py:push",
+)
+
+alias(
+    name = "review",
+    actual = "//pw_change/py:review",
+)
+
+alias(
+    name = "presubmit",
+    actual = "//pw_presubmit/py:local_presubmit",
 )
 
 # Symlink to clangd, for user convenience.
@@ -56,202 +88,106 @@ copy_file(
     allow_symlink = True,
 )
 
-# The Fuchsia SDK is only supported on Linux hosts, so the target that
-# generates compile commands for targets built for Fuchsia is separate from
-# the more general-purpose `refresh_compile_commands` target.
-refresh_compile_commands(
+# Creates a set of compile command databases that merges
+# all of the databases produced by its deps.
+pw_compile_commands_generator(
+    name = "update_compile_commands",
+    deps = [
+        ":update_host_compile_commands",
+        ":update_host_googletest_compile_commands",
+        ":update_rp2040_compile_commands",
+        ":update_rp2350_compile_commands",
+    ] + select({
+        "@platforms//os:linux": [":refresh_compile_commands_for_fuchsia_sdk"],
+        "//conditions:default": [],
+    }),
+)
+
+pw_compile_commands_generator(
+    name = "update_host_compile_commands",
+    platform = "@bazel_tools//tools:host_platform",
+    target_patterns = [
+        "//...",
+    ],
+)
+
+pw_compile_commands_generator(
+    name = "update_host_googletest_compile_commands",
+    platform = "//targets/host:host_googletest",
+    target_patterns = [
+        "//...",
+    ],
+)
+
+pw_compile_commands_generator(
+    name = "update_rp2040_compile_commands",
+    platform = "//targets/rp2040",
+    target_patterns = [
+        "//...",
+    ],
+)
+
+pw_compile_commands_generator(
+    name = "update_rp2350_compile_commands",
+    platform = "//targets/rp2040:rp2350",
+    target_patterns = [
+        "//...",
+    ],
+)
+
+pw_compile_commands_generator(
     name = "refresh_compile_commands_for_fuchsia_sdk",
-    out_dir = ".compile_commands",
+    platform = "//targets/fuchsia:fuchsia_host",
     target_compatible_with = select({
         "@platforms//os:linux": [],
         "//conditions:default": ["@platforms//:incompatible"],
     }),
-    target_groups = {
-        "fuchsia": [
-            [
-                "//pw_bluetooth_sapphire/fuchsia/bt_host:test_pkg",
-                "--config=fuchsia",
-            ],
-            [
-                "//pw_bluetooth_sapphire/fuchsia/host/att:test_pkg",
-                "--config=fuchsia",
-            ],
-            [
-                "//pw_bluetooth_sapphire/fuchsia/host/common:test_pkg",
-                "--config=fuchsia",
-            ],
-            [
-                "//pw_bluetooth_sapphire/fuchsia/host/controllers:test_pkg",
-                "--config=fuchsia",
-            ],
-            [
-                "//pw_bluetooth_sapphire/fuchsia/host/fidl:test_pkg",
-                "--config=fuchsia",
-            ],
-            [
-                "//pw_bluetooth_sapphire/fuchsia/host/gap:test_pkg",
-                "--config=fuchsia",
-            ],
-            [
-                "//pw_bluetooth_sapphire/fuchsia/host/gatt:test_pkg",
-                "--config=fuchsia",
-            ],
-            [
-                "//pw_bluetooth_sapphire/fuchsia/host/hci:test_pkg",
-                "--config=fuchsia",
-            ],
-            [
-                "//pw_bluetooth_sapphire/fuchsia/host/hci-spec:test_pkg",
-                "--config=fuchsia",
-            ],
-            [
-                "//pw_bluetooth_sapphire/fuchsia/host/iso:test_pkg",
-                "--config=fuchsia",
-            ],
-            [
-                "//pw_bluetooth_sapphire/fuchsia/host/l2cap:test_pkg",
-                "--config=fuchsia",
-            ],
-            [
-                "//pw_bluetooth_sapphire/fuchsia/host/sco:test_pkg",
-                "--config=fuchsia",
-            ],
-            [
-                "//pw_bluetooth_sapphire/fuchsia/host/sdp:test_pkg",
-                "--config=fuchsia",
-            ],
-            [
-                "//pw_bluetooth_sapphire/fuchsia/host/sm:test_pkg",
-                "--config=fuchsia",
-            ],
-            [
-                "//pw_bluetooth_sapphire/fuchsia/host/socket:test_pkg",
-                "--config=fuchsia",
-            ],
-            [
-                "//pw_bluetooth_sapphire/fuchsia/host/testing:test_pkg",
-                "--config=fuchsia",
-            ],
-            [
-                "//pw_bluetooth_sapphire/fuchsia/host/transport:test_pkg",
-                "--config=fuchsia",
-            ],
-        ],
-    },
+    target_patterns = [
+        "//pw_bluetooth_sapphire/fuchsia/bt_host:test_pkg",
+        "//pw_bluetooth_sapphire/fuchsia/host/att:test_pkg",
+        "//pw_bluetooth_sapphire/fuchsia/host/common:test_pkg",
+        "//pw_bluetooth_sapphire/fuchsia/host/controllers:test_pkg",
+        "//pw_bluetooth_sapphire/fuchsia/host/fidl:test_pkg",
+        "//pw_bluetooth_sapphire/fuchsia/host/gap:test_pkg",
+        "//pw_bluetooth_sapphire/fuchsia/host/gatt:test_pkg",
+        "//pw_bluetooth_sapphire/fuchsia/host/hci:test_pkg",
+        "//pw_bluetooth_sapphire/fuchsia/host/hci-spec:test_pkg",
+        "//pw_bluetooth_sapphire/fuchsia/host/iso:test_pkg",
+        "//pw_bluetooth_sapphire/fuchsia/host/l2cap:test_pkg",
+        "//pw_bluetooth_sapphire/fuchsia/host/sco:test_pkg",
+        "//pw_bluetooth_sapphire/fuchsia/host/sdp:test_pkg",
+        "//pw_bluetooth_sapphire/fuchsia/host/sm:test_pkg",
+        "//pw_bluetooth_sapphire/fuchsia/host/socket:test_pkg",
+        "//pw_bluetooth_sapphire/fuchsia/host/testing:test_pkg",
+        "//pw_bluetooth_sapphire/fuchsia/host/transport:test_pkg",
+    ],
 )
 
 sphinx_docs_library(
-    name = "docs",
+    name = "extra_docs_inputs",
     srcs = [
         ".bazelversion",
+        ".clang-tidy",
         "Kconfig.zephyr",
+        "PIGWEED_MODULES",
     ],
     target_compatible_with = incompatible_with_mcu(),
-    visibility = ["//visibility:public"],
-)
-
-# NPM bundling via rollup
-npm_link_all_packages(name = "node_modules")
-
-directory_path(
-    name = "rollup_entry_point",
-    directory = "//:node_modules/rollup/dir",
-    path = "dist/bin/rollup",
-    target_compatible_with = incompatible_with_mcu(),
-)
-
-js_binary(
-    name = "rollup_bin",
-    entry_point = ":rollup_entry_point",
-    target_compatible_with = incompatible_with_mcu(),
-)
-
-filegroup(
-    name = "js_files",
-    srcs = glob([
-        "ts/**/*.ts",
-    ]) + [
-        "package.json",
-        "rollup.config.js",
-        "rollup-protos.config.js",
-        "tsconfig.json",
-    ],
-)
-
-js_run_binary(
-    name = "build_protos_builder",
-    srcs = [
-        ":js_files",
-        ":node_modules",
-        "//pw_hdlc/ts:js_files",
-        "//pw_protobuf_compiler/ts:js_files",
-        "//pw_status/ts:js_files",
-        "//pw_tokenizer/ts:js_files",
-    ],
-    outs = ["dist/bin/build_default_protos.js"],
-    args = ["-c rollup-protos.config.js"],
-    target_compatible_with = incompatible_with_mcu(),
-    tool = ":rollup_bin",
-)
-
-js_binary(
-    name = "build_protos_binary",
-    entry_point = ":build_protos_builder",
-    target_compatible_with = incompatible_with_mcu(),
-)
-
-js_run_binary(
-    name = "build_protos",
-    srcs = [
-        ":js_files",
-        ":node_modules",
-        "//pw_log:js_protos",
-        "//pw_protobuf:js_protos",
-        "//pw_protobuf_compiler/ts:js_files",
-        "//pw_rpc/ts:js_files",
-        "//pw_tokenizer/ts:js_files",
-        "//pw_transfer/ts:js_files",
-    ],
-    out_dirs = ["dist/protos"],
-    target_compatible_with = incompatible_with_mcu(),
-    tool = ":build_protos_binary",
-)
-
-js_run_binary(
-    name = "pw_web",
-    srcs = [
-        ":build_protos",
-        ":js_files",
-        ":node_modules",
-        "//pw_hdlc/ts:js_files",
-        "//pw_protobuf_compiler/ts:js_files",
-        "//pw_rpc/ts:js_files",
-        "//pw_status/ts:js_files",
-        "//pw_tokenizer/ts:js_files",
-        "//pw_transfer/ts:js_files",
-        "//pw_web:js_files",
-    ],
-    outs = [
-        "dist/index.mjs",
-        "dist/index.mjs.map",
-        "dist/index.umd.js",
-        "dist/index.umd.js.map",
-        "dist/logging.mjs",
-        "dist/logging.umd.js",
-        "dist/logging.umd.js.map",
-        "dist/proto_collection.umd.js",
-        "dist/proto_collection.umd.js.map",
-        "dist/pw_console.mjs",
-        "dist/pw_console.umd.js",
-        "dist/pw_console.umd.js.map",
-    ],
-    args = ["-c"],
-    target_compatible_with = incompatible_with_mcu(),
-    tool = ":rollup_bin",
+    visibility = [":__subpackages__"],
 )
 
 filegroup(
     name = "clang_tidy_config",
     srcs = [".clang-tidy"],
     visibility = ["//visibility:public"],
+)
+
+filegroup(
+    name = "pylintrc",
+    srcs = [".pylintrc"],
+)
+
+copy_to_bin(
+    name = "tsconfig",
+    srcs = ["tsconfig.json"],
+    visibility = ["//pw_web:__subpackages__"],
 )

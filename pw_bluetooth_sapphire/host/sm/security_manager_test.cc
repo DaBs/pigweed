@@ -21,6 +21,7 @@
 #include <cstdlib>
 
 #include "pw_async/fake_dispatcher.h"
+#include "pw_bluetooth_sapphire/fake_lease_provider.h"
 #include "pw_bluetooth_sapphire/internal/host/common/macros.h"
 #include "pw_bluetooth_sapphire/internal/host/common/random.h"
 #include "pw_bluetooth_sapphire/internal/host/gap/gap.h"
@@ -127,6 +128,12 @@ class SecurityManagerTest : public l2cap::testing::FakeChannelTest,
 
  protected:
   void SetUp() override {
+    static bool backend_set_up = false;
+    if (!backend_set_up) {
+      pw::crypto::ecdh::SetUpBackendForTesting();
+      backend_set_up = true;
+    }
+
     l2cap::testing::FakeChannelTest::SetUp();
     InitializeTransport();
   }
@@ -642,8 +649,8 @@ class SecurityManagerTest : public l2cap::testing::FakeChannelTest,
     auto mock_controller =
         std::make_unique<bt::testing::MockController>(dispatcher());
     controller_ = mock_controller->GetWeakPtr();
-    transport_ = std::make_unique<hci::Transport>(std::move(mock_controller),
-                                                  dispatcher());
+    transport_ = std::make_unique<hci::Transport>(
+        std::move(mock_controller), dispatcher(), lease_provider_);
     std::optional<bool> init_success;
     transport_->Initialize([&](bool success) { init_success = success; });
     RunUntilIdle();
@@ -728,6 +735,7 @@ class SecurityManagerTest : public l2cap::testing::FakeChannelTest,
 
   std::optional<ErrorCode> received_error_code_;
 
+  pw::bluetooth_sapphire::testing::FakeLeaseProvider lease_provider_;
   std::unique_ptr<l2cap::testing::FakeChannel> fake_chan_;
   std::unique_ptr<hci::testing::FakeLowEnergyConnection> fake_le_link_;
   std::unique_ptr<hci::testing::FakeBrEdrConnection> fake_bredr_link_;

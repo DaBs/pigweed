@@ -13,7 +13,6 @@ pw_unit_test
       .. code-block:: c++
 
          #include "mylib.h"
-
          #include "pw_unit_test/framework.h"
 
          namespace {
@@ -24,7 +23,7 @@ pw_unit_test
            EXPECT_STREQ(expected.c_str(), actual.c_str());
          }
 
-         }
+         }  // namespace
 
    .. tab-item:: BUILD.bazel
 
@@ -54,7 +53,6 @@ pw_unit_test
       .. code-block:: c++
 
          #include "mylib.h"
-
          #include "pw_string/string.h"
 
          namespace mylib {
@@ -64,7 +62,7 @@ pw_unit_test
            return textmoji;
          }
 
-         }
+         }  // namespace mylib
 
    .. tab-item:: mylib.h
 
@@ -178,10 +176,6 @@ Set up your build system
              ],
          )
 
-      This assumes that your Bazel ``WORKSPACE`` has a `repository
-      <https://bazel.build/concepts/build-ref#repositories>`_ named ``@pigweed``
-      that points to the upstream Pigweed repository.
-
       See also :ref:`module-pw_unit_test-bazel`.
 
    .. tab-item:: GN
@@ -215,7 +209,6 @@ Create test suites and test cases:
 .. code-block:: c++
 
    #include "mylib.h"
-
    #include "pw_unit_test/framework.h"
 
    namespace {
@@ -278,6 +271,35 @@ If the :ref:`subset <module-pw_unit_test-compatibility>` of GoogleTest that
 full upstream GoogleTest API through ``pw_unit_test:googletest``. See
 :ref:`module-pw_unit_test-upstream`.
 
+.. _module-pw_unit_test-compatibility:
+
+``pw_unit_test:light`` API compatibility
+----------------------------------------
+``pw_unit_test:light`` offers a number of primitives for test declaration,
+assertion, event handlers, and configuration.
+
+.. note::
+
+   The ``googletest_test_matchers`` target which provides Pigweed-specific
+   ``StatusIs``, ``IsOkAndHolds`` isn't part of the ``pw_unit_test:light``
+   backend. These matchers are only usable when including the full upstream
+   GoogleTest backend.
+
+Missing features include:
+
+* GoogleMock and matchers (e.g. ``EXPECT_THAT``).
+* Death tests (e.g. ``EXPECT_DEATH``). ``EXPECT_DEATH_IF_SUPPORTED``
+  does nothing but silently passes.
+* Value-parameterized tests.
+* Stream messages (e.g. ``EXPECT_TRUE(...) << "My message"``) will compile, but
+  no message will be logged.
+* SCOPED_TRACE will compile, but trace information will not be added to failure
+  messages.
+
+See :ref:`module-pw_unit_test-upstream` for guidance on using the
+upstream GoogleTest backend (``pw_unit_test:googletest``) instead of
+``pw_unit_test:light``.
+
 .. _module-pw_unit_test-main:
 
 Create a custom ``main`` function
@@ -326,8 +348,6 @@ To do more complex testing, such as on-device testing:
 
 Create event handlers
 =====================
-.. _//pw_unit_test/public/pw_unit_test/event_handler.h: https://cs.opensource.google/pigweed/pigweed/+/main:pw_unit_test/public/pw_unit_test/event_handler.h
-
 The ``pw::unit_test::EventHandler`` class defines the interface through which
 ``pw_unit_test:light`` communicates the results of its test runs. If you're
 using a :ref:`custom main function <module-pw_unit_test-main>` you need to
@@ -340,8 +360,8 @@ Predefined event handlers
 Pigweed provides some standard event handlers to simplify the process of
 getting started with ``pw_unit_test:light``. All event handlers provide for
 GoogleTest-style output using the shared
-:cpp:class:`pw::unit_test::GoogleTestStyleEventHandler` base. Example
-output:
+:cc:`GoogleTestStyleEventHandler
+<pw::unit_test::GoogleTestStyleEventHandler>` base. Example output:
 
 .. code-block::
 
@@ -369,11 +389,9 @@ output:
 
 Run a subset of test suites
 ===========================
-.. _//pw_unit_test/light_public_overrides/pw_unit_test/framework_backend.h: https://cs.opensource.google/pigweed/pigweed/+/main:pw_unit_test/light_public_overrides/pw_unit_test/framework_backend.h
-
 To run only a subset of registered test suites, use the
 ``pw::unit_test::SetTestSuitesToRun`` function. See
-`//pw_unit_test/light_public_overrides/pw_unit_test/framework_backend.h`_.
+:cs:`pw_unit_test/light_public_overrides/pw_unit_test/framework_backend.h`.
 
 This is useful when you've got a lot of test suites bundled up into a
 :ref:`single test binary <module-pw_unit_test-main>` and you only need
@@ -386,25 +404,111 @@ Skip tests in Bazel
 Use ``target_compatible_with`` in Bazel to skip tests. The following test is
 skipped when :ref:`using upstream GoogleTest <module-pw_unit_test-upstream>`:
 
-.. code-block::
+.. code-block:: python
 
    load("//pw_unit_test:pw_cc_test.bzl", "pw_cc_test")
 
    pw_cc_test(
        name = "no_upstream_test",
        srcs = ["no_upstream_test.cc"],
-        target_compatible_with = select({
-            "//pw_unit_test:light_setting": [],
-            "//conditions:default": ["@platforms//:incompatible"],
-        }),
-   }
+       target_compatible_with = select({
+           "//pw_unit_test:backend_is_googletest": ["@platforms//:incompatible"],
+           "//conditions:default": [],
+       }),
+   )
+
+Constexpr unit tests
+====================
+The :cc:`PW_CONSTEXPR_TEST` macro defines a test that is executed both at
+compile time in a ``static_assert`` and as a regular GoogleTest-style
+``TEST()``. This offers the advantages of compile-time testing in a structured,
+familiar API, without sacrificing anything from GoogleTest-style tests. The
+framework uses the standard GoogleTest macros at run time, and is compatible
+with GoogleTest or Pigweed's ``pw_unit_test:light`` framework.
+
+To create a ``constexpr`` test:
+
+#. Include ``"pw_unit_test/constexpr.h"`` alongside the test framework
+   (``"pw_unit_test/framework.h"`` or ``"gtest/gtest.h"``).
+#. Use the macro :cc:`PW_CONSTEXPR_TEST` instead of ``TEST``. Note that the
+   function body is passed as the third argument to the macro.
+#. Use the familiar GoogleTest macros, but with a ``PW_TEST_`` prefix. For
+   example:
+
+   - ``EXPECT_TRUE`` → ``PW_TEST_EXPECT_TRUE``
+   - ``EXPECT_EQ`` → ``PW_TEST_EXPECT_EQ``
+   - ``ASSERT_STREQ`` → ``PW_TEST_ASSERT_STREQ``
+   - etc.
+
+The result is a familiar-looking unit test that executes both at compile-time
+and run-time.
+
+.. literalinclude:: constexpr_test.cc
+   :language: cpp
+   :start-after: [pw_unit_test-constexpr]
+   :end-before: [pw_unit_test-constexpr]
+
+Why run tests at compile time?
+------------------------------
+- Cross-compile and execute tests without having to flash them to a device.
+- Ensure ``constexpr`` functions can actually be evaluated at compile time.
+  For example, function templates may be marked as ``constexpr``, even if they
+  do not support constant evaluation when instantiated.
+- Catch undefined behavior, out-of-bounds access, and other issues during
+  compilation on any platform, without needing to run sanitizers.
+
+Why execute the tests at run time at all?
+-----------------------------------------
+.. block-submission: disable
+
+- Code may run differently at compile time and execution, particularly when
+  ``std::is_constant_evaluated`` or ``if consteval`` are used.
+- Error messages are much better at run time. :cc:`PW_CONSTEXPR_TEST` makes it
+  simple to temporarily disable compile time tests and see the rich
+  GoogleTest-like output (see :ref:`SKIP_CONSTEXPR_TESTS_DONT_SUBMIT
+  <module-pw_unit_test-constexpr-skip>`).
+- Tools like code coverage only work for code that is executed normally.
+
+:cc:`PW_CONSTEXPR_TEST` uses ``cpp20::is_constant_evaluated()`` from
+``stdcompat``. If the compiler does not support ``is_constant_evaluated``, only
+the regular GoogleTest version will run. Note that compiler support is
+independent of the C++ standard in use.
+
+.. _module-pw_unit_test-constexpr-skip:
+
+Temporarily skip ``constexpr`` tests to see GoogleTest output
+-------------------------------------------------------------
+Define the ``SKIP_CONSTEXPR_TESTS_DONT_SUBMIT`` macro to temporarily disable the
+``constexpr`` portion of subsequent :cc:`PW_CONSTEXPR_TEST` tests. Use this to
+view GoogleTest output, which is usually more informative than the compiler's
+``constexpr`` test failure output.
+
+.. block-submission: enable
+
+Defines of this macro should never be submitted. If a test shouldn't run at
+compile time, use a plain ``TEST()``.
+
+.. literalinclude:: constexpr_test.cc
+   :language: cpp
+   :start-after: [pw_unit_test-constexpr-skip]
+   :end-before: [pw_unit_test-constexpr-skip]
+
+.. _module-pw_unit_test-constexpr-if-compiler:
+
+Limit ``constexpr`` tests to a specific compiler
+------------------------------------------------
+Due to differences in compilers and their maintainers interpretation of the C++
+standard, there may be cases when an expression can be constant evaluated with
+some compilers but not others. In these cases, you can restrict the
+``constexpr`` portion of a :cc:`PW_CONSTEXPR_TEST` test by using either
+:cc:`PW_CONSTEXPR_TEST_IF_CLANG` or :cc:`PW_CONSTEXPR_TEST_IF_GCC`.
 
 .. _module-pw_unit_test-static:
 
 Run tests in static libraries
 =============================
 To run tests in a static library, use the
-:c:macro:`PW_UNIT_TEST_LINK_FILE_CONTAINING_TEST` macro.
+:cc:`PW_UNIT_TEST_LINK_FILE_CONTAINING_TEST` macro.
 
 Linkers usually ignore tests through static libraries (i.e. ``.a`` files)
 because test registration relies on the test instance's static constructor
@@ -419,16 +523,16 @@ Use upstream GoogleTest
 To use the upstream GoogleTest backend (``pw_unit_test:googletest``) instead
 of the default backend:
 
-.. _GoogleTestHandlerAdapter: https://cs.opensource.google/pigweed/pigweed/+/main:pw_unit_test/public/pw_unit_test/googletest_handler_adapter.h
-
 1. Clone the GoogleTest repository into your project. See
    :ref:`module-pw_third_party_googletest`.
 
 2. :ref:`Create a custom main function <module-pw_unit_test-main>`.
 
-3. Combine `GoogleTestHandlerAdapter`_ with a :ref:`predefined event
-   handler <module-pw_unit_test-predefined-event-handlers>` to enable your
-   ``main`` function to work with upstream GoogleTest without modification.
+3. Combine :cs:`GoogleTestHandlerAdapter
+   <main:pw_unit_test/public/pw_unit_test/googletest_handler_adapter.h>`
+   with a :ref:`predefined event handler
+   <module-pw_unit_test-predefined-event-handlers>` to enable your ``main``
+   function to work with upstream GoogleTest without modification.
 
    .. code-block:: c++
 
@@ -458,10 +562,8 @@ produced output.
 
 To set up a serial test runner in Python:
 
-.. _//pw_unit_test/py/pw_unit_test/serial_test_runner.py: https://cs.opensource.google/pigweed/pigweed/+/main:pw_unit_test/py/pw_unit_test/serial_test_runner.py
-
 1. Implement a ``SerialTestingDevice`` class for your device. See
-   `//pw_unit_test/py/pw_unit_test/serial_test_runner.py`_.
+   :cs:`pw_unit_test/py/pw_unit_test/serial_test_runner.py`.
 2. Configure your device code to wait to run unit tests until
    ``DEFAULT_TEST_START_CHARACTER`` is sent over the serial connection.
 
@@ -469,11 +571,9 @@ To set up a serial test runner in Python:
 
 Run tests over RPC
 ==================
-.. _//pw_unit_test/pw_unit_test_proto/unit_test.proto: https://cs.opensource.google/pigweed/pigweed/+/main:pw_unit_test/pw_unit_test_proto/unit_test.proto
-
 ``pw_unit_test`` provides an RPC service which runs unit tests on demand and
 streams the results back to the client. The service is defined in
-`//pw_unit_test/pw_unit_test_proto/unit_test.proto`_.
+:cs:`pw_unit_test/pw_unit_test_proto/unit_test.proto`.
 
 The RPC service is primarily intended for use with the default
 ``pw_unit_test:light`` backend. It has some support for the upstream GoogleTest
@@ -487,29 +587,40 @@ To set up RPC-based unit tests in your application:
    * Bazel: ``@pigweed//pw_unit_test:rpc_service``
    * GN: ``$dir_pw_unit_test:rpc_service``
 
-2. Create a ``pw::unit_test::UnitTestService`` instance.
+2. Initialize a ``pw::unit_test::UnitTestThread`` instance and define a
+   ``pw::Thread`` using it as the entry point. (See example below.)
 
-3. Register the instance with your RPC server.
+3. Register the thread's ``Service`` with your RPC server.
 
    .. code-block:: c++
 
       #include "pw_rpc/server.h"
+      #include "pw_thread/thread.h"
       #include "pw_unit_test/unit_test_service.h"
 
       pw::rpc::Channel channels[] = {
-        pw::rpc::Channel::Create<1>(&my_output),
+          pw::rpc::Channel::Create<1>(&my_output),
       };
       pw::rpc::Server server(channels);
 
-      pw::unit_test::UnitTestService unit_test_service;
+      constexpr pw::ThreadAttrs kUnitTestThreadAttrs =
+          pw::ThreadAttrs()
+              .set_name("UnitTestThread")
+              .set_priority(pw::ThreadPriority::Medium())
+              .set_stack_size_bytes(4096);
+      pw::ThreadContextFor<kUnitTestThreadAttrs> unit_test_thread_context;
 
-      void RegisterServices() {
-        server.RegisterService(unit_test_services);
+      pw::unit_test::UnitTestThread unit_test_thread;
+
+      void AppInit() {
+        pw::Thread(pw::GetThreadOptions(unit_test_thread_context), unit_test_thread)
+            .detach();
+        server.RegisterService(unit_test_thread.service());
       }
 
    See :ref:`module-pw_rpc` for more guidance around setting up RPC.
 
-4. Run tests that have been flashed to a device by calling
+6. Run tests that have been flashed to a device by calling
    ``pw_unit_test.rpc.run_tests()`` in Python. The argument should be an RPC
    client services object that has the unit testing RPC service enabled. By
    default, the results output via logging. The return value is a
@@ -533,179 +644,37 @@ To set up RPC-based unit tests in your application:
           ) as client:
               run_tests(client.rpcs())
 
+Golden file testing with ``pw_golden_test``
+===========================================
+The ``pw_golden_test`` macro in ``//pw_unit_test/golden.bzl`` defines tests that
+execute a binary and compares its output against the contents of a predefined
+"golden" file. This is useful for testing that command-line tools or other
+binaries run successfully and produce consistent text-based output across code
+changes.
+
+If the output of the binary differs from the expected file, the test prints a
+diff between the actual and expected outputs and exits with a non-zero code.
+
+The following example shows how to use ``pw_golden_test`` in Bazel. The test
+runs the ``//pw_unit_test:run_and_compare_test_executable`` C++ binary and
+compares its output to the ``run_and_compare_test.expected`` file.
+
+.. literalinclude:: py/BUILD.bazel
+   :language: python
+   :start-after: pw_unit_test-run-and-compare-test-bazel
+   :end-before: pw_unit_test-run-and-compare-test-bazel
+
+In GN and CMake, directly run the
+``//pw_unit_test/py/pw_unit_test/golden_test.py`` script for golden tests.
+
 .. _module-pw_unit_test-cpp:
 
 -----------------
 C++ API reference
 -----------------
-
-``pw_status`` Helpers
-=====================
-Both the light and GoogleTest backends of ``pw_unit_test`` expose some matchers
-for dealing with Pigweed ``pw::Status`` and ``pw::Result`` values. See
-:ref:`module-pw_unit_test-api-expect` and :ref:`module-pw_unit_test-api-assert`
-for details.
-
-.. _module-pw_unit_test-compatibility:
-
-``pw_unit_test:light`` API compatibility
-========================================
-``pw_unit_test:light`` offers a number of primitives for test declaration,
-assertion, event handlers, and configuration.
-
-.. note::
-
-   The ``googletest_test_matchers`` target which provides Pigweed-specific
-   ``StatusIs``, ``IsOkAndHolds`` isn't part of the ``pw_unit_test:light``
-   backend. These matchers are only usable when including the full upstream
-   GoogleTest backend.
-
-Missing features include:
-
-* GoogleMock and matchers (e.g. :c:macro:`EXPECT_THAT`).
-* Death tests (e.g. :c:macro:`EXPECT_DEATH`). ``EXPECT_DEATH_IF_SUPPORTED``
-  does nothing but silently passes.
-* Value-parameterized tests.
-* Stream messages (e.g. ``EXPECT_TRUE(...) << "My message"``) will compile, but
-  no message will be logged.
-
-See :ref:`module-pw_unit_test-upstream` for guidance on using the
-upstream GoogleTest backend (``pw_unit_test:googletest``) instead of
-``pw_unit_test:light``.
-
-.. _module-pw_unit_test-declare:
-
-Test declaration
-================
-Note that ``TEST_F`` may allocate fixtures separately from the stack.
-Large variables should be stored in test fixture fields,
-rather than stack variables. This allows the test framework to statically ensure
-that enough space is available to store these variables.
-
-.. doxygendefine:: TEST
-.. doxygendefine:: GTEST_TEST
-.. doxygendefine:: TEST_F
-.. doxygendefine:: FRIEND_TEST
-
-.. _module-pw_unit_test-control:
-
-Test control
-============
-
-.. doxygenfunction:: RUN_ALL_TESTS
-.. doxygendefine:: FAIL
-.. doxygendefine:: GTEST_FAIL
-.. doxygendefine:: SUCCEED
-.. doxygendefine:: GTEST_SUCCEED
-.. doxygendefine:: GTEST_SKIP
-.. doxygendefine:: ADD_FAILURE
-.. doxygendefine:: GTEST_HAS_DEATH_TEST
-.. doxygendefine:: EXPECT_DEATH_IF_SUPPORTED
-.. doxygendefine:: ASSERT_DEATH_IF_SUPPORTED
-
-.. _module-pw_unit_test-api-expect:
-
-Expectations
-============
-When a test fails an expectation, the framework marks the test as a failure
-and then continues executing the test. They're useful when you want to
-verify multiple dimensions of the same feature and see all the errors at the
-same time.
-
-.. doxygendefine:: EXPECT_TRUE
-.. doxygendefine:: EXPECT_FALSE
-.. doxygendefine:: EXPECT_EQ
-.. doxygendefine:: EXPECT_NE
-.. doxygendefine:: EXPECT_GT
-.. doxygendefine:: EXPECT_GE
-.. doxygendefine:: EXPECT_LT
-.. doxygendefine:: EXPECT_LE
-.. doxygendefine:: EXPECT_NEAR
-.. doxygendefine:: EXPECT_FLOAT_EQ
-.. doxygendefine:: EXPECT_DOUBLE_EQ
-.. doxygendefine:: EXPECT_STREQ
-.. doxygendefine:: EXPECT_STRNE
-.. doxygendefine:: PW_TEST_EXPECT_OK
-
-.. _module-pw_unit_test-api-assert:
-
-Assertions
-==========
-Assertions work the same as expectations except they stop the execution of the
-test as soon as a failed condition is met.
-
-.. doxygendefine:: ASSERT_TRUE
-.. doxygendefine:: ASSERT_FALSE
-.. doxygendefine:: ASSERT_EQ
-.. doxygendefine:: ASSERT_NE
-.. doxygendefine:: ASSERT_GT
-.. doxygendefine:: ASSERT_GE
-.. doxygendefine:: ASSERT_LT
-.. doxygendefine:: ASSERT_LE
-.. doxygendefine:: ASSERT_NEAR
-.. doxygendefine:: ASSERT_FLOAT_EQ
-.. doxygendefine:: ASSERT_DOUBLE_EQ
-.. doxygendefine:: ASSERT_STREQ
-.. doxygendefine:: ASSERT_STRNE
-.. doxygendefine:: PW_TEST_ASSERT_OK
-.. doxygendefine:: PW_TEST_ASSERT_OK_AND_ASSIGN
-
-.. _module-pw_unit_test-api-event-handlers:
-
-Event handlers
-==============
-.. doxygenfunction:: pw::unit_test::RegisterEventHandler(EventHandler* event_handler)
-.. doxygenclass:: pw::unit_test::EventHandler
-   :members:
-.. doxygenclass:: pw::unit_test::GoogleTestHandlerAdapter
-.. doxygenclass:: pw::unit_test::GoogleTestStyleEventHandler
-.. doxygenclass:: pw::unit_test::SimplePrintingEventHandler
-.. doxygenclass:: pw::unit_test::LoggingEventHandler
-.. doxygenclass:: pw::unit_test::PrintfEventHandler
-.. doxygenclass:: pw::unit_test::MultiEventHandler
-.. doxygenclass:: pw::unit_test::TestRecordEventHandler
-
-.. _module-pw_unit_test-cpp-config:
-
-Configuration
-=============
-.. doxygenfile:: pw_unit_test/config.h
-   :sections: define
-
-.. _module-pw_unit_test-cpp-helpers:
-
-Helpers
-=======
-.. doxygendefine:: PW_UNIT_TEST_LINK_FILE_CONTAINING_TEST
+Moved: :cc:`pw_unit_test`
 
 .. _module-pw_unit_test-py:
-
---------------------
-Constexpr unit tests
---------------------
-.. doxygenfile:: pw_unit_test/constexpr.h
-   :sections: detaileddescription
-
-API reference
-=============
-.. doxygendefine:: PW_CONSTEXPR_TEST
-
-.. block-submission: disable
-.. c:macro:: SKIP_CONSTEXPR_TESTS_DONT_SUBMIT
-
-   Define the ``SKIP_CONSTEXPR_TESTS_DONT_SUBMIT`` macro to temporarily disable
-   the ``constexpr`` portion of subsequent :c:macro:`PW_CONSTEXPR_TEST`\s. Use
-   this to view GoogleTest output, which is usually more informative than the
-   compiler's ``constexpr`` test failure output.
-
-   Defines of this macro should never be submitted. If a test shouldn't run at
-   compile time, use a plain ``TEST()``.
-
-   .. literalinclude:: constexpr_test.cc
-      :language: cpp
-      :start-after: [pw_unit_test-constexpr-skip]
-      :end-before: [pw_unit_test-constexpr-skip]
-.. block-submission: enable
 
 --------------------
 Python API reference
@@ -771,6 +740,9 @@ See also :ref:`module-pw_unit_test-helpers`.
 ``pw_cc_test`` is a wrapper for `cc_test`_ that provides some defaults, such as
 a dependency on ``@pigweed//pw_unit_test:main``. It supports and passes through
 all the arguments recognized by ``cc_test``.
+
+``pw_cc_test`` also supports negative compilation (NC) testing. Pass ``has_nc_test = True`` to enable NC
+tests. See :ref:`module-pw_compilation_testing` for details.
 
 .. _module-pw_unit_test-bazel-args:
 
@@ -1320,3 +1292,66 @@ CMake build arguments
    Type: string (path to a ``.cmake`` file)
 
    Usage: toolchain-controlled only
+
+====================
+Zephyr backend tests
+====================
+Zephyr backend tests use Zephyr's test runner `twister`_. The test runner is
+installed into the Pigweed CLI and can be run by calling ``pw twister-runner``.
+The runner intercepts a few arguments in order to add features to the normal
+test runner; beyond that, the runner just calls twister directly.
+
+The runner will intercept the ``-T`` or ``--testsuite-root`` arguments and do
+the following:
+
+* For every ``testcase.yaml`` file under the testsuite root directory it appends
+  ``-T path/to/testcase.yaml``.
+* For every ``testtemplate.yaml`` it creates a new directory using the
+  ``{name}`` field in the YAML file and the ``--build-dir`` to create a new test
+  root at ``{build_dir}/{name}``. It will then take the ``testcase`` node in the
+  template and create a new ``{build_dir}/{name}/testcase.yaml``. This new YAML
+  file will be appended to the final twister command using ``-T
+  {build_dir}/{name}``.
+
+--------------
+Test templates
+--------------
+Twister normally uses a combination of ``testcase.yaml`` files along
+``CMakeLists.txt`` files which serve as the test's entry point. This doesn't
+work when trying to write tests side by side with the source. The twister runner
+introduces the concept of ``testtemplate.yaml`` which allows the test to live in
+the same directory as the source but is compatible with twister. The test
+template YAML file contains the following required keys:
+
+* ``name`` - The name of the test directory to create. This must be unique per
+  twister run.
+* ``testcase`` - The content of this entry will be copied into a new
+  ``{build_dir}/{name}/testcase.yaml`` file.
+
+Additional fields are available in the template and are optional:
+
+* ``file-map`` - This key/value dictionary contains a mapping of relative file
+  paths (reltive to the ``testtemplate.yaml`` file) to output relative file
+  paths (relative to the generated ``{build_dir}/{name)``). Each entry will
+  create a symlink.
+* ``use-default-cmake`` - By default ``true`` and allows the test to leverage a
+  common ``CMakeLists.txt`` that should fit the majority of test cases. It sets
+  up a simple Zephyr app which uses the ``simple_printing_main.cc`` to run the
+  tests. This ``CMake`` file also expects that the test will be a library
+  created by ``pw_add_test``. For example, if we wanted to test the
+  ``pw_base64.base64_test`` unit test we would just need to pass
+  ``TEST_LIB=pw_base64.base64_test`` as a ``CMake`` argument.
+* ``use-default-prj-conf`` - By default ``true`` and allows the test to leverage
+  a common ``prj.conf`` that should fit the majority of test cases. It sets up
+  C++20 and a few other common Kconfigs. Additional configs can be added as a
+  part of the ``testtemplate.yaml`` using the ``extra_configs`` key.
+
+-----------------
+Running the tests
+-----------------
+Automatically, tests will be picked up by ``pw presubmit --step zephyr_build``.
+This presubmit test will call the ``twister-runner`` script to run all the tests
+defined in either ``testcase.yaml`` or ``testtemplate.yaml``. Coverage reports
+can be found later in ``twister-out/coverage/``.
+
+.. _twister: https://docs.zephyrproject.org/latest/develop/test/twister.html

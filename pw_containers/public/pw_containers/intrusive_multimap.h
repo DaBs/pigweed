@@ -18,6 +18,11 @@
 
 namespace pw {
 
+/// @module{pw_containers}
+
+/// @addtogroup pw_containers_maps
+/// @{
+
 /// A `std::multimap<Key, T, Compare>`-like class that uses intrusive items.
 ///
 /// Since the map structure is stored in the items themselves, each item must
@@ -121,8 +126,8 @@ class IntrusiveMultiMap {
   /// @param  get_key   Function with signature `Key(const T&)` that returns the
   ///                   value that items are sorted on.
   template <typename Comparator>
-  constexpr explicit IntrusiveMultiMap(Comparator&& compare)
-      : IntrusiveMultiMap(std::forward<Comparator>(compare),
+  constexpr explicit IntrusiveMultiMap(Comparator compare)
+      : IntrusiveMultiMap(std::move(compare),
                           [](const T& t) { return t.key(); }) {}
 
   /// Constructs an empty map of items.
@@ -226,7 +231,7 @@ class IntrusiveMultiMap {
   iterator erase(iterator pos) { return iterator(tree_.erase_one(*pos)); }
 
   iterator erase(iterator first, iterator last) {
-    return iterator(tree_.erase_range(*first, *last));
+    return iterator(tree_.erase_range(first, last));
   }
 
   size_t erase(const Key& key) { return tree_.erase_all(key); }

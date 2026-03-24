@@ -20,7 +20,6 @@ load("//pw_unit_test:pw_cc_test.bzl", "pw_cc_test")
 
 package(
     default_visibility = ["//visibility:public"],
-    features = ["-layering_check"],
 )
 
 licenses(["notice"])
@@ -53,28 +52,35 @@ cc_library(
         "public_overrides/pw_log_backend/log_backend.h",
         "public_overrides/pw_log_backend/log_backend_uses_pw_tokenizer.h",
     ],
-    includes = [
-        "public_overrides",
-    ],
+    strip_include_prefix = "public_overrides",
     tags = ["noclangtidy"],
     deps = [
         ":handler.facade",
         ":headers",
         "//pw_log:pw_log.facade",
+        "//pw_tokenizer",
     ],
 )
 
 cc_library(
     name = "gcc_partially_tokenized",
-    srcs = ["log_tokenized.cc"],
     hdrs = [
         "gcc_partially_tokenized_public_overrides/pw_log_backend/log_backend.h",
+    ],
+    strip_include_prefix = "gcc_partially_tokenized_public_overrides",
+    deps = [
+        ":gcc_partially_tokenized_private",
+        ":headers",
+    ],
+)
+
+cc_library(
+    name = "gcc_partially_tokenized_private",
+    srcs = ["log_tokenized.cc"],
+    hdrs = [
         "public/pw_log_tokenized/gcc_partially_tokenized.h",
     ],
-    includes = [
-        "gcc_partially_tokenized_public_overrides",
-        "public",
-    ],
+    strip_include_prefix = "public",
     deps = [
         ":handler",
         ":headers",
@@ -86,12 +92,14 @@ cc_library(
 alias(
     name = "impl",
     actual = ":handler",
+    features = ["-conversion_warnings"],
 )
 
 pw_facade(
     name = "handler",
     hdrs = ["public/pw_log_tokenized/handler.h"],
     backend = ":handler_backend",
+    features = ["-conversion_warnings"],
     strip_include_prefix = "public",
     deps = ["//pw_preprocessor"],
 )
@@ -99,6 +107,7 @@ pw_facade(
 label_flag(
     name = "handler_backend",
     build_setting_default = ":base64_over_hdlc",
+    features = ["-conversion_warnings"],
 )
 
 # There is no default backend for now.
@@ -120,12 +129,15 @@ cc_library(
 cc_library(
     name = "base64_over_hdlc",
     srcs = ["base64_over_hdlc.cc"],
+    features = ["-conversion_warnings"],
     tags = ["noclangtidy"],
     deps = [
         ":base64",
         ":handler.facade",
         "//pw_hdlc",
+        "//pw_span",
         "//pw_stream:sys_io_stream",
+        "//pw_string:string",
         "//pw_tokenizer:base64",
     ],
 )
@@ -140,6 +152,7 @@ pw_cc_test(
     deps = [
         ":base64",
         ":headers",
+        "//pw_preprocessor",
     ],
 )
 
@@ -168,6 +181,7 @@ filegroup(
     srcs = [
         "public/pw_log_tokenized/base64.h",
         "public/pw_log_tokenized/config.h",
+        "public/pw_log_tokenized/fields.h",
         "public/pw_log_tokenized/handler.h",
         "public/pw_log_tokenized/metadata.h",
     ],
@@ -180,4 +194,24 @@ sphinx_docs_library(
     ],
     prefix = "pw_log_tokenized/",
     target_compatible_with = incompatible_with_mcu(),
+)
+
+cc_library(
+    name = "fields",
+    hdrs = ["public/pw_log_tokenized/fields.h"],
+    strip_include_prefix = "public",
+    deps = [
+        ":headers",
+        "//pw_status",
+    ],
+)
+
+pw_cc_test(
+    name = "fields_test",
+    srcs = ["fields_test.cc"],
+    deps = [
+        ":fields",
+        "//pw_status",
+        "//pw_unit_test:constexpr",
+    ],
 )

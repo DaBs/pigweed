@@ -15,17 +15,16 @@ C++ backend
 ``pw_log_tokenized`` provides a backend for ``pw_log`` that tokenizes log
 messages with the ``pw_tokenizer`` module. The log level, 16-bit tokenized
 module name, and flags bits are passed through the payload argument. The macro
-eventually passes logs to the :c:func:`pw_log_tokenized_HandleLog` function,
+eventually passes logs to the :cc:`pw_log_tokenized_HandleLog` function,
 which must be implemented by the application.
-
-.. doxygenfunction:: pw_log_tokenized_HandleLog
 
 Example implementation:
 
 .. code-block:: cpp
 
-   extern "C" void pw_log_tokenized_HandleLog(
-       uint32_t payload, const uint8_t message[], size_t size) {
+   extern "C" void pw_log_tokenized_HandleLog(uint32_t payload,
+                                              const uint8_t message[],
+                                              size_t size) {
      // The metadata object provides the log level, module token, and flags.
      // These values can be recorded and used for runtime filtering.
      pw::log_tokenized::Metadata metadata(payload);
@@ -80,10 +79,8 @@ file were first, the long path might take most of the hashed characters,
 increasing the odds of a collision with other strings in that file. In C++, all
 characters in the string are hashed, so the order is not important.
 
-The format string is created by the :c:macro:`PW_LOG_TOKENIZED_FORMAT_STRING`
+The format string is created by the :cc:`PW_LOG_TOKENIZED_FORMAT_STRING`
 macro.
-
-.. doxygendefine:: PW_LOG_TOKENIZED_FORMAT_STRING
 
 Metadata in the tokenizer payload argument
 -------------------------------------------
@@ -106,33 +103,32 @@ The number of bits to use for each metadata field is configurable through macros
 in ``pw_log/config.h``. The field widths must sum to 32 bits. A field with zero
 bits allocated is excluded from the log metadata.
 
-.. doxygendefine:: PW_LOG_TOKENIZED_LEVEL_BITS
-.. doxygendefine:: PW_LOG_TOKENIZED_LINE_BITS
-.. doxygendefine:: PW_LOG_TOKENIZED_FLAG_BITS
-.. doxygendefine:: PW_LOG_TOKENIZED_MODULE_BITS
+* :cc:`PW_LOG_TOKENIZED_LEVEL_BITS`
+* :cc:`PW_LOG_TOKENIZED_LINE_BITS`
+* :cc:`PW_LOG_TOKENIZED_FLAG_BITS`
+* :cc:`PW_LOG_TOKENIZED_MODULE_BITS`
 
 Creating and reading Metadata payloads
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-``pw_log_tokenized`` provides a C++ class to facilitate the creation and
-interpretation of packed log metadata payloads.
-
-.. doxygenclass:: pw::log_tokenized::GenericMetadata
-.. doxygentypedef:: pw::log_tokenized::Metadata
+``pw_log_tokenized`` provides :cc:`GenericMetadata
+<pw::log_tokenized::GenericMetadata>` to facilitate the creation and
+interpretation of packed log :cc:`Metadata
+<pw::log_tokenized::Metadata>` payloads.
 
 The following example shows that a ``Metadata`` object can be created from a
 ``uint32_t`` log metadata payload.
 
 .. code-block:: cpp
 
-   extern "C" void pw_log_tokenized_HandleLog(
-       uint32_t payload,
-       const uint8_t message[],
-       size_t size_bytes) {
+   extern "C" void pw_log_tokenized_HandleLog(uint32_t payload,
+                                              const uint8_t message[],
+                                              size_t size_bytes) {
      pw::log_tokenized::Metadata metadata = payload;
      // Check the log level to see if this log is a crash.
      if (metadata.level() == PW_LOG_LEVEL_FATAL) {
-       HandleCrash(metadata, pw::ConstByteSpan(
-           reinterpret_cast<const std::byte*>(message), size_bytes));
+       HandleCrash(metadata,
+                   pw::ConstByteSpan(reinterpret_cast<const std::byte*>(message),
+                                     size_bytes));
        PW_UNREACHABLE;
      }
      // ...
@@ -146,9 +142,7 @@ object:
    // Logs an explicitly created string token.
    void LogToken(uint32_t token, int level, int line_number, int module) {
      const uint32_t payload =
-         log_tokenized::Metadata(
-             level, module, PW_LOG_FLAGS, line_number)
-             .value();
+         log_tokenized::Metadata(level, module, PW_LOG_FLAGS, line_number).value();
      std::array<std::byte, sizeof(token)> token_buffer =
          pw::bytes::CopyInOrder(endian::little, token);
 
@@ -159,9 +153,14 @@ object:
    }
 
 The binary tokenized message may be encoded in the :ref:`prefixed Base64 format
-<module-pw_tokenizer-base64-format>` with the following function:
+<module-pw_tokenizer-base64-format>` with the
+:cc:`pw::log_tokenized::PrefixedBase64Encode` function.
 
-.. doxygenfunction:: PrefixedBase64Encode(span<const std::byte>)
+Parsing metadata fields
+-----------------------
+The metadata fields packed into the format string can be parsed with the
+:cc:`pw::log_tokenized::ParseFields` function. This function takes a string
+and a callback that is called for each key-value pair.
 
 Build targets
 -------------

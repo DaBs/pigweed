@@ -44,6 +44,7 @@ pw_add_library(pw_perf_test.state STATIC
     pw_assert
   PRIVATE_DEPS
     pw_log
+    pw_numeric.integer_division
   SOURCES
     state.cc
 )
@@ -68,6 +69,28 @@ pw_add_library(pw_perf_test.event_handler INTERFACE
     public/pw_perf_test/event_handler.h
   PUBLIC_INCLUDES
     public
+)
+
+pw_add_library(pw_perf_test.log_csv_event_handler STATIC
+  PUBLIC_INCLUDES
+    public
+  PRIVATE_DEPS
+    pw_log
+  PUBLIC_DEPS
+    pw_perf_test.event_handler
+    pw_perf_test
+    pw_string.builder
+  HEADERS
+    public/pw_perf_test/log_csv_event_handler.h
+  SOURCES
+    log_csv_event_handler.cc
+)
+
+pw_add_library(pw_perf_test.log_csv_main STATIC
+  PUBLIC_DEPS
+    pw_perf_test.log_csv_event_handler
+  SOURCES
+    log_csv_main.cc
 )
 
 pw_add_library(pw_perf_test.logging_event_handler STATIC

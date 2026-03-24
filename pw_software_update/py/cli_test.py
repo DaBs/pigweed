@@ -89,9 +89,9 @@ class AddFileToBundleTest(unittest.TestCase):
         )
 
         targets_metadata.target_files.append(target_file)
-        bundle.targets_metadata[
-            'targets'
-        ].serialized_targets_metadata = targets_metadata.SerializeToString()
+        bundle.targets_metadata['targets'].serialized_targets_metadata = (
+            targets_metadata.SerializeToString()
+        )
 
         # Checks for raised exception for duplicate target file
         with self.assertRaises(Exception):

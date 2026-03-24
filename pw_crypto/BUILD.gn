@@ -18,7 +18,6 @@ import("$dir_pw_bloat/bloat.gni")
 import("$dir_pw_build/facade.gni")
 import("$dir_pw_build/target_types.gni")
 import("$dir_pw_crypto/backend.gni")
-import("$dir_pw_docgen/docs.gni")
 import("$dir_pw_unit_test/test.gni")
 
 config("default_config") {
@@ -39,50 +38,12 @@ pw_facade("sha256") {
   deps = [ "$dir_pw_assert" ]
 }
 
-pw_doc_group("docs") {
-  sources = [ "docs.rst" ]
-  report_deps = [ ":size_report" ]
-}
-
-pw_size_diff("size_report") {
-  title = "pw::crypto Size Report"
-  base = "$dir_pw_bloat:bloat_base"
-
-  binaries = []
-
-  if (pw_crypto_SHA256_BACKEND != "") {
-    binaries += [
-      {
-        target = "size_report:sha256_simple"
-        label = "SHA256 ($pw_crypto_SHA256_BACKEND)"
-      },
-    ]
-  }
-
-  if (pw_crypto_ECDSA_BACKEND != "") {
-    binaries += [
-      {
-        target = "size_report:ecdsa_p256_verify"
-        label = "ECDSA P256 Verify ($pw_crypto_ECDSA_BACKEND)"
-      },
-    ]
-  }
-
-  if (binaries == []) {
-    binaries += [
-      {
-        target = "$dir_pw_bloat:bloat_base"
-        label = "No backend is selected."
-      },
-    ]
-  }
-}
-
 pw_test_group("tests") {
   tests = [
     ":aes_test",
     ":sha256_test",
     ":sha256_mock_test",
+    ":ecdh_test",
     ":ecdsa_test",
   ]
 }
@@ -134,7 +95,7 @@ pw_source_set("sha256_mbedtls") {
   sources = [ "sha256_mbedtls.cc" ]
   public_deps = [
     ":sha256.facade",
-    "$dir_pw_third_party/mbedtls",
+    "$pw_external_mbedtls",
   ]
 }
 
@@ -147,7 +108,7 @@ pw_source_set("sha256_mbedtls_v3") {
   sources = [ "sha256_mbedtls.cc" ]
   public_deps = [
     ":sha256.facade",
-    "$dir_pw_third_party/mbedtls:mbedtls_v3",
+    "$pw_external_mbedtls:mbedtls_v3",
   ]
 }
 
@@ -166,7 +127,7 @@ pw_source_set("ecdsa_mbedtls") {
   deps = [
     "$dir_pw_function",
     "$dir_pw_log",
-    "$dir_pw_third_party/mbedtls",
+    "$pw_external_mbedtls",
   ]
   public_deps = [
     ":ecdsa.facade",
@@ -179,7 +140,7 @@ pw_source_set("ecdsa_mbedtls_v3") {
   deps = [
     "$dir_pw_function",
     "$dir_pw_log",
-    "$dir_pw_third_party/mbedtls:mbedtls_v3",
+    "$pw_external_mbedtls:mbedtls_v3",
   ]
   public_deps = [
     ":ecdsa.facade",
@@ -203,6 +164,7 @@ pw_facade("aes") {
     "public/pw_crypto/aes_backend_defs.h",
   ]
   public_deps = [
+    "$dir_pw_assert:assert",
     "$dir_pw_bytes",
     "$dir_pw_log",
     "$dir_pw_status",
@@ -230,7 +192,7 @@ pw_source_set("aes_boringssl") {
   public_deps = [
     ":aes.facade",
     "$dir_pw_span:cast",
-    "$dir_pw_third_party/boringssl",
+    "$pw_external_boringssl",
   ]
 }
 
@@ -244,7 +206,7 @@ pw_source_set("aes_mbedtls_v3") {
   sources = [ "aes_mbedtls.cc" ]
   public_deps = [
     ":aes.facade",
-    "$dir_pw_third_party/mbedtls:mbedtls_v3",
+    "$pw_external_mbedtls:mbedtls_v3",
   ]
 }
 
@@ -259,4 +221,45 @@ pw_test("aes_test") {
     "$dir_pw_containers:vector",
   ]
   sources = [ "aes_test.cc" ]
+}
+
+pw_facade("ecdh") {
+  backend = pw_crypto_ECDH_BACKEND
+  public_configs = [ ":default_config" ]
+  public = [ "public/pw_crypto/ecdh.h" ]
+  public_deps = [
+    "$dir_pw_bytes",
+    "$dir_pw_result",
+    "$dir_pw_status",
+  ]
+}
+
+pw_source_set("ecdh_boringssl") {
+  public_configs = [ ":boringssl_config" ]
+  sources = [ "ecdh_boringssl.cc" ]
+  public = [ "public_overrides/boringssl/pw_crypto/ecdh_backend.h" ]
+  deps = [ "$dir_pw_assert" ]
+  public_deps = [
+    ":ecdh.facade",
+    "$dir_pw_third_party/boringssl",
+  ]
+}
+
+pw_source_set("ecdh_mbedtls") {
+  public_configs = [ ":mbedtls_config" ]
+  sources = [ "ecdh_mbedtls.cc" ]
+  public = [ "public_overrides/mbedtls/pw_crypto/ecdh_backend.h" ]
+  deps = [ "$dir_pw_assert" ]
+  public_deps = [
+    ":ecdh.facade",
+    "$pw_external_mbedtls",
+  ]
+}
+
+# This test targets the specific backend pointed to by
+# pw_crypto_ECDH_BACKEND.
+pw_test("ecdh_test") {
+  enable_if = pw_crypto_ECDH_BACKEND != ""
+  deps = [ ":ecdh" ]
+  sources = [ "ecdh_test.cc" ]
 }

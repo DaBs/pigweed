@@ -31,6 +31,8 @@
 
 namespace pw::rpc {
 
+/// @module{pw_rpc}
+
 class Server : public internal::Endpoint {
  public:
   // If dynamic allocation is supported, it is not necessary to preallocate a
@@ -218,5 +220,7 @@ class Server : public internal::Endpoint {
 
   IntrusiveList<Service> services_ PW_GUARDED_BY(internal::rpc_lock());
 };
+
+/// @}
 
 }  // namespace pw::rpc

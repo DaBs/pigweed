@@ -17,7 +17,6 @@ import("//build_overrides/pigweed.gni")
 import("$dir_pw_build/module_config.gni")
 import("$dir_pw_build/python_action_test.gni")
 import("$dir_pw_build/target_types.gni")
-import("$dir_pw_docgen/docs.gni")
 import("$dir_pw_protobuf_compiler/proto.gni")
 import("$dir_pw_toolchain/traits.gni")
 import("$dir_pw_unit_test/test.gni")
@@ -113,7 +112,7 @@ pw_source_set("googletest") {
   public = [ "googletest_public_overrides/pw_unit_test/framework_backend.h" ]
 
   public_deps = [
-    "$dir_pw_third_party/googletest",
+    "$pw_external_googletest",
     dir_pw_result,
     dir_pw_status,
   ]
@@ -128,7 +127,7 @@ pw_source_set("status_macros") {
   public_configs = [ ":public_include_path" ]
   public = [ "public/pw_unit_test/status_macros.h" ]
   public_deps = [
-    "$dir_pw_third_party/fuchsia:stdcompat",
+    "$pw_external_fuchsia:stdcompat",
     dir_pw_status,
   ]
 }
@@ -147,7 +146,7 @@ pw_source_set("googletest_handler_adapter") {
   public_configs = [ ":public_include_path" ]
   public_deps = [
     ":event_handler",
-    "$dir_pw_third_party/googletest",
+    "$pw_external_googletest",
     dir_pw_preprocessor,
   ]
   public = [ "public/pw_unit_test/googletest_handler_adapter.h" ]
@@ -158,7 +157,7 @@ pw_source_set("googletest_test_matchers") {
   public_configs = [ ":public_include_path" ]
   public = [ "public/pw_unit_test/googletest_test_matchers.h" ]
   public_deps = [
-    "$dir_pw_third_party/googletest",
+    "$pw_external_googletest",
     dir_pw_result,
     dir_pw_status,
   ]
@@ -244,7 +243,7 @@ pw_source_set("constexpr") {
   public = [ "public/pw_unit_test/constexpr.h" ]
   public_configs = [ ":public_include_path" ]
   public_deps = [
-    "$dir_pw_third_party/fuchsia:stdcompat",
+    "$pw_external_fuchsia:stdcompat",
     dir_pw_preprocessor,
   ]
 }
@@ -307,8 +306,16 @@ pw_source_set("rpc_service") {
     ":unit_test_proto.pwpb",
     ":unit_test_proto.raw_rpc",
     "$dir_pw_containers:vector",
+    "$dir_pw_string:util",
+    "$dir_pw_sync:lock_annotations",
+    "$dir_pw_sync:mutex",
+    "$dir_pw_sync:thread_notification",
+    "$dir_pw_thread:thread_core",
   ]
-  deps = [ dir_pw_log ]
+  deps = [
+    dir_pw_assert,
+    dir_pw_log,
+  ]
   public = [ "public/pw_unit_test/unit_test_service.h" ]
   sources = [ "unit_test_service.cc" ]
   defines = []
@@ -322,17 +329,6 @@ pw_source_set("rpc_service") {
     sources += [ "rpc_gtest_event_handler.cc" ]
     public += [ "rpc_gtest_public/pw_unit_test/internal/rpc_event_handler.h" ]
   }
-}
-
-pw_source_set("rpc_main") {
-  testonly = pw_unit_test_TESTONLY
-  public_deps = [ ":pw_unit_test" ]
-  deps = [
-    ":rpc_service",
-    "$dir_pw_rpc/system_server",
-    dir_pw_log,
-  ]
-  sources = [ "rpc_main.cc" ]
 }
 
 if (pw_unit_test_BACKEND == "$dir_pw_unit_test:light") {
@@ -355,6 +351,8 @@ pw_executable("test_rpc_server") {
     ":rpc_service",
     "$dir_pw_rpc/system_server",
     "$dir_pw_rpc/system_server:socket",
+    "$dir_pw_thread:thread",
+    "$dir_pw_thread_stl:thread",
     dir_pw_log,
   ]
 }
@@ -363,16 +361,17 @@ pw_proto_library("unit_test_proto") {
   sources = [ "pw_unit_test_proto/unit_test.proto" ]
 }
 
-pw_doc_group("docs") {
-  sources = [ "docs.rst" ]
-  other_deps = [ "py" ]
-  inputs = [ "constexpr_test.cc" ]
-}
-
 pw_test("metadata_only_test") {
   extra_metadata = {
     extra_key = "extra_value"
   }
+}
+
+# This executable is used to test pw_unit_test/golden_test.py.
+pw_executable("run_and_compare_test_executable") {
+  testonly = pw_unit_test_TESTONLY
+  sources = [ "run_and_compare_test_executable.cc" ]
+  visibility = [ "./*" ]
 }
 
 # pw_test_group produces the metadata file for its tests.

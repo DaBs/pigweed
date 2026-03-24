@@ -24,10 +24,12 @@ namespace bt::hci {
 using FeaturesBits = pw::bluetooth::Controller::FeaturesBits;
 
 Transport::Transport(std::unique_ptr<pw::bluetooth::Controller> controller,
-                     pw::async::Dispatcher& dispatcher)
+                     pw::async::Dispatcher& dispatcher,
+                     pw::bluetooth_sapphire::LeaseProvider& wake_lease_provider)
     : WeakSelf(this),
       dispatcher_(dispatcher),
-      controller_(std::move(controller)) {
+      controller_(std::move(controller)),
+      wake_lease_provider_(wake_lease_provider) {
   PW_CHECK(controller_);
 }
 
@@ -51,7 +53,7 @@ void Transport::Initialize(
     }
 
     self->command_channel_ = std::make_unique<CommandChannel>(
-        self->controller_.get(), self->dispatcher_);
+        self->controller_.get(), self->dispatcher_, self->wake_lease_provider_);
     self->command_channel_->set_channel_timeout_cb([self] {
       if (self.is_alive()) {
         self->OnChannelError();
@@ -82,8 +84,11 @@ void Transport::Initialize(
 bool Transport::InitializeACLDataChannel(
     const DataBufferInfo& bredr_buffer_info,
     const DataBufferInfo& le_buffer_info) {
-  acl_data_channel_ = AclDataChannel::Create(
-      this, controller_.get(), bredr_buffer_info, le_buffer_info);
+  acl_data_channel_ = AclDataChannel::Create(this,
+                                             controller_.get(),
+                                             bredr_buffer_info,
+                                             le_buffer_info,
+                                             wake_lease_provider_);
 
   if (hci_node_) {
     acl_data_channel_->AttachInspect(hci_node_,
@@ -95,10 +100,10 @@ bool Transport::InitializeACLDataChannel(
 
 bool Transport::InitializeScoDataChannel(const DataBufferInfo& buffer_info) {
   if (!buffer_info.IsAvailable()) {
-    bt_log(
-        WARN,
-        "hci",
-        "failed to initialize SCO data channel: buffer info is not available");
+    bt_log(WARN,
+           "hci",
+           "failed to initialize SCO data channel: buffer info is not "
+           "available");
     return false;
   }
 
@@ -115,13 +120,10 @@ bool Transport::InitializeScoDataChannel(const DataBufferInfo& buffer_info) {
 bool Transport::InitializeIsoDataChannel(const DataBufferInfo& buffer_info) {
   PW_CHECK(buffer_info.IsAvailable());
 
-  if (static_cast<uint32_t>(*features_ & FeaturesBits::kHciIso) == 0) {
-    bt_log(WARN, "hci", "HCI ISO not supported");
-    return false;
-  }
-
-  iso_data_channel_ = IsoDataChannel::Create(
-      buffer_info, command_channel_.get(), controller_.get());
+  iso_data_channel_ = IsoDataChannel::Create(buffer_info,
+                                             command_channel_.get(),
+                                             controller_.get(),
+                                             wake_lease_provider_);
   return true;
 }
 

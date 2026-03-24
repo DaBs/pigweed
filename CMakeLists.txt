@@ -20,14 +20,22 @@ project(Pigweed)
 include(pw_build/pigweed.cmake)
 
 if(CONFIG_ZEPHYR_PIGWEED_MODULE)
-  pw_set_zephyr_backend_ifdef(CONFIG_PIGWEED_ASSERT
+  pw_set_zephyr_backend_ifdef(CONFIG_PIGWEED_ASSERT_ZEPHYR
       pw_assert.assert pw_assert_zephyr.assert pw_assert/backend.cmake)
-  pw_set_zephyr_backend_ifdef(CONFIG_PIGWEED_ASSERT
+  pw_set_zephyr_backend_ifdef(CONFIG_PIGWEED_ASSERT_ZEPHYR
       pw_assert.check pw_assert_zephyr.check pw_assert/backend.cmake)
+  pw_set_zephyr_backend_ifdef(CONFIG_PIGWEED_ASSERT_TOKENIZED
+      pw_assert.assert pw_assert_tokenized.assert_backend pw_assert/backend.cmake)
+  pw_set_zephyr_backend_ifdef(CONFIG_PIGWEED_ASSERT_TOKENIZED
+      pw_assert.check pw_assert_tokenized.check_backend pw_assert/backend.cmake)
   pw_set_zephyr_backend_ifdef(CONFIG_PIGWEED_CHRONO_SYSTEM_CLOCK
       pw_chrono.system_clock pw_chrono_zephyr.system_clock pw_chrono/backend.cmake)
+  pw_set_zephyr_backend_ifdef(CONFIG_PIGWEED_CHRONO_SYSTEM_TIMER
+      pw_chrono.system_timer pw_chrono_zephyr.system_timer pw_chrono/backend.cmake)
   pw_set_zephyr_backend_ifdef(CONFIG_PIGWEED_INTERRUPT_CONTEXT
       pw_interrupt.context pw_interrupt_zephyr.context pw_interrupt/backend.cmake)
+  pw_set_zephyr_backend_ifdef(CONFIG_PIGWEED_LOG_STRING
+      pw_log pw_log_string pw_log/backend.cmake)
   pw_set_zephyr_backend_ifdef(CONFIG_PIGWEED_LOG_ZEPHYR
       pw_log pw_log_zephyr pw_log/backend.cmake)
   pw_set_zephyr_backend_ifdef(CONFIG_PIGWEED_LOG_TOKENIZED
@@ -46,12 +54,18 @@ if(CONFIG_ZEPHYR_PIGWEED_MODULE)
       pw_thread.thread_iteration pw_thread_zephyr.thread_iteration pw_thread/backend.cmake)
   pw_set_zephyr_backend_ifdef(CONFIG_PIGWEED_THREAD_SLEEP
       pw_thread.sleep pw_thread_zephyr.sleep pw_thread/backend.cmake)
+  pw_set_zephyr_backend_ifdef(CONFIG_PIGWEED_THREAD_YIELD
+      pw_thread.yield pw_thread_zephyr.yield pw_thread/backend.cmake)
   pw_set_zephyr_backend_ifdef(CONFIG_PIGWEED_THREAD
       pw_thread.id pw_thread_zephyr.id pw_thread/backend.cmake)
   pw_set_zephyr_backend_ifdef(CONFIG_PIGWEED_THREAD
       pw_thread.thread pw_thread_zephyr.thread pw_thread/backend.cmake)
+  pw_set_zephyr_backend_ifdef(CONFIG_PIGWEED_THREAD
+      pw_thread.thread_creation pw_thread_zephyr.thread_creation pw_thread/backend.cmake)
   pw_set_zephyr_backend_ifdef(CONFIG_PIGWEED_SYNC_BINARY_SEMAPHORE
-      pw_sync.mutex pw_sync_zephyr.binary_semaphore_backend pw_sync/backend.cmake)
+      pw_sync.binary_semaphore pw_sync_zephyr.binary_semaphore_backend pw_sync/backend.cmake)
+  pw_set_zephyr_backend_ifdef(CONFIG_PIGWEED_SYNC_COUNTING_SEMAPHORE
+      pw_sync.counting_semaphore pw_sync_zephyr.counting_semaphore_backend pw_sync/backend.cmake)
   pw_set_zephyr_backend_ifdef(CONFIG_PIGWEED_SYNC_INTERRUPT_SPIN_LOCK
       pw_sync.interrupt_spin_lock pw_sync_zephyr.interrupt_spin_lock_backend pw_sync/backend.cmake)
   pw_set_zephyr_backend_ifdef(CONFIG_PIGWEED_SYNC_THREAD_NOTIFICATION
@@ -60,6 +74,8 @@ if(CONFIG_ZEPHYR_PIGWEED_MODULE)
       pw_sync.timed_thread_notification pw_sync_zephyr.timed_thread_notification_backend pw_sync/backend.cmake)
   pw_set_zephyr_backend_ifdef(CONFIG_PIGWEED_SYNC_MUTEX
       pw_sync.mutex pw_sync_zephyr.mutex_backend pw_sync/backend.cmake)
+  pw_set_zephyr_backend_ifdef(CONFIG_PIGWEED_SYNC_TIMED_MUTEX
+      pw_sync.timed_mutex pw_sync_zephyr.timed_mutex_backend pw_sync/backend.cmake)
   pw_set_zephyr_backend_ifdef(CONFIG_PIGWEED_SYS_IO
       pw_sys_io pw_sys_io_zephyr pw_sys_io/backend.cmake)
 
@@ -74,12 +90,11 @@ add_subdirectory(pw_assert EXCLUDE_FROM_ALL)
 add_subdirectory(pw_assert_basic EXCLUDE_FROM_ALL)
 add_subdirectory(pw_assert_fuchsia EXCLUDE_FROM_ALL)
 add_subdirectory(pw_assert_log EXCLUDE_FROM_ALL)
+add_subdirectory(pw_assert_tokenized EXCLUDE_FROM_ALL)
 add_subdirectory(pw_assert_zephyr EXCLUDE_FROM_ALL)
 add_subdirectory(pw_async EXCLUDE_FROM_ALL)
 add_subdirectory(pw_async_basic EXCLUDE_FROM_ALL)
 add_subdirectory(pw_async2 EXCLUDE_FROM_ALL)
-add_subdirectory(pw_async2_basic EXCLUDE_FROM_ALL)
-add_subdirectory(pw_async2_epoll EXCLUDE_FROM_ALL)
 add_subdirectory(pw_async_fuchsia EXCLUDE_FROM_ALL)
 add_subdirectory(pw_atomic EXCLUDE_FROM_ALL)
 add_subdirectory(pw_base64 EXCLUDE_FROM_ALL)
@@ -100,14 +115,17 @@ add_subdirectory(pw_containers EXCLUDE_FROM_ALL)
 add_subdirectory(pw_cpu_exception EXCLUDE_FROM_ALL)
 add_subdirectory(pw_cpu_exception_cortex_m EXCLUDE_FROM_ALL)
 add_subdirectory(pw_digital_io EXCLUDE_FROM_ALL)
+add_subdirectory(pw_digital_io_zephyr EXCLUDE_FROM_ALL)
 add_subdirectory(pw_display EXCLUDE_FROM_ALL)
 add_subdirectory(pw_elf EXCLUDE_FROM_ALL)
 add_subdirectory(pw_file EXCLUDE_FROM_ALL)
+add_subdirectory(pw_flatbuffers EXCLUDE_FROM_ALL)
 add_subdirectory(pw_function EXCLUDE_FROM_ALL)
 add_subdirectory(pw_fuzzer EXCLUDE_FROM_ALL)
 add_subdirectory(pw_hex_dump EXCLUDE_FROM_ALL)
 add_subdirectory(pw_hdlc EXCLUDE_FROM_ALL)
 add_subdirectory(pw_i2c EXCLUDE_FROM_ALL)
+add_subdirectory(pw_i2c_zephyr EXCLUDE_FROM_ALL)
 add_subdirectory(pw_interrupt EXCLUDE_FROM_ALL)
 add_subdirectory(pw_interrupt_cortex_m EXCLUDE_FROM_ALL)
 add_subdirectory(pw_interrupt_freertos EXCLUDE_FROM_ALL)
@@ -115,6 +133,8 @@ add_subdirectory(pw_interrupt_zephyr EXCLUDE_FROM_ALL)
 add_subdirectory(pw_intrusive_ptr EXCLUDE_FROM_ALL)
 add_subdirectory(pw_json EXCLUDE_FROM_ALL)
 add_subdirectory(pw_kvs EXCLUDE_FROM_ALL)
+add_subdirectory(pw_libc EXCLUDE_FROM_ALL)
+add_subdirectory(pw_libcxx EXCLUDE_FROM_ALL)
 add_subdirectory(pw_log EXCLUDE_FROM_ALL)
 add_subdirectory(pw_log_basic EXCLUDE_FROM_ALL)
 add_subdirectory(pw_log_fuchsia EXCLUDE_FROM_ALL)
@@ -123,7 +143,8 @@ add_subdirectory(pw_log_string EXCLUDE_FROM_ALL)
 add_subdirectory(pw_log_tokenized EXCLUDE_FROM_ALL)
 add_subdirectory(pw_log_rpc EXCLUDE_FROM_ALL)
 add_subdirectory(pw_log_zephyr EXCLUDE_FROM_ALL)
-add_subdirectory(pw_minimal_cpp_stdlib EXCLUDE_FROM_ALL)
+add_subdirectory(pw_malloc EXCLUDE_FROM_ALL)
+add_subdirectory(pw_memory EXCLUDE_FROM_ALL)
 add_subdirectory(pw_metric EXCLUDE_FROM_ALL)
 add_subdirectory(pw_multibuf EXCLUDE_FROM_ALL)
 add_subdirectory(pw_multisink EXCLUDE_FROM_ALL)
@@ -168,6 +189,7 @@ add_subdirectory(pw_trace EXCLUDE_FROM_ALL)
 add_subdirectory(pw_trace_tokenized EXCLUDE_FROM_ALL)
 add_subdirectory(pw_transfer EXCLUDE_FROM_ALL)
 add_subdirectory(pw_uart EXCLUDE_FROM_ALL)
+add_subdirectory(pw_uuid EXCLUDE_FROM_ALL)
 add_subdirectory(pw_unit_test EXCLUDE_FROM_ALL)
 add_subdirectory(pw_varint EXCLUDE_FROM_ALL)
 add_subdirectory(pw_work_queue EXCLUDE_FROM_ALL)
@@ -175,6 +197,7 @@ add_subdirectory(pw_work_queue EXCLUDE_FROM_ALL)
 add_subdirectory(third_party/abseil-cpp EXCLUDE_FROM_ALL)
 add_subdirectory(third_party/boringssl EXCLUDE_FROM_ALL)
 add_subdirectory(third_party/emboss EXCLUDE_FROM_ALL)
+add_subdirectory(third_party/flatbuffers EXCLUDE_FROM_ALL)
 add_subdirectory(third_party/freertos EXCLUDE_FROM_ALL)
 add_subdirectory(third_party/fuchsia EXCLUDE_FROM_ALL)
 add_subdirectory(third_party/fuzztest EXCLUDE_FROM_ALL)
@@ -186,14 +209,9 @@ add_custom_target(pw_apps)
 # pw_system example apps
 add_subdirectory(targets/host_device_simulator EXCLUDE_FROM_ALL)
 add_dependencies(pw_apps pw_system.system_example)
-add_dependencies(pw_apps pw_system.system_async_host_example)
 
 if(CONFIG_ZEPHYR_PIGWEED_MODULE)
   add_subdirectory(zephyr)
-  if(CONFIG_PIGWEED_MINIMAL_CPP_STDLIB)
-    # Add include path to pw_minimal_cpp_stdlib to compiler
-    zephyr_compile_options(-isystem ${ZEPHYR_PIGWEED_MODULE_DIR}/pw_minimal_cpp_stdlib/public)
-  endif()
 else()
   add_subdirectory(targets/host EXCLUDE_FROM_ALL)
 

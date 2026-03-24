@@ -18,31 +18,31 @@ package {
 
 cc_library_static {
     name: "pw_bytes",
-    cpp_std: "c++20",
-    vendor_available: true,
+    defaults: [
+        "pw_android_common_target_support",
+    ],
     export_include_dirs: ["public"],
     header_libs: [
         "fuchsia_sdk_lib_stdcompat",
         "pw_assert",
+        "pw_containers_headers",
     ],
     export_header_lib_headers: [
         "fuchsia_sdk_lib_stdcompat",
         "pw_assert",
+        "pw_containers_headers",
     ],
-    host_supported: true,
     srcs: [
         "alignment.cc",
         "byte_builder.cc",
     ],
     static_libs: [
-        "pw_containers",
         "pw_polyfill",
         "pw_preprocessor",
         "pw_span",
         "pw_status",
     ],
     export_static_lib_headers: [
-        "pw_containers",
         "pw_polyfill",
         "pw_preprocessor",
         "pw_span",

@@ -30,12 +30,14 @@ inline constexpr uint32_t kHardFaultIsrNum = 0x3;
 inline constexpr uint32_t kMemFaultIsrNum = 0x4;
 inline constexpr uint32_t kBusFaultIsrNum = 0x5;
 inline constexpr uint32_t kUsageFaultIsrNum = 0x6;
+inline constexpr uint32_t kDebugMonIsrNum = 0xC;
 
 // Masks for Interrupt Control and State Register ICSR (ARMv7-M Section B3.2.4)
 inline constexpr uint32_t kIcsrVectactiveMask = (1 << 9) - 1;
 
 // Masks for individual bits of HFSR. (ARMv7-M Section B3.2.16)
 inline constexpr uint32_t kHfsrForcedMask = (0x1 << 30);
+inline constexpr uint32_t kHfsrDebugEvtMask = (0x1 << 31);
 
 // Masks for different sections of CFSR. (ARMv7-M Section B3.2.15)
 inline constexpr uint32_t kCfsrMemFaultMask = 0x000000ff;
@@ -106,17 +108,23 @@ inline constexpr uint32_t kControlThreadModeStackMask = 0x1u << 1;
 
 // Memory mapped registers. (ARMv7-M Section B3.2.2, Table B3-4)
 // Note: Only some of these are supported on ARMv6-M.
-inline volatile uint32_t& cortex_m_cfsr =
-    *reinterpret_cast<volatile uint32_t*>(0xE000ED28u);
-inline volatile uint32_t& cortex_m_mmfar =
-    *reinterpret_cast<volatile uint32_t*>(0xE000ED34u);
-inline volatile uint32_t& cortex_m_bfar =
-    *reinterpret_cast<volatile uint32_t*>(0xE000ED38u);
-inline volatile uint32_t& cortex_m_icsr =
-    *reinterpret_cast<volatile uint32_t*>(0xE000ED04u);
-inline volatile uint32_t& cortex_m_hfsr =
-    *reinterpret_cast<volatile uint32_t*>(0xE000ED2Cu);
-inline volatile uint32_t& cortex_m_shcsr =
-    *reinterpret_cast<volatile uint32_t*>(0xE000ED24u);
+inline volatile uint32_t& cortex_m_cfsr() {
+  return *reinterpret_cast<volatile uint32_t*>(0xE000ED28u);
+}
+inline volatile uint32_t& cortex_m_mmfar() {
+  return *reinterpret_cast<volatile uint32_t*>(0xE000ED34u);
+}
+inline volatile uint32_t& cortex_m_bfar() {
+  return *reinterpret_cast<volatile uint32_t*>(0xE000ED38u);
+}
+inline volatile uint32_t& cortex_m_icsr() {
+  return *reinterpret_cast<volatile uint32_t*>(0xE000ED04u);
+}
+inline volatile uint32_t& cortex_m_hfsr() {
+  return *reinterpret_cast<volatile uint32_t*>(0xE000ED2Cu);
+}
+inline volatile uint32_t& cortex_m_shcsr() {
+  return *reinterpret_cast<volatile uint32_t*>(0xE000ED24u);
+}
 
 }  // namespace pw::cpu_exception::cortex_m

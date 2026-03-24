@@ -12,31 +12,35 @@
 # License for the specific language governing permissions and limitations under
 # the License.
 
-load("@rules_python//python:defs.bzl", "py_library")
 load("@rules_python//sphinxdocs:sphinx_docs_library.bzl", "sphinx_docs_library")
 load("//pw_build:compatibility.bzl", "incompatible_with_mcu")
-load("//pw_build:python.bzl", "pw_py_binary", "pw_py_test")
+load("//pw_build:python.bzl", "pw_py_binary", "pw_py_library", "pw_py_test")
 
 package(default_visibility = ["//visibility:public"])
 
-py_library(
+pw_py_library(
     name = "event_count_history",
     srcs = ["pw_console/widgets/event_count_history.py"],
 )
 
-py_library(
+pw_py_library(
     name = "pyserial_wrapper",
     srcs = ["pw_console/pyserial_wrapper.py"],
+    # TODO: b/434772781 - This target's dependencies are not quite correct.
+    tags = ["nomypy"],
     deps = [
         ":event_count_history",
+        "@pigweed_python_packages//pyserial",
     ],
 )
 
-py_library(
+pw_py_library(
     name = "pw_console",
     srcs = [
         "pw_console/__init__.py",
         "pw_console/__main__.py",
+        "pw_console/background_command_log_parsers.py",
+        "pw_console/background_command_runner.py",
         "pw_console/command_runner.py",
         "pw_console/console_app.py",
         "pw_console/console_log_server.py",
@@ -110,14 +114,14 @@ py_library(
         "//pw_cli/py:pw_cli",
         "//pw_config_loader/py:pw_config_loader",
         "//pw_log_tokenized/py:pw_log_tokenized",
-        "@python_packages//aiohttp",
-        "@python_packages//jinja2",
-        "@python_packages//prompt_toolkit",
-        "@python_packages//ptpython",
-        "@python_packages//pygments",
-        "@python_packages//pyperclip",
-        "@python_packages//pyyaml",
-        "@python_packages//websockets",
+        "@pigweed_python_packages//aiohttp",
+        "@pigweed_python_packages//jinja2",
+        "@pigweed_python_packages//prompt_toolkit",
+        "@pigweed_python_packages//ptpython",
+        "@pigweed_python_packages//pygments",
+        "@pigweed_python_packages//pyperclip",
+        "@pigweed_python_packages//pyyaml",
+        "@pigweed_python_packages//websockets",
     ],
 )
 
@@ -125,6 +129,9 @@ pw_py_binary(
     name = "pw_console_test_mode",
     srcs = [
         "pw_console/__main__.py",
+    ],
+    args = [
+        "--test-mode",
     ],
     main = "pw_console/__main__.py",
     deps = [
@@ -140,6 +147,7 @@ pw_py_test(
     ],
     deps = [
         ":pw_console",
+        "@pigweed_python_packages//prompt_toolkit",
     ],
 )
 
@@ -151,6 +159,7 @@ pw_py_test(
     ],
     deps = [
         ":pw_console",
+        "@pigweed_python_packages//prompt_toolkit",
     ],
 )
 
@@ -162,6 +171,7 @@ pw_py_test(
     ],
     deps = [
         ":pw_console",
+        "@pigweed_python_packages//pyyaml",
     ],
 )
 
@@ -173,6 +183,8 @@ pw_py_test(
     ],
     deps = [
         ":pw_console",
+        "@pigweed_python_packages//jinja2",
+        "@pigweed_python_packages//prompt_toolkit",
     ],
 )
 
@@ -184,7 +196,8 @@ pw_py_test(
     ],
     deps = [
         ":pw_console",
-        "@python_packages//parameterized",
+        "@pigweed_python_packages//parameterized",
+        "@pigweed_python_packages//prompt_toolkit",
     ],
 )
 
@@ -207,7 +220,8 @@ pw_py_test(
     ],
     deps = [
         ":pw_console",
-        "@python_packages//parameterized",
+        "@pigweed_python_packages//parameterized",
+        "@pigweed_python_packages//prompt_toolkit",
     ],
 )
 
@@ -230,6 +244,7 @@ pw_py_test(
     ],
     deps = [
         ":pw_console",
+        "@pigweed_python_packages//prompt_toolkit",
     ],
 )
 
@@ -241,7 +256,7 @@ pw_py_test(
     ],
     deps = [
         ":pw_console",
-        "@python_packages//parameterized",
+        "@pigweed_python_packages//parameterized",
     ],
 )
 
@@ -253,7 +268,8 @@ pw_py_test(
     ],
     deps = [
         ":pw_console",
-        "@python_packages//parameterized",
+        "@pigweed_python_packages//parameterized",
+        "@pigweed_python_packages//prompt_toolkit",
     ],
 )
 
@@ -265,6 +281,7 @@ pw_py_test(
     ],
     deps = [
         ":pw_console",
+        "@pigweed_python_packages//prompt_toolkit",
     ],
 )
 

@@ -13,7 +13,7 @@
 # the License.
 
 config ZEPHYR_PIGWEED_MODULE
-    depends on STD_CPP17 || STD_CPP2A || STD_CPP20 || STD_CPP2B
+    depends on REQUIRES_FULL_LIBCPP && (STD_CPP17 || STD_CPP2A || STD_CPP20 || STD_CPP2B)
 
 if ZEPHYR_PIGWEED_MODULE
 
@@ -23,11 +23,12 @@ rsource "pw_bytes/Kconfig"
 rsource "pw_checksum/Kconfig"
 rsource "pw_chrono_zephyr/Kconfig"
 rsource "pw_containers/Kconfig"
+rsource "pw_digital_io_zephyr/Kconfig"
 rsource "pw_function/Kconfig"
 rsource "pw_hdlc/Kconfig"
+rsource "pw_i2c_zephyr/Kconfig"
 rsource "pw_interrupt_zephyr/Kconfig"
 rsource "pw_log_zephyr/Kconfig"
-rsource "pw_minimal_cpp_stdlib/Kconfig"
 rsource "pw_multisink/Kconfig"
 rsource "pw_polyfill/Kconfig"
 rsource "pw_preprocessor/Kconfig"
@@ -41,6 +42,7 @@ rsource "pw_string/Kconfig"
 rsource "pw_sync_zephyr/Kconfig"
 rsource "pw_sys_io_zephyr/Kconfig"
 rsource "pw_system/Kconfig"
+rsource "pw_trace_tokenized/Kconfig"
 rsource "pw_thread_zephyr/Kconfig"
 rsource "pw_tokenizer/Kconfig"
 rsource "pw_varint/Kconfig"

@@ -28,6 +28,8 @@
 
 namespace pw {
 
+/// @submodule{pw_bytes,build}
+
 /// ByteBuilder facilitates building bytes in a fixed-size buffer.
 /// BytesBuilders never overflow. Status is tracked for each operation and
 /// an overall status is maintained, which reflects the most recent error.
@@ -219,19 +221,11 @@ class ByteBuilder {
   /// that occurred while updating the bytes. After an update fails, the status
   /// remains non-OK until it is cleared with clear() or clear_status().
   ///
-  /// @returns @rst
-  ///
-  /// .. pw-status-codes::
-  ///
-  ///    OK: No errors have occurred.
-  ///
-  ///    RESOURCE_EXHAUSTED: Output to the ``ByteBuilder`` was truncated.
-  ///
-  ///    INVALID_ARGUMENT: ``printf``-style formatting failed.
-  ///
-  ///    OUT_OF_RANGE: An operation outside the buffer was attempted.
-  ///
-  /// @endrst
+  /// @returns
+  /// * @OK: No errors have occurred.
+  /// * @RESOURCE_EXHAUSTED: Output to the `ByteBuilder` was truncated.
+  /// * @INVALID_ARGUMENT: `printf`-style formatting failed.
+  /// * @OUT_OF_RANGE: An operation outside the buffer was attempted.
   Status status() const { return status_; }
 
   /// Returns status() and size() as a StatusWithSize.
@@ -417,5 +411,7 @@ class ByteBuffer : public ByteBuilder {
 constexpr ByteBuilder::iterator operator+(int n, ByteBuilder::iterator it) {
   return it + n;
 }
+
+/// @}
 
 }  // namespace pw

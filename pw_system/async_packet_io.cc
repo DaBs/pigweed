@@ -38,7 +38,7 @@ using ::pw::multibuf::MultiBuf;
 // lockless in single producer, single consumer scenarios.
 
 // TODO: b/349398108 - MultiBuf directly out of (and into) the ring buffer.
-Poll<InlineVarLenEntryQueue<>::Entry>
+Poll<InlineVarLenEntryQueue<>::const_value_type>
 RpcChannelOutputQueue::PendOutgoingDatagram(Context& cx) {
   // The head pointer will not change until Pop is called.
   std::lock_guard lock(mutex_);
@@ -57,7 +57,7 @@ Status RpcChannelOutputQueue::Send(ConstByteSpan datagram) {
                       datagram.size());
   mutex_.lock();
   if (queue_.try_push(datagram)) {
-    std::move(packet_ready_).Wake();
+    packet_ready_.Wake();
   } else {
     dropped_packets_ += 1;
   }
@@ -101,7 +101,7 @@ void RpcServerThread::RunOnce() {
   packet_multibuf_.Release();
   std::lock_guard lock(mutex_);
   ready_for_packet_ = true;
-  std::move(ready_to_receive_packet_).Wake();
+  ready_to_receive_packet_.Wake();
 }
 
 PacketIO::PacketIO(channel::ByteReaderWriter& io_channel,

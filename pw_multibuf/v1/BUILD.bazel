@@ -1,0 +1,344 @@
+# Copyright 2025 The Pigweed Authors
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may not
+# use this file except in compliance with the License. You may obtain a copy of
+# the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations under
+# the License.
+
+load("@rules_cc//cc:cc_library.bzl", "cc_library")
+load("//pw_unit_test:pw_cc_test.bzl", "pw_cc_test")
+
+package(
+    default_visibility = ["//visibility:public"],
+    features = [
+        "-ctad_warnings",
+    ],
+)
+
+licenses(["notice"])
+
+### Libraries and tests
+
+# LINT.IfChange
+cc_library(
+    name = "chunk",
+    srcs = ["chunk.cc"],
+    hdrs = ["public/pw_multibuf/v1/chunk.h"],
+    implementation_deps = ["//pw_assert:check"],
+    strip_include_prefix = "public",
+    deps = [
+        "//pw_assert:assert",
+        "//pw_bytes",
+        "//pw_multibuf:config",
+        "//pw_preprocessor",
+        "//pw_span",
+        "//pw_sync:mutex",
+    ],
+)
+# LINT.ThenChange(../Android.bp, BUILD.gn, CMakeLists.txt)
+
+# LINT.IfChange
+cc_library(
+    name = "chunk_testing",
+    testonly = True,
+    hdrs = ["private/pw_multibuf_private/chunk_testing.h"],
+    defines = ["PW_MULTIBUF_VERSION=1"],
+    strip_include_prefix = "private",
+    visibility = ["//visibility:private"],
+    deps = [
+        ":header_chunk_region_tracker",
+        "//pw_allocator:testing",
+        "//pw_multibuf",
+        "//pw_multibuf:chunk_testing",
+    ],
+)
+
+# Expose source files to be reused by v1_adapter.
+filegroup(
+    name = "chunk_test_srcs",
+    testonly = True,
+    srcs = ["chunk_test.cc"],
+    visibility = ["//pw_multibuf:__subpackages__"],
+)
+
+pw_cc_test(
+    name = "chunk_test",
+    srcs = [":chunk_test_srcs"],
+    defines = ["PW_MULTIBUF_VERSION=1"],
+    deps = [":chunk_testing"],
+)
+
+cc_library(
+    name = "header_chunk_region_tracker",
+    hdrs = ["public/pw_multibuf/v1/header_chunk_region_tracker.h"],
+    strip_include_prefix = "public",
+    deps = [
+        ":chunk",
+        "//pw_allocator:allocator",
+        "//pw_bytes",
+        "//pw_multibuf:config",
+    ],
+)
+
+pw_cc_test(
+    name = "header_chunk_region_tracker_test",
+    srcs = ["header_chunk_region_tracker_test.cc"],
+    defines = ["PW_MULTIBUF_VERSION=1"],
+    features = ["-conversion_warnings"],
+    deps = [
+        ":chunk",
+        ":header_chunk_region_tracker",
+        "//pw_allocator:testing",
+        "//pw_status",
+    ],
+)
+
+cc_library(
+    name = "single_chunk_region_tracker",
+    hdrs = ["public/pw_multibuf/v1/single_chunk_region_tracker.h"],
+    strip_include_prefix = "public",
+    deps = [
+        ":chunk",
+        "//pw_assert:assert",
+        "//pw_bytes",
+        "//pw_multibuf:config",
+    ],
+)
+
+# Expose source files to be reused by v1_adapter.
+filegroup(
+    name = "single_chunk_region_tracker_test_srcs",
+    testonly = True,
+    srcs = ["single_chunk_region_tracker_test.cc"],
+    visibility = ["//pw_multibuf:__subpackages__"],
+)
+
+pw_cc_test(
+    name = "single_chunk_region_tracker_test",
+    srcs = [":single_chunk_region_tracker_test_srcs"],
+    defines = ["PW_MULTIBUF_VERSION=1"],
+    # TODO: b/260624583 - Fix this for rp2040
+    target_compatible_with = select({
+        "//pw_build/constraints/chipset:rp2040": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
+    deps = [
+        "//pw_multibuf:chunk",
+        "//pw_multibuf:single_chunk_region_tracker",
+    ],
+)
+# LINT.ThenChange(BUILD.gn, CMakeLists.txt)
+
+# LINT.IfChange
+cc_library(
+    name = "multibuf",
+    srcs = ["multibuf.cc"],
+    hdrs = ["public/pw_multibuf/v1/multibuf.h"],
+    implementation_deps = ["//pw_assert:check"],
+    strip_include_prefix = "public",
+    deps = [
+        ":chunk",
+        "//pw_multibuf:config",
+        "//pw_preprocessor",
+        "//pw_status",
+    ],
+)
+# LINT.ThenChange(../Android.bp, BUILD.gn, CMakeLists.txt)
+
+# LINT.IfChange
+# Expose source files to be reused by v1_adapter.
+filegroup(
+    name = "multibuf_test_srcs",
+    testonly = True,
+    srcs = ["multibuf_test.cc"],
+    visibility = ["//pw_multibuf:__subpackages__"],
+)
+
+pw_cc_test(
+    name = "multibuf_test",
+    srcs = [
+        ":multibuf_test_srcs",
+    ],
+    defines = ["PW_MULTIBUF_VERSION=1"],
+    deps = [
+        ":chunk_testing",
+        "//pw_bytes",
+        "//pw_multibuf:test_utils",
+    ],
+)
+# LINT.ThenChange(BUILD.gn, CMakeLists.txt)
+
+# LINT.IfChange
+cc_library(
+    name = "allocator",
+    srcs = ["allocator.cc"],
+    hdrs = ["public/pw_multibuf/v1/allocator.h"],
+    strip_include_prefix = "public",
+    deps = [
+        ":multibuf",
+        "//pw_containers:intrusive_forward_list",
+        "//pw_multibuf:config",
+        "//pw_result",
+        "//pw_sync:mutex",
+    ],
+)
+# LINT.ThenChange(../Android.bp, BUILD.gn, CMakeLists.txt)
+
+# LINT.IfChange
+cc_library(
+    name = "allocator_async",
+    srcs = ["allocator_async.cc"],
+    hdrs = ["public/pw_multibuf/v1/allocator_async.h"],
+    features = ["-conversion_warnings"],
+    implementation_deps = ["//pw_assert:check"],
+    strip_include_prefix = "public",
+    deps = [
+        ":allocator",
+        "//pw_async2",
+        "//pw_multibuf:config",
+    ],
+)
+
+pw_cc_test(
+    name = "allocator_async_test",
+    srcs = ["allocator_async_test.cc"],
+    defines = ["PW_MULTIBUF_VERSION=1"],
+    features = ["-conversion_warnings"],
+    deps = [
+        ":allocator",
+        ":allocator_async",
+        "//pw_async2",
+        "//pw_async2:testing",
+    ],
+)
+# LINT.ThenChange(BUILD.gn, CMakeLists.txt)
+
+# LINT.IfChange
+cc_library(
+    name = "simple_allocator",
+    srcs = ["simple_allocator.cc"],
+    hdrs = ["public/pw_multibuf/v1/simple_allocator.h"],
+    features = ["-conversion_warnings"],
+    implementation_deps = ["//pw_assert:check"],
+    strip_include_prefix = "public",
+    deps = [
+        ":allocator",
+        ":multibuf",
+        "//pw_allocator:allocator",
+        "//pw_bytes:alignment",
+        "//pw_containers:intrusive_list",
+        "//pw_multibuf:config",
+    ],
+)
+# LINT.ThenChange(../Android.bp, BUILD.gn, CMakeLists.txt)
+
+# LINT.IfChange
+# Expose source files to be reused by v1_adapter.
+filegroup(
+    name = "simple_allocator_test_srcs",
+    testonly = True,
+    srcs = ["simple_allocator_test.cc"],
+    visibility = ["//pw_multibuf:__subpackages__"],
+)
+
+pw_cc_test(
+    name = "simple_allocator_test",
+    srcs = [":simple_allocator_test_srcs"],
+    defines = ["PW_MULTIBUF_VERSION=1"],
+    features = ["-conversion_warnings"],
+    deps = [
+        "//pw_allocator:null_allocator",
+        "//pw_allocator:testing",
+        "//pw_multibuf:simple_allocator",
+    ],
+)
+
+cc_library(
+    name = "stream",
+    srcs = ["stream.cc"],
+    hdrs = ["public/pw_multibuf/v1/stream.h"],
+    strip_include_prefix = "public",
+    deps = [
+        ":multibuf",
+        "//pw_multibuf:config",
+        "//pw_status",
+        "//pw_stream",
+    ],
+)
+
+pw_cc_test(
+    name = "stream_test",
+    srcs = ["stream_test.cc"],
+    defines = ["PW_MULTIBUF_VERSION=1"],
+    features = ["-conversion_warnings"],
+    deps = [
+        ":chunk_testing",
+        ":stream",
+        "//pw_bytes",
+        "//pw_multibuf",
+        "//pw_multibuf:test_utils",
+        "//pw_status",
+    ],
+)
+# LINT.ThenChange(BUILD.gn, CMakeLists.txt)
+
+# LINT.IfChange
+cc_library(
+    name = "from_span",
+    srcs = ["from_span.cc"],
+    hdrs = ["public/pw_multibuf/v1/from_span.h"],
+    strip_include_prefix = "public",
+    deps = [
+        ":multibuf",
+        "//pw_allocator",
+        "//pw_function",
+        "//pw_multibuf:config",
+    ],
+)
+# LINT.ThenChange(../Android.bp, BUILD.gn, CMakeLists.txt)
+
+# LINT.IfChange
+# Expose source files to be reused by v1_adapter.
+filegroup(
+    name = "from_span_test_srcs",
+    testonly = True,
+    srcs = ["from_span_test.cc"],
+    visibility = ["//pw_multibuf:__subpackages__"],
+)
+
+pw_cc_test(
+    name = "from_span_test",
+    srcs = [":from_span_test_srcs"],
+    defines = ["PW_MULTIBUF_VERSION=1"],
+    features = ["-conversion_warnings"],
+    deps = [
+        "//pw_allocator:testing",
+        "//pw_multibuf:from_span",
+    ],
+)
+
+# LINT.ThenChange(BUILD.gn, CMakeLists.txt)
+
+### Docs
+
+filegroup(
+    name = "doxygen",
+    srcs = [
+        "public/pw_multibuf/v1/allocator.h",
+        "public/pw_multibuf/v1/allocator_async.h",
+        "public/pw_multibuf/v1/chunk.h",
+        "public/pw_multibuf/v1/from_span.h",
+        "public/pw_multibuf/v1/header_chunk_region_tracker.h",
+        "public/pw_multibuf/v1/multibuf.h",
+        "public/pw_multibuf/v1/simple_allocator.h",
+        "public/pw_multibuf/v1/single_chunk_region_tracker.h",
+        "public/pw_multibuf/v1/stream.h",
+    ],
+)

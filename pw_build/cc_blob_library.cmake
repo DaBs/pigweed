@@ -154,6 +154,8 @@ function(pw_cc_blob_library NAME)
   )
 
   pw_add_library_generic("${NAME}" OBJECT
+    GENERATED_HEADERS
+      "${generated_header}"
     SOURCES
       "${generated_source}"
     PUBLIC_INCLUDES

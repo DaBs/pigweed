@@ -72,8 +72,11 @@ void SetBaudRate(uint32_t clock, uint32_t target_baud) {
 extern "C" void pw_sys_io_lm3s6965evb_Init() {
   rcgc1 |= kRcgcUart0EnableMask;
 
-  for (volatile int i = 0; i < 3; i = i + 1) {
-    // We must wait after enabling uart.
+  // Wait briefly after enabling UART.
+  // GCC does not allow incrementing volatiles in for loops when using C++20.
+  volatile int i = 0;
+  while (i < 3) {
+    i = i + 1;
   }
   // Set baud rate.
   SetBaudRate(kSystemCoreClock, /*target_baud=*/115200);

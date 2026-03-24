@@ -66,6 +66,8 @@ namespace pw::stream {
 class MpscReader;
 class MpscWriter;
 
+/// @submodule{pw_stream,interface}
+
 /// Creates a multi-producer, single consumer stream.
 ///
 /// This method creates a stream by associating a reader and writer. Both are
@@ -81,6 +83,10 @@ class MpscWriter;
 /// @param[out]   reader  The reader to connect.
 /// @param[out]   writer  The writer to connect.
 void CreateMpscStream(MpscReader& reader, MpscWriter& writer);
+
+/// @}
+
+/// @submodule{pw_stream,interface_writer}
 
 /// Writer for a multi-producer, single consumer stream.
 ///
@@ -126,10 +132,10 @@ class MpscWriter : public NonSeekableWriter,
   /// Set the timeout for writing to this stream.
   ///
   /// After setting a timeout, if the given duration elapses while making a call
-  /// to `Write()`, @pw_status{RESOURCE_EXHAUSTED} will be returned. If desired,
-  /// a timeout should be set before calling `Write()`. Setting a timeout when a
-  /// writer is awaiting notification from a reader will not affect the duration
-  /// of that wait.
+  /// to `Write()`, `pw::Status::ResourceExhausted()` will be returned. If
+  /// desired, a timeout should be set before calling `Write()`. Setting a
+  /// timeout when a writer is awaiting notification from a reader will not
+  /// affect the duration of that wait.
   ///
   /// Note that setting a write timeout makes partial writes possible. For
   /// example, if a call to `Write()` of some length corresponds to 2 calls to
@@ -195,6 +201,10 @@ class MpscWriter : public NonSeekableWriter,
   duration timeout_ PW_GUARDED_BY(mutex_);
   size_t last_write_ PW_GUARDED_BY(mutex_) = 0;
 };
+
+/// @}
+
+/// @submodule{pw_stream,interface_reader}
 
 /// Reader of a multi-producer, single-consumer stream.
 ///
@@ -387,5 +397,7 @@ class BufferedMpscReader : public MpscReader {
  private:
   std::array<std::byte, kCapacity> buffer_;
 };
+
+/// @}
 
 }  // namespace pw::stream

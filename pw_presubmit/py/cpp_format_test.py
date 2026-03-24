@@ -20,6 +20,7 @@ from typing import Final, Sequence
 import unittest
 
 from format_testing_utils import CapturingToolRunner
+from pw_build.runfiles_manager import RunfilesManager
 from pw_presubmit.format.cpp import ClangFormatFormatter
 
 _TEST_DATA_FILES = importlib.resources.files('pw_presubmit.format.test_data')
@@ -36,10 +37,27 @@ _CLANG_FORMAT_ARGS: Final[Sequence[str]] = (
 class TestClangFormatFormatter(unittest.TestCase):
     """Tests for the ClangFormatFormatter."""
 
+    def setUp(self):
+        self.runfiles = RunfilesManager()
+        self.runfiles.add_bazel_tool(
+            'clang-format',
+            'llvm_toolchain.clang_format',
+        )
+        self.runfiles.add_bootstrapped_tool(
+            'clang-format',
+            'clang-format',
+            from_shell_path=True,
+        )
+        self.tool_runner = CapturingToolRunner(
+            {'clang-format': self.runfiles['clang-format']}
+        )
+
+    def _clang_format_path(self) -> str:
+        return str(self.runfiles['clang-format'])
+
     def test_check_file(self):
-        tool_runner = CapturingToolRunner()
         formatter = ClangFormatFormatter(_CLANG_FORMAT_ARGS)
-        formatter.run_tool = tool_runner
+        formatter.run_tool = self.tool_runner
 
         result = formatter.format_file_in_memory(
             _TEST_SRC_FILE, _TEST_SRC_FILE.read_bytes()
@@ -48,12 +66,12 @@ class TestClangFormatFormatter(unittest.TestCase):
         self.assertEqual(result.error_message, None)
 
         self.assertEqual(
-            tool_runner.command_history.pop(0),
+            self.tool_runner.command_history.pop(0),
             ' '.join(
                 (
-                    'clang-format',
+                    self._clang_format_path(),
                     f'--style=file:{_CLANG_FORMAT_CONFIG_PATH}',
-                    str(_TEST_SRC_FILE),
+                    f'--assume-filename={_TEST_SRC_FILE}',
                 )
             ),
         )
@@ -63,9 +81,8 @@ class TestClangFormatFormatter(unittest.TestCase):
         )
 
     def test_fix_file(self):
-        tool_runner = CapturingToolRunner()
         formatter = ClangFormatFormatter(_CLANG_FORMAT_ARGS)
-        formatter.run_tool = tool_runner
+        formatter.run_tool = self.tool_runner
 
         with TemporaryDirectory() as temp_dir:
             file_to_fix = Path(temp_dir) / _TEST_SRC_FILE.name
@@ -77,10 +94,10 @@ class TestClangFormatFormatter(unittest.TestCase):
             self.assertFalse(list(errors))
 
             self.assertEqual(
-                tool_runner.command_history.pop(0),
+                self.tool_runner.command_history.pop(0),
                 ' '.join(
                     (
-                        'clang-format',
+                        self._clang_format_path(),
                         '-i',
                         f'--style=file:{_CLANG_FORMAT_CONFIG_PATH}',
                         str(file_to_fix),

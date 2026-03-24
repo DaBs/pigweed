@@ -15,8 +15,8 @@
 load("@com_google_protobuf//bazel:java_lite_proto_library.bzl", "java_lite_proto_library")
 load("@com_google_protobuf//bazel:java_proto_library.bzl", "java_proto_library")
 load("@com_google_protobuf//bazel:proto_library.bzl", "proto_library")
+load("@com_google_protobuf//bazel:py_proto_library.bzl", "py_proto_library")
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
-load("@rules_python//python:proto.bzl", "py_proto_library")
 load("@rules_python//sphinxdocs:sphinx_docs_library.bzl", "sphinx_docs_library")
 load("//pw_build:compatibility.bzl", "incompatible_with_mcu")
 load("//pw_build:copy_to_bin.bzl", "copy_to_bin")
@@ -60,6 +60,7 @@ cc_library(
     name = "core",
     srcs = [
         "chunk.cc",
+        "client.cc",
         "client_context.cc",
         "context.cc",
         "rate_estimate.cc",
@@ -67,6 +68,7 @@ cc_library(
         "transfer_thread.cc",
     ],
     hdrs = [
+        "public/pw_transfer/client.h",
         "public/pw_transfer/handler.h",
         "public/pw_transfer/internal/chunk.h",
         "public/pw_transfer/internal/client_context.h",
@@ -77,6 +79,7 @@ cc_library(
         "public/pw_transfer/rate_estimate.h",
         "public/pw_transfer/transfer_thread.h",
     ],
+    features = ["-conversion_warnings"],
     implementation_deps = ["//pw_assert:check"],
     strip_include_prefix = "public",
     deps = [
@@ -86,7 +89,7 @@ cc_library(
         "//pw_assert:assert",
         "//pw_bytes",
         "//pw_chrono:system_clock",
-        "//pw_containers:intrusive_list",
+        "//pw_containers:intrusive_forward_list",
         "//pw_log",
         "//pw_log:rate_limited",
         "//pw_preprocessor",
@@ -113,6 +116,7 @@ cc_library(
     hdrs = [
         "public/pw_transfer/transfer.h",
     ],
+    features = ["-conversion_warnings"],
     implementation_deps = ["//pw_assert:check"],
     strip_include_prefix = "public",
     deps = [
@@ -128,20 +132,26 @@ cc_library(
 )
 
 cc_library(
-    name = "client",
+    name = "handler_allocator",
     srcs = [
-        "client.cc",
+        "handler_allocator.cc",
     ],
-    hdrs = [
-        "public/pw_transfer/client.h",
-    ],
+    hdrs = ["public/pw_transfer/handler_allocator.h"],
+    features = ["-conversion_warnings"],
     strip_include_prefix = "public",
     deps = [
-        ":core",
-        "//pw_function",
-        "//pw_log",
-        "//pw_stream",
+        ":pw_transfer",
+        "//pw_allocator",
+        "//pw_assert:assert",
+        "//pw_containers:dynamic_deque",
+        "//pw_sync:lock_annotations",
+        "//pw_sync:mutex",
     ],
+)
+
+alias(
+    name = "client",
+    actual = ":core",
 )
 
 cc_library(
@@ -150,6 +160,7 @@ cc_library(
     hdrs = [
         "public/pw_transfer/atomic_file_transfer_handler.h",
     ],
+    features = ["-conversion_warnings"],
     strip_include_prefix = "public",
     deps = [
         ":atomic_file_transfer_handler_internal",
@@ -172,6 +183,7 @@ cc_library(
     srcs = [
         "pw_transfer_private/chunk_testing.h",
     ],
+    features = ["-conversion_warnings"],
     implementation_deps = ["//pw_containers:vector"],
     deps = [
         ":core",
@@ -182,20 +194,39 @@ cc_library(
 pw_cc_test(
     name = "chunk_test",
     srcs = ["chunk_test.cc"],
+    features = ["-conversion_warnings"],
     deps = [":core"],
 )
 
 pw_cc_test(
     name = "handler_test",
     srcs = ["handler_test.cc"],
+    features = ["-conversion_warnings"],
     # TODO: b/235345886 - Fix transfer tests on Windows and non-host builds.
     target_compatible_with = select(hosts_lin_mac),
     deps = [":pw_transfer"],
 )
 
 pw_cc_test(
+    name = "handler_allocator_test",
+    srcs = ["handler_allocator_test.cc"],
+    features = ["-conversion_warnings"],
+    # TODO: b/235345886 - Fix transfer tests on Windows and non-host builds.
+    target_compatible_with = select(hosts_lin_mac),
+    deps = [
+        ":handler_allocator",
+        "//pw_allocator:best_fit",
+        "//pw_allocator/block:small_block",
+        "//pw_stream",
+        "//pw_thread:test_thread_context",
+        "//pw_thread:thread",
+    ],
+)
+
+pw_cc_test(
     name = "atomic_file_transfer_handler_test",
     srcs = ["atomic_file_transfer_handler_test.cc"],
+    features = ["-conversion_warnings"],
     # TODO: b/235345886 - Fix transfer tests on Windows and non-host builds.
     target_compatible_with = select(hosts_lin_mac),
     deps = [
@@ -210,6 +241,7 @@ pw_cc_test(
 pw_cc_test(
     name = "transfer_thread_test",
     srcs = ["transfer_thread_test.cc"],
+    features = ["-conversion_warnings"],
     # TODO: b/235345886 - Fix transfer tests on Windows and non-host builds.
     target_compatible_with = select(hosts_lin_mac),
     deps = [
@@ -226,6 +258,7 @@ pw_cc_test(
 pw_cc_test(
     name = "transfer_test",
     srcs = ["transfer_test.cc"],
+    features = ["-conversion_warnings"],
     # TODO: b/235345886 - Fix transfer tests on Windows and non-host builds.
     target_compatible_with = select(hosts_lin_mac),
     deps = [
@@ -242,6 +275,7 @@ pw_cc_test(
 pw_cc_test(
     name = "client_test",
     srcs = ["client_test.cc"],
+    features = ["-conversion_warnings"],
     # TODO: b/235345886 - Fix transfer tests on Windows and non-host builds.
     target_compatible_with = select(hosts_lin_mac),
     deps = [
@@ -297,7 +331,6 @@ filegroup(
 sphinx_docs_library(
     name = "docs",
     srcs = [
-        "api.rst",
         "docs.rst",
         "transfer.proto",
     ],

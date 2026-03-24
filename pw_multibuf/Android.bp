@@ -20,19 +20,21 @@ filegroup {
     name: "pw_multibuf_src_files",
 }
 
+// LINT.IfChange
 cc_library_static {
     name: "pw_multibuf",
-    srcs: [
-        "chunk.cc",
-        "from_span.cc",
-        "multibuf.cc",
-    ],
-    cpp_std: "c++20",
-    export_include_dirs: [
-        "public",
-    ],
     defaults: [
         "pw_android_common_backends",
+        "pw_android_common_target_support",
+    ],
+    export_include_dirs: [
+        "public",
+        "v1/public",
+    ],
+    srcs: [
+        "v1/chunk.cc",
+        "v1/from_span.cc",
+        "v1/multibuf.cc",
     ],
     header_libs: [
         "pw_assert",
@@ -44,8 +46,6 @@ cc_library_static {
         "pw_log",
         "pw_sync",
     ],
-    vendor_available: true,
-    host_supported: true,
     static_libs: [
         "pw_allocator",
         "pw_bytes",
@@ -64,15 +64,17 @@ cc_library_static {
 
 cc_library_static {
     name: "pw_multibuf_allocator",
-    srcs: [
-        "allocator.cc",
-    ],
-    cpp_std: "c++20",
-    export_include_dirs: [
-        "public",
-    ],
     defaults: [
         "pw_android_common_backends",
+        "pw_android_common_target_support",
+    ],
+    srcs: [
+        "v1/allocator.cc",
+        "v1/simple_allocator.cc",
+    ],
+    export_include_dirs: [
+        "public",
+        "v1/public",
     ],
     header_libs: [
         "pw_sync",
@@ -90,9 +92,130 @@ cc_library_static {
         "pw_multibuf",
         "pw_result",
     ],
-    vendor_available: true,
-    host_supported: true,
 }
 
-// # TODO: https://pwbug.dev/384615147 - Add targets for other multibuf targets
-// including allocator_async.
+cc_library_static {
+    name: "pw_multibuf_v1_adapter",
+    defaults: [
+        "pw_android_common_backends",
+        "pw_android_common_target_support",
+    ],
+    export_include_dirs: [
+        "public",
+        "v1_adapter/public",
+    ],
+    srcs: [
+        "v1_adapter/chunk.cc",
+        "v1_adapter/from_span.cc",
+        "v1_adapter/multibuf.cc",
+    ],
+    header_libs: [
+        "pw_assert",
+    ],
+    export_header_lib_headers: [
+        "pw_assert",
+    ],
+    static_libs: [
+        "pw_allocator",
+        "pw_bytes",
+        "pw_multibuf_v2",
+        "pw_function",
+        "pw_status",
+        "pw_span",
+    ],
+    export_static_lib_headers: [
+        "pw_allocator",
+        "pw_bytes",
+        "pw_function",
+        "pw_multibuf_v2",
+        "pw_span",
+        "pw_status",
+    ],
+}
+
+cc_library_static {
+    name: "pw_multibuf_allocator_v1_adapter",
+    defaults: [
+        "pw_android_common_backends",
+        "pw_android_common_target_support",
+    ],
+    srcs: [
+        "v1_adapter/chunk_allocator.cc",
+        "v1_adapter/simple_allocator.cc",
+    ],
+    export_include_dirs: [
+        "public",
+        "v1_adapter/public",
+    ],
+    header_libs: [
+        "pw_sync",
+    ],
+    export_header_lib_headers: [
+        "pw_sync",
+    ],
+    static_libs: [
+        "pw_allocator",
+        "pw_bytes",
+        "pw_containers",
+        "pw_multibuf_v1_adapter",
+        "pw_result",
+    ],
+    export_static_lib_headers: [
+        "pw_allocator",
+        "pw_bytes",
+        "pw_containers",
+        "pw_multibuf_v1_adapter",
+        "pw_result",
+    ],
+}
+
+cc_library_static {
+    name: "pw_multibuf_v2",
+    defaults: [
+        "pw_android_common_backends",
+        "pw_android_common_target_support",
+    ],
+    export_include_dirs: [
+        "public",
+        "v2/public",
+    ],
+    srcs: [
+        "v2/generic_multibuf.cc"
+    ],
+    header_libs: [
+        "pw_assert",
+    ],
+    export_header_lib_headers: [
+        "pw_assert",
+    ],
+    static_libs: [
+        "pw_allocator",
+        "pw_bytes",
+        "pw_preprocessor",
+        "pw_containers",
+        "pw_result",
+        "pw_span",
+    ],
+    export_static_lib_headers: [
+        "pw_allocator",
+        "pw_bytes",
+        "pw_containers",
+        "pw_preprocessor",
+        "pw_result",
+        "pw_span",
+    ],
+}
+// LINT.ThenChange(BUILD.bazel, BUILD.gn, CMakeLists.txt)
+
+cc_library_headers {
+    name: "pw_multibuf_headers",
+    defaults: [
+        "pw_android_common_backends",
+        "pw_android_common_target_support",
+    ],
+    export_include_dirs: [
+        "public",
+        "v1/public",
+        "v2/public",
+    ],
+}

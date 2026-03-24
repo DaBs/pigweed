@@ -78,9 +78,11 @@ class RpcIntegrationTest(unittest.TestCase):
         calls = [
             mock.call(
                 case,
-                unit_test_pb2.SUCCESS
-                if case.suite_name == 'Passing'
-                else unit_test_pb2.FAILURE,
+                (
+                    unit_test_pb2.SUCCESS
+                    if case.suite_name == 'Passing'
+                    else unit_test_pb2.FAILURE
+                ),
             )
             for case in EXECUTED_TESTS
         ]

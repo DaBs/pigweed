@@ -20,18 +20,20 @@
 
 #include "pw_assert/assert.h"
 #include "pw_bytes/span.h"
+#include "pw_memory/internal/sibling_cast.h"
 #include "pw_result/result.h"
 #include "pw_span/span.h"
 #include "pw_status/status.h"
 #include "pw_status/status_with_size.h"
-#include "pw_toolchain/internal/sibling_cast.h"
 
 namespace pw::stream {
 
+/// @submodule{pw_stream,interface}
+
 /// A generic stream that may support reading, writing, and seeking, but makes
 /// no guarantees about whether any operations are supported. Unsupported
-/// functions return Status::Unimplemented() Stream serves as the base for the
-/// Reader, Writer, and ReaderWriter interfaces.
+/// functions return `Status::Unimplemented()`. Stream serves as the base for
+/// the Reader, Writer, and ReaderWriter interfaces.
 ///
 /// Stream cannot be extended directly. Instead, work with one of the derived
 /// classes that explicitly supports the required functionality. Stream should
@@ -99,24 +101,15 @@ class Stream {
   /// Derived classes should NOT try to override these public read methods.
   /// Instead, provide an implementation by overriding DoRead().
   ///
-  /// @returns @rst
-  ///
-  /// .. pw-status-codes::
-  ///
-  ///    OK: Between 1 and ``dest.size_bytes()`` were successfully
-  ///    read. Returns the span of read bytes.
-  ///
-  ///    UNIMPLEMENTED: This stream does not support reading.
-  ///
-  ///    FAILED_PRECONDITION: The Reader is not in state to read data.
-  ///
-  ///    RESOURCE_EXHAUSTED: Unable to read any bytes at this time. No
-  ///    bytes read. Try again once bytes become available.
-  ///
-  ///    OUT_OF_RANGE: Reader has been exhausted, similar to EOF. No bytes
-  ///    were read, no more will be read.
-  ///
-  /// @endrst
+  /// @returns
+  /// * @OK: Between 1 and `dest.size_bytes()` were successfully
+  ///   read. `Result` contains the span of read bytes.
+  /// * @UNIMPLEMENTED: This stream does not support reading.
+  /// * @FAILED_PRECONDITION: The `Reader` is not in state to read data.
+  /// * @RESOURCE_EXHAUSTED: Unable to read any bytes at this time. No bytes
+  ///   read. Try again once bytes become available.
+  /// * @OUT_OF_RANGE: `Reader` has been exhausted, similar to EOF. No bytes
+  ///   were read, no more will be read.
   Result<ByteSpan> Read(ByteSpan dest) {
     PW_DASSERT(dest.empty() || dest.data() != nullptr);
     StatusWithSize result = DoRead(dest);
@@ -170,23 +163,14 @@ class Stream {
   /// Derived classes should NOT try to override the public Write methods.
   /// Instead, provide an implementation by overriding DoWrite().
   ///
-  /// @returns @rst
-  ///
-  /// .. pw-status-codes::
-  ///
-  ///    OK: Data was successfully accepted by the stream.
-  ///
-  ///    UNIMPLEMENTED: This stream does not support writing.
-  ///
-  ///    FAILED_PRECONDITION: The writer is not in a state to accept data.
-  ///
-  ///    RESOURCE_EXHAUSTED: The writer was unable to write all of requested
-  ///    data at this time. No data was written.
-  ///
-  ///    OUT_OF_RANGE: The Writer has been exhausted, similar to EOF. No
-  ///    data was written; no more will be written.
-  ///
-  /// @endrst
+  /// @returns
+  /// * @OK: Data was successfully accepted by the stream.
+  /// * @UNIMPLEMENTED: This stream does not support writing.
+  /// * @FAILED_PRECONDITION: The writer is not in a state to accept data.
+  /// * @RESOURCE_EXHAUSTED: The writer was unable to write all of requested
+  ///   data at this time. No data was written.
+  /// * @OUT_OF_RANGE: The writer has been exhausted, similar to EOF. No
+  ///   data was written; no more will be written.
   Status Write(ConstByteSpan data) {
     PW_DASSERT(data.empty() || data.data() != nullptr);
     return DoWrite(data);
@@ -205,18 +189,11 @@ class Stream {
   /// the end of a stream is determined by the implementation. The
   /// implementation could fail with OUT_OF_RANGE or append bytes to the stream.
   ///
-  /// @returns @rst
-  ///
-  /// .. pw-status-codes::
-  ///
-  ///    OK: Successfully updated the position.
-  ///
-  ///    UNIMPLEMENTED: Seeking is not supported for this stream.
-  ///
-  ///    OUT_OF_RANGE: Attempted to seek beyond the bounds of the
-  ///    stream. The position is unchanged.
-  ///
-  /// @endrst
+  /// @returns
+  /// * @OK: Successfully updated the position.
+  /// * @UNIMPLEMENTED: Seeking is not supported for this stream.
+  /// * @OUT_OF_RANGE: Attempted to seek beyond the bounds of the stream. The
+  ///   position is unchanged.
   Status Seek(ptrdiff_t offset, Whence origin = kBeginning) {
     return DoSeek(offset, origin);
   }
@@ -328,6 +305,10 @@ class Stream {
   Seekability seekability_;
 };
 
+/// @}
+
+/// @submodule{pw_stream,interface_reader}
+
 /// A Stream that supports reading but not writing. The Write() method is
 /// hidden.
 ///
@@ -413,6 +394,10 @@ class NonSeekableReader : public Reader {
 
   Status DoSeek(ptrdiff_t, Whence) final { return Status::Unimplemented(); }
 };
+
+/// @}
+
+/// @submodule{pw_stream,interface_writer}
 
 /// A Stream that supports writing but not reading. The Read() method is hidden.
 ///
@@ -500,6 +485,10 @@ class NonSeekableWriter : public Writer {
 
   Status DoSeek(ptrdiff_t, Whence) final { return Status::Unimplemented(); }
 };
+
+/// @}
+
+/// @submodule{pw_stream,interface_readerwriter}
 
 /// A Stream that supports both reading and writing.
 ///
@@ -659,5 +648,7 @@ class NonSeekableReaderWriter : public ReaderWriter {
 
   Status DoSeek(ptrdiff_t, Whence) final { return Status::Unimplemented(); }
 };
+
+/// @}
 
 }  // namespace pw::stream

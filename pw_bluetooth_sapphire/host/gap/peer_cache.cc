@@ -92,11 +92,12 @@ bool PeerCache::AddBondedPeer(BondingData bd) {
     return false;
   }
 
-  // A bonded peer must have its identity known.
-  peer->set_identity_known(true);
-
   if (bd.name.has_value()) {
     peer->RegisterName(bd.name.value(), Peer::NameSource::kUnknown);
+  }
+
+  if (bd.device_class.has_value()) {
+    peer->MutBrEdr().SetDeviceClass(*bd.device_class);
   }
 
   if (bond_le) {

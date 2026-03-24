@@ -24,6 +24,10 @@
 namespace bt::l2cap::internal {
 namespace {
 
+// This value is arbitrary, but Core Spec v6.1 contains just 7 options so
+// supporting 7 unknown options seems reasonable.
+constexpr size_t kMaxUnknownOptionsPerResponse = 7;
+
 ChannelConfiguration::RetransmissionAndFlowControlOption
 WriteRfcOutboundTimeouts(
     ChannelConfiguration::RetransmissionAndFlowControlOption rfc_option) {
@@ -35,6 +39,9 @@ WriteRfcOutboundTimeouts(
 constexpr uint16_t kBrEdrDynamicChannelCount =
     kLastACLDynamicChannelId - kFirstDynamicChannelId + 1;
 
+constexpr pw::chrono::SystemClock::duration
+    kNoResourcesResponseTimeoutDuration = std::chrono::seconds(2);
+
 const uint8_t kMaxNumBasicConfigRequests = 2;
 }  // namespace
 
@@ -42,13 +49,15 @@ BrEdrDynamicChannelRegistry::BrEdrDynamicChannelRegistry(
     SignalingChannelInterface* sig,
     DynamicChannelCallback close_cb,
     ServiceRequestCallback service_request_cb,
-    bool random_channel_ids)
+    bool random_channel_ids,
+    pw::async::Dispatcher& dispatcher)
     : DynamicChannelRegistry(kBrEdrDynamicChannelCount,
                              std::move(close_cb),
                              std::move(service_request_cb),
                              random_channel_ids),
       state_(0u),
-      sig_(sig) {
+      sig_(sig),
+      dispatcher_(dispatcher) {
   PW_DCHECK(sig_);
   BrEdrCommandHandler cmd_handler(sig_);
   cmd_handler.ServeConnectionRequest(
@@ -62,19 +71,25 @@ BrEdrDynamicChannelRegistry::BrEdrDynamicChannelRegistry(
   SendInformationRequests();
 }
 
-DynamicChannelPtr BrEdrDynamicChannelRegistry::MakeOutbound(
+std::unique_ptr<DynamicChannel> BrEdrDynamicChannelRegistry::MakeOutbound(
     Psm psm, ChannelId local_cid, ChannelParameters params) {
   return BrEdrDynamicChannel::MakeOutbound(
-      this, sig_, psm, local_cid, params, PeerSupportsERTM());
+      this, sig_, psm, local_cid, params, PeerSupportsERTM(), dispatcher_);
 }
 
-DynamicChannelPtr BrEdrDynamicChannelRegistry::MakeInbound(
+std::unique_ptr<DynamicChannel> BrEdrDynamicChannelRegistry::MakeInbound(
     Psm psm,
     ChannelId local_cid,
     ChannelId remote_cid,
     ChannelParameters params) {
-  return BrEdrDynamicChannel::MakeInbound(
-      this, sig_, psm, local_cid, remote_cid, params, PeerSupportsERTM());
+  return BrEdrDynamicChannel::MakeInbound(this,
+                                          sig_,
+                                          psm,
+                                          local_cid,
+                                          remote_cid,
+                                          params,
+                                          PeerSupportsERTM(),
+                                          dispatcher_);
 }
 
 void BrEdrDynamicChannelRegistry::OnRxConnReq(
@@ -245,8 +260,8 @@ void BrEdrDynamicChannelRegistry::OnRxExtendedFeaturesInfoRsp(
     // Treat failure result as if feature mask indicated no ERTM support so that
     // configuration can fall back to basic mode.
     ForEach([](DynamicChannel* chan) {
-      static_cast<BrEdrDynamicChannel*>(chan)->SetEnhancedRetransmissionSupport(
-          false);
+      std::ignore = static_cast<BrEdrDynamicChannel*>(chan)
+                        ->SetEnhancedRetransmissionSupport(false);
     });
     return;
   }
@@ -283,8 +298,8 @@ void BrEdrDynamicChannelRegistry::OnRxExtendedFeaturesInfoRsp(
   bool ertm_support =
       *extended_features_ & kExtendedFeaturesBitEnhancedRetransmission;
   ForEach([ertm_support](DynamicChannel* chan) {
-    static_cast<BrEdrDynamicChannel*>(chan)->SetEnhancedRetransmissionSupport(
-        ertm_support);
+    std::ignore = static_cast<BrEdrDynamicChannel*>(chan)
+                      ->SetEnhancedRetransmissionSupport(ertm_support);
   });
 }
 
@@ -325,7 +340,8 @@ BrEdrDynamicChannelPtr BrEdrDynamicChannel::MakeOutbound(
     Psm psm,
     ChannelId local_cid,
     ChannelParameters params,
-    std::optional<bool> peer_supports_ertm) {
+    std::optional<bool> peer_supports_ertm,
+    pw::async::Dispatcher& dispatcher) {
   return std::unique_ptr<BrEdrDynamicChannel>(
       new BrEdrDynamicChannel(registry,
                               signaling_channel,
@@ -333,7 +349,8 @@ BrEdrDynamicChannelPtr BrEdrDynamicChannel::MakeOutbound(
                               local_cid,
                               kInvalidChannelId,
                               params,
-                              peer_supports_ertm));
+                              peer_supports_ertm,
+                              dispatcher));
 }
 
 BrEdrDynamicChannelPtr BrEdrDynamicChannel::MakeInbound(
@@ -343,7 +360,8 @@ BrEdrDynamicChannelPtr BrEdrDynamicChannel::MakeInbound(
     ChannelId local_cid,
     ChannelId remote_cid,
     ChannelParameters params,
-    std::optional<bool> peer_supports_ertm) {
+    std::optional<bool> peer_supports_ertm,
+    pw::async::Dispatcher& dispatcher) {
   auto channel = std::unique_ptr<BrEdrDynamicChannel>(
       new BrEdrDynamicChannel(registry,
                               signaling_channel,
@@ -351,7 +369,8 @@ BrEdrDynamicChannelPtr BrEdrDynamicChannel::MakeInbound(
                               local_cid,
                               remote_cid,
                               params,
-                              peer_supports_ertm));
+                              peer_supports_ertm,
+                              dispatcher));
   channel->state_ |= kConnRequested;
   return channel;
 }
@@ -563,6 +582,40 @@ void BrEdrDynamicChannel::OnRxConfigReq(
     return;
   }
 
+  // Reject request if it contains unknown options.
+  // See Core Spec v5.1, Volume 3, Section 4.5: Configuration Options
+  if (!config.unknown_options().empty()) {
+    // This configuration transaction was a failure, so clear the accumulator.
+    remote_config_accum_.reset();
+
+    std::string unknown_string;
+    ChannelConfiguration::ConfigurationOptions unknown_options;
+    // Return just the first kMaxUnknownOptionsPerResponse unknown options.
+    for (size_t i = 0; i < config.unknown_options().size() &&
+                       i < kMaxUnknownOptionsPerResponse;
+         i++) {
+      const ChannelConfiguration::UnknownOption& option =
+          config.unknown_options()[i];
+      unknown_string += std::string(" ") + option.ToString();
+      unknown_options.push_back(
+          std::make_unique<ChannelConfiguration::UnknownOption>(option));
+    }
+
+    bt_log(DEBUG,
+           "l2cap-bredr",
+           "Channel %#.4x: config request contained unknown options (options: "
+           "%s)\n",
+           local_cid(),
+           unknown_string.c_str());
+
+    uint16_t rsp_flags = continuation ? kConfigurationContinuation : 0;
+    responder->Send(remote_cid(),
+                    rsp_flags,
+                    ConfigurationResult::kUnknownOptions,
+                    std::move(unknown_options));
+    return;
+  }
+
   // Always add options to accumulator, even if C = 0, for later code
   // simplicity.
   if (remote_config_accum_.has_value()) {
@@ -597,7 +650,11 @@ void BrEdrDynamicChannel::OnRxConfigReq(
   // Record peer support for ERTM even if they haven't sent a Extended Features
   // Mask.
   if (req_mode == RetransmissionAndFlowControlMode::kEnhancedRetransmission) {
-    SetEnhancedRetransmissionSupport(true);
+    // This can send a config request, which can fail and cause the channel to
+    // be destroyed, in which case we should not proceed.
+    if (!SetEnhancedRetransmissionSupport(true)) {
+      return;
+    }
   }
 
   // Set default config options if not already in request.
@@ -639,31 +696,6 @@ void BrEdrDynamicChannel::OnRxConfigReq(
   }
 
   state_ |= kRemoteConfigReceived;
-
-  // Reject request if it contains unknown options.
-  // See Core Spec v5.1, Volume 3, Section 4.5: Configuration Options
-  if (!req_config.unknown_options().empty()) {
-    ChannelConfiguration::ConfigurationOptions unknown_options;
-    std::string unknown_string;
-    for (auto& option : req_config.unknown_options()) {
-      unknown_options.push_back(
-          std::make_unique<ChannelConfiguration::UnknownOption>(option));
-      unknown_string += std::string(" ") + option.ToString();
-    }
-
-    bt_log(DEBUG,
-           "l2cap-bredr",
-           "Channel %#.4x: config request contained unknown options (options: "
-           "%s)\n",
-           local_cid(),
-           unknown_string.c_str());
-
-    responder->Send(remote_cid(),
-                    /*flags=*/0x0000,
-                    ConfigurationResult::kUnknownOptions,
-                    std::move(unknown_options));
-    return;
-  }
 
   auto unacceptable_config = CheckForUnacceptableConfigReqOptions(req_config);
   auto unacceptable_options = unacceptable_config.Options();
@@ -813,7 +845,7 @@ void BrEdrDynamicChannel::CompleteInboundConnection(
 
   UpdateLocalConfigForErtm();
   if (!IsWaitingForPeerErtmSupport()) {
-    TrySendLocalConfig();
+    std::ignore = TrySendLocalConfig();
   }
 }
 
@@ -824,12 +856,14 @@ BrEdrDynamicChannel::BrEdrDynamicChannel(
     ChannelId local_cid,
     ChannelId remote_cid,
     ChannelParameters params,
-    std::optional<bool> peer_supports_ertm)
+    std::optional<bool> peer_supports_ertm,
+    pw::async::Dispatcher& dispatcher)
     : DynamicChannel(registry, psm, local_cid, remote_cid),
       signaling_channel_(signaling_channel),
       parameters_(params),
       state_(0u),
       peer_supports_ertm_(peer_supports_ertm),
+      dispatcher_(dispatcher),
       weak_self_(this) {
   PW_DCHECK(signaling_channel_);
   PW_DCHECK(local_cid != kInvalidChannelId);
@@ -921,17 +955,17 @@ bool BrEdrDynamicChannel::IsWaitingForPeerErtmSupport() {
          (local_mode != RetransmissionAndFlowControlMode::kBasic);
 }
 
-void BrEdrDynamicChannel::TrySendLocalConfig() {
+bool BrEdrDynamicChannel::TrySendLocalConfig() {
   if (state_ & kLocalConfigSent) {
-    return;
+    return true;
   }
 
   PW_CHECK(!IsWaitingForPeerErtmSupport());
 
-  SendLocalConfig();
+  return SendLocalConfig();
 }
 
-void BrEdrDynamicChannel::SendLocalConfig() {
+bool BrEdrDynamicChannel::SendLocalConfig() {
   auto on_config_rsp_timeout = [this, self = weak_self_.GetWeakPtr()] {
     if (self.is_alive()) {
       bt_log(WARN,
@@ -972,7 +1006,7 @@ void BrEdrDynamicChannel::SendLocalConfig() {
            "Channel %#.4x: Failed to send Configuration Request",
            local_cid());
     PassOpenError();
-    return;
+    return false;
   }
 
   bt_log(TRACE,
@@ -982,6 +1016,7 @@ void BrEdrDynamicChannel::SendLocalConfig() {
          bt_str(request_config));
 
   state_ |= kLocalConfigSent;
+  return true;
 }
 
 bool BrEdrDynamicChannel::BothConfigsAccepted() const {
@@ -1140,7 +1175,7 @@ BrEdrDynamicChannel::CheckForUnacceptableErtmOptions(
   return unacceptable_rfc_option;
 }
 
-bool BrEdrDynamicChannel::TryRecoverFromUnacceptableParametersConfigRsp(
+void BrEdrDynamicChannel::TryRecoverFromUnacceptableParametersConfigRsp(
     const ChannelConfiguration& rsp_config) {
   // Check if channel mode was unacceptable.
   if (rsp_config.retransmission_flow_control_option()) {
@@ -1178,15 +1213,16 @@ bool BrEdrDynamicChannel::TryRecoverFromUnacceptableParametersConfigRsp(
                local_cid(),
                static_cast<uint8_t>(rsp_mode),
                static_cast<uint8_t>(remote_mode));
-        return false;
+        PassOpenError();
+        return;
       }
     }
 
     bt_log(TRACE,
            "l2cap-bredr",
            "Channel %#.4x: Attempting to recover from unacceptable parameters "
-           "config response by "
-           "falling back to basic mode and resending config request",
+           "config response by falling back to basic mode and resending config "
+           "request",
            local_cid());
 
     // Fall back to basic mode and try sending config again up to
@@ -1199,11 +1235,12 @@ bool BrEdrDynamicChannel::TryRecoverFromUnacceptableParametersConfigRsp(
              "%#.2x basic mode config request attempts has been met",
              local_cid(),
              kMaxNumBasicConfigRequests);
-      return false;
+      PassOpenError();
+      return;
     }
     UpdateLocalConfigForErtm();
-    SendLocalConfig();
-    return true;
+    std::ignore = SendLocalConfig();
+    return;
   }
 
   // Other unacceptable parameters cannot be recovered from.
@@ -1213,7 +1250,7 @@ bool BrEdrDynamicChannel::TryRecoverFromUnacceptableParametersConfigRsp(
          "unacceptable parameters config "
          "response",
          local_cid());
-  return false;
+  PassOpenError();
 }
 
 BrEdrDynamicChannel::ResponseHandlerAction BrEdrDynamicChannel::OnRxConnRsp(
@@ -1249,6 +1286,11 @@ BrEdrDynamicChannel::ResponseHandlerAction BrEdrDynamicChannel::OnRxConnRsp(
     return ResponseHandlerAction::kCompleteOutboundTransaction;
   }
 
+  if (conn_rsp_no_resources_timer_.is_pending() &&
+      rsp.result() != ConnectionResult::kNoResources) {
+    conn_rsp_no_resources_timer_.Cancel();
+  }
+
   if (rsp.result() == ConnectionResult::kPending) {
     bt_log(TRACE,
            "l2cap-bredr",
@@ -1281,6 +1323,39 @@ BrEdrDynamicChannel::ResponseHandlerAction BrEdrDynamicChannel::OnRxConnRsp(
   }
 
   if (rsp.result() != ConnectionResult::kSuccess) {
+    // Workaround for AirPods 4 interop bug: when opening an AVDTP channel,
+    // the device initially responds with "Refused - no resources available",
+    // but subsequently sends "Pending" and then "Success" responses. Wait
+    // for a short duration instead of failing the connection immediately.
+    // TODO: https://fxbug.dev/477697118 - Remove this once Apple fixes the
+    // firmware bug.
+    if (rsp.result() == ConnectionResult::kNoResources && psm() == kAVDTP) {
+      bt_log(WARN,
+             "l2cap-bredr",
+             "Channel %#.4x: Connection Response indicates 'no resources', "
+             "but continuing to wait due to interop bug",
+             local_cid());
+      if (!conn_rsp_no_resources_timer_.is_pending()) {
+        conn_rsp_no_resources_timer_.set_function([self =
+                                                       weak_self_.GetWeakPtr()](
+                                                      pw::async::
+                                                          Context& /*ctx*/,
+                                                      pw::Status status) {
+          if (self.is_alive() && status.ok()) {
+            bt_log(WARN,
+                   "l2cap-bredr",
+                   "Channel %#.4x: Timed out waiting for subsequent Connection "
+                   "Responses after 'no resources' workaround",
+                   self->local_cid());
+            self->PassOpenError();
+          }
+        });
+        conn_rsp_no_resources_timer_.PostAfter(
+            kNoResourcesResponseTimeoutDuration);
+      }
+      return ResponseHandlerAction::kExpectAdditionalResponse;
+    }
+
     bt_log(ERROR,
            "l2cap-bredr",
            "Channel %#.4x: Unsuccessful Connection Response result %#.4hx, "
@@ -1339,7 +1414,7 @@ BrEdrDynamicChannel::ResponseHandlerAction BrEdrDynamicChannel::OnRxConnRsp(
 
   UpdateLocalConfigForErtm();
   if (!IsWaitingForPeerErtmSupport()) {
-    TrySendLocalConfig();
+    std::ignore = TrySendLocalConfig();
   }
   return ResponseHandlerAction::kCompleteOutboundTransaction;
 }
@@ -1383,10 +1458,7 @@ BrEdrDynamicChannel::ResponseHandlerAction BrEdrDynamicChannel::OnRxConfigRsp(
            "(options: %s)",
            local_cid(),
            bt_str(rsp.config()));
-
-    if (!TryRecoverFromUnacceptableParametersConfigRsp(rsp.config())) {
-      PassOpenError();
-    }
+    TryRecoverFromUnacceptableParametersConfigRsp(rsp.config());
     return ResponseHandlerAction::kCompleteOutboundTransaction;
   }
 
@@ -1454,15 +1526,16 @@ BrEdrDynamicChannel::ResponseHandlerAction BrEdrDynamicChannel::OnRxConfigRsp(
   return ResponseHandlerAction::kCompleteOutboundTransaction;
 }
 
-void BrEdrDynamicChannel::SetEnhancedRetransmissionSupport(bool supported) {
+bool BrEdrDynamicChannel::SetEnhancedRetransmissionSupport(bool supported) {
   peer_supports_ertm_ = supported;
 
   UpdateLocalConfigForErtm();
 
   // Don't send local config before connection response.
   if (state_ & kConnResponded) {
-    TrySendLocalConfig();
+    return TrySendLocalConfig();
   }
+  return true;
 }
 
 }  // namespace bt::l2cap::internal

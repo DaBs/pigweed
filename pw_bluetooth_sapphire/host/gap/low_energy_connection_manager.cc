@@ -81,6 +81,20 @@ static const hci_spec::LEPreferredConnectionParameters
                                  /*max_latency=*/0,
                                  hci_spec::defaults::kLESupervisionTimeout);
 
+const char* LowEnergyDisconnectReasonToString(
+    LowEnergyDisconnectReason reason) {
+  switch (reason) {
+    case LowEnergyDisconnectReason::kApiRequest:
+      return "api request";
+    case LowEnergyDisconnectReason::kError:
+      return "error";
+    case LowEnergyDisconnectReason::kZeroRef:
+      return "zero ref";
+    case LowEnergyDisconnectReason::kPeerDisconnection:
+      return "peer disconnection";
+  }
+}
+
 const char* kInspectRequestsNodeName = "pending_requests";
 const char* kInspectRequestNodeNamePrefix = "pending_request_";
 const char* kInspectConnectionsNodeName = "connections";
@@ -104,6 +118,12 @@ const char* kInspectDisconnectLinkErrorNodeName = "disconnect_link_error_count";
 const char* kInspectDisconnectZeroRefNodeName = "disconnect_zero_ref_count";
 const char* kInspectDisconnectRemoteDisconnectionNodeName =
     "disconnect_remote_disconnection_count";
+const char* kInspectLastDisconnectedListName = "last_disconnected";
+const char* kInspectLastDisconnectedItemPeerIdPropertyName = "peer_id";
+const char* kInspectLastDisconnectedItemConnectedTimePropertyName =
+    "connected_@time";
+const char* kInspectLastDisconnectedItemTimePropertyName = "@time";
+const char* kInspectLastDisconnectedItemReasonPropertyName = "reason";
 
 }  // namespace
 
@@ -117,7 +137,10 @@ LowEnergyConnectionManager::LowEnergyConnectionManager(
     LowEnergyDiscoveryManager::WeakPtr discovery_manager,
     sm::SecurityManagerFactory sm_creator,
     const AdapterState& adapter_state,
-    pw::async::Dispatcher& dispatcher)
+    pw::async::Dispatcher& dispatcher,
+    pw::bluetooth_sapphire::LeaseProvider& wake_lease_provider,
+    PeriodicAdvertisingSyncManager::TransferSyncFn&&
+        transfer_periodic_advertising_sync_fn)
     : dispatcher_(dispatcher),
       hci_(std::move(hci)),
       security_mode_(LESecurityMode::Mode1),
@@ -130,6 +153,9 @@ LowEnergyConnectionManager::LowEnergyConnectionManager(
       discovery_manager_(discovery_manager),
       hci_connector_(connector),
       local_address_delegate_(addr_delegate),
+      wake_lease_provider_(wake_lease_provider),
+      transfer_periodic_advertising_sync_fn_(
+          std::move(transfer_periodic_advertising_sync_fn)),
       weak_self_(this) {
   PW_DCHECK(peer_cache_);
   PW_DCHECK(l2cap_);
@@ -156,7 +182,8 @@ LowEnergyConnectionManager::~LowEnergyConnectionManager() {
 
   // Clean up all connections.
   for (auto& iter : connections_) {
-    CleanUpConnection(std::move(iter.second));
+    CleanUpConnection(std::move(iter.second),
+                      LowEnergyDisconnectReason::kApiRequest);
   }
 
   connections_.clear();
@@ -290,7 +317,7 @@ bool LowEnergyConnectionManager::Disconnect(PeerId peer_id,
     inspect_properties_.disconnect_link_error_count_.Add(1);
   }
 
-  CleanUpConnection(std::move(conn));
+  CleanUpConnection(std::move(conn), reason);
   return true;
 }
 
@@ -379,6 +406,8 @@ void LowEnergyConnectionManager::AttachInspect(inspect::Node& parent,
       inspect_node_, kInspectDisconnectZeroRefNodeName);
   inspect_properties_.disconnect_remote_disconnection_count_.AttachInspect(
       inspect_node_, kInspectDisconnectRemoteDisconnectionNodeName);
+  last_disconnected_list_.AttachInspect(inspect_node_,
+                                        kInspectLastDisconnectedListName);
 }
 
 void LowEnergyConnectionManager::RegisterRemoteInitiatedLink(
@@ -437,7 +466,8 @@ void LowEnergyConnectionManager::RegisterRemoteInitiatedLink(
                                                      gatt_,
                                                      adapter_state_,
                                                      dispatcher_,
-                                                     local_address_delegate_);
+                                                     local_address_delegate_,
+                                                     wake_lease_provider_);
   auto [conn_iter, _] = remote_connectors_.emplace(
       peer_id, RequestAndConnector{std::move(request), std::move(connector)});
   // Wait until the connector is in the map to start in case the result callback
@@ -544,7 +574,7 @@ void LowEnergyConnectionManager::ReleaseReference(
          bt_str(*conn->link()),
          bt_str(conn->peer_id()));
   inspect_properties_.disconnect_zero_ref_count_.Add(1);
-  CleanUpConnection(std::move(conn));
+  CleanUpConnection(std::move(conn), LowEnergyDisconnectReason::kZeroRef);
 }
 
 void LowEnergyConnectionManager::TryCreateNextConnection() {
@@ -577,7 +607,8 @@ void LowEnergyConnectionManager::TryCreateNextConnection() {
               gatt_,
               adapter_state_,
               dispatcher_,
-              local_address_delegate_);
+              local_address_delegate_,
+              wake_lease_provider_);
       connector->AttachInspect(inspect_node_,
                                kInspectOutboundConnectorNodeName);
 
@@ -758,8 +789,24 @@ bool LowEnergyConnectionManager::InitializeConnection(
   return true;
 }
 
+void LowEnergyConnectionManager::RecordDisconnectInspect(
+    const internal::LowEnergyConnection& conn,
+    LowEnergyDisconnectReason reason) {
+  auto& inspect_item = last_disconnected_list_.CreateItem();
+  inspect_item.node.RecordString(kInspectLastDisconnectedItemPeerIdPropertyName,
+                                 conn.peer_id().ToString());
+  inspect_item.node.RecordInt(
+      kInspectLastDisconnectedItemConnectedTimePropertyName,
+      conn.create_time().time_since_epoch().count());
+  inspect_item.node.RecordInt(kInspectLastDisconnectedItemTimePropertyName,
+                              dispatcher_.now().time_since_epoch().count());
+  inspect_item.node.RecordString(kInspectLastDisconnectedItemReasonPropertyName,
+                                 LowEnergyDisconnectReasonToString(reason));
+}
+
 void LowEnergyConnectionManager::CleanUpConnection(
-    std::unique_ptr<internal::LowEnergyConnection> conn) {
+    std::unique_ptr<internal::LowEnergyConnection> conn,
+    LowEnergyDisconnectReason reason) {
   PW_CHECK(conn);
 
   // Mark the peer peer as no longer connected.
@@ -767,6 +814,7 @@ void LowEnergyConnectionManager::CleanUpConnection(
   PW_CHECK(peer,
            "A connection was active for an unknown peer! (id: %s)",
            bt_str(conn->peer_id()));
+  RecordDisconnectInspect(*conn, reason);
   conn.reset();
 }
 
@@ -814,7 +862,8 @@ void LowEnergyConnectionManager::OnPeerDisconnect(
 
   inspect_properties_.disconnect_remote_disconnection_count_.Add(1);
 
-  CleanUpConnection(std::move(conn));
+  CleanUpConnection(std::move(conn),
+                    LowEnergyDisconnectReason::kPeerDisconnection);
 }
 
 LowEnergyConnectionManager::ConnectionMap::iterator

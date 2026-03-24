@@ -38,11 +38,11 @@ cc_library(
     deps = [
         "//pw_assert:assert",
         "//pw_bytes",
+        "//pw_memory:sibling_cast",
         "//pw_polyfill",
         "//pw_result",
         "//pw_span",
         "//pw_status",
-        "//pw_toolchain:sibling_cast",
     ],
 )
 
@@ -52,6 +52,7 @@ cc_library(
     name = "socket_stream",
     srcs = ["socket_stream.cc"],
     hdrs = ["public/pw_stream/socket_stream.h"],
+    features = ["-conversion_warnings"],
     implementation_deps = ["//pw_assert:check"],
     strip_include_prefix = "public",
     target_compatible_with = incompatible_with_mcu(unless_platform_has = ":socket_stream_compatible"),
@@ -73,6 +74,7 @@ cc_library(
     hdrs = ["public/pw_stream/sys_io_stream.h"],
     strip_include_prefix = "public",
     deps = [
+        "//pw_bytes",
         "//pw_stream",
         "//pw_sys_io",
     ],
@@ -82,6 +84,7 @@ cc_library(
     name = "std_file_stream",
     srcs = ["std_file_stream.cc"],
     hdrs = ["public/pw_stream/std_file_stream.h"],
+    features = ["-conversion_warnings"],
     implementation_deps = ["//pw_assert:check"],
     strip_include_prefix = "public",
     target_compatible_with = incompatible_with_mcu(),
@@ -92,11 +95,22 @@ cc_library(
     name = "interval_reader",
     srcs = ["interval_reader.cc"],
     hdrs = ["public/pw_stream/interval_reader.h"],
+    features = ["-conversion_warnings"],
     implementation_deps = ["//pw_assert:check"],
     strip_include_prefix = "public",
     deps = [
         ":pw_stream",
         "//pw_assert:assert",
+        "//pw_status",
+    ],
+)
+
+cc_library(
+    name = "limited_stream",
+    hdrs = ["public/pw_stream/limited_stream.h"],
+    strip_include_prefix = "public",
+    deps = [
+        ":pw_stream",
         "//pw_status",
     ],
 )
@@ -121,6 +135,17 @@ cc_library(
 )
 
 pw_cc_test(
+    name = "limited_stream_test",
+    srcs = ["limited_stream_test.cc"],
+    deps = [
+        ":limited_stream",
+        ":pw_stream",
+        "//pw_bytes",
+        "//pw_status",
+    ],
+)
+
+pw_cc_test(
     name = "memory_stream_test",
     srcs = ["memory_stream_test.cc"],
     deps = [
@@ -139,6 +164,7 @@ pw_cc_test(
 pw_cc_test(
     name = "std_file_stream_test",
     srcs = ["std_file_stream_test.cc"],
+    features = ["-conversion_warnings"],
     target_compatible_with = incompatible_with_mcu(),
     deps = [
         ":std_file_stream",
@@ -174,6 +200,7 @@ pw_cc_test(
 pw_cc_test(
     name = "interval_reader_test",
     srcs = ["interval_reader_test.cc"],
+    features = ["-conversion_warnings"],
     deps = [
         ":interval_reader",
         ":pw_stream",
@@ -184,6 +211,7 @@ pw_cc_test(
 pw_cc_test(
     name = "socket_stream_test",
     srcs = ["socket_stream_test.cc"],
+    features = ["-conversion_warnings"],
     deps = [
         ":socket_stream",
         "//pw_result",
@@ -194,6 +222,7 @@ pw_cc_test(
 pw_cc_test(
     name = "mpsc_stream_test",
     srcs = ["mpsc_stream_test.cc"],
+    features = ["-ctad_warnings"],
     # TODO: b/361369435 - This test crashes on rp2.
     target_compatible_with = select({
         "@pico-sdk//bazel/constraint:rp2040": ["@platforms//:incompatible"],
@@ -213,7 +242,16 @@ pw_cc_test(
 filegroup(
     name = "doxygen",
     srcs = [
+        "public/pw_stream/interval_reader.h",
+        "public/pw_stream/limited_stream.h",
+        "public/pw_stream/memory_stream.h",
+        "public/pw_stream/mpsc_stream.h",
+        "public/pw_stream/null_stream.h",
+        "public/pw_stream/seek.h",
+        "public/pw_stream/socket_stream.h",
+        "public/pw_stream/std_file_stream.h",
         "public/pw_stream/stream.h",
+        "public/pw_stream/sys_io_stream.h",
     ],
 )
 

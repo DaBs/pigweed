@@ -5,13 +5,13 @@
     "coverage.json",
     "default.json",
     "doxygen.json",
+    "flatc.json",
     "go.json",
     "host_tools.json",
     "kythe.json",
     "luci.json",
     "msrv_python.json",
     "rbe.json",
-    "ruff.json",
     "testing.json",
     "web.json"
   ]

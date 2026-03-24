@@ -54,7 +54,7 @@ Flags can also be passed to the test binary:
 .. code-block:: console
 
    bazelisk run --config=fuchsia //pw_bluetooth_sapphire/fuchsia/host/l2cap:test_pkg \
-     -- --gtest-filter="*Example" --severity=DEBUG
+     -- --gtest_filter="*Example" --severity=DEBUG
 
 .. note::
    If the test is unable to connect to the emulator, run ``pw ffx target
@@ -69,13 +69,11 @@ all tests, but this is slow:
 
 Emulator
 ========
-To start the emulator, use one of the following commands:
+To start the emulator, use the following command:
 
 .. code-block::
 
-   bazelisk run @fuchsia_products//:core.x64.emu -- --headless
-   # OR
-   bazelisk run @fuchsia_products//:minimal.arm64.emu -- --headless
+   bazelisk run --config=fuchsia @fuchsia_products//:core.x64.emu -- --headless
 
 To stop the running emulator, use the following command:
 
@@ -136,6 +134,58 @@ following command in the Pigweed repository to register the symbols.
 
              $ bazelisk run --config=fuchsia //pw_bluetooth_sapphire/fuchsia/bt_host:pkg.x64.debug_symbols
 
+Using a local Fuchsia SDK
+=========================
+If you are making changes to the Fuchsia SDK itself (e.g., modifying FIDL
+definitions in a local ``fuchsia.git`` checkout), you can point Pigweed to use
+your local SDK instead of the prebuilt one from CIPD.
+
+1. **Build the SDK in your Fuchsia checkout:**
+
+   .. code-block:: console
+
+      fx build //sdk:final_fuchsia_sdk
+
+2. **Find the canonical name of the SDK repository:**
+
+   Because Pigweed uses Bzlmod, the repository name ``fuchsia_sdk`` might be
+   mangled internally. To find the exact name you need to override, run:
+
+   .. code-block:: console
+
+      bazel mod dump_repo_mapping pigweed | grep fuchsia_sdk | python -m json.tool | jq .fuchsia_sdk
+
+   This will return a mapping like ``fuchsia_sdk -> @@+_repo_rules5+fuchsia_sdk``.
+   The canonical name is everything after the ``@@`` (e.g.,
+   ``+_repo_rules5+fuchsia_sdk``).
+
+3. **Override the SDK repository in Pigweed:**
+
+   Use the ``--override_repository`` flag with the canonical name and an
+   **absolute path** (Bazel does not expand ``~``):
+
+   .. code-block:: console
+
+      bazelisk build --config=fuchsia \
+        --override_repository=+_repo_rules5+fuchsia_sdk=/home/user/code/fuchsia/out/default/obj/sdk/final_fuchsia_sdk \
+        //pw_bluetooth_sapphire/fuchsia/bt_host:pkg.x64
+
+4. **(Optional) Persistent configuration:**
+
+   To avoid passing the flag every time, you can add it to a ``user.bazelrc``
+   file in your Pigweed root:
+
+   .. code-block:: none
+
+      # user.bazelrc
+      build --override_repository=+_repo_rules5+fuchsia_sdk=/home/user/code/fuchsia/out/default/obj/sdk/final_fuchsia_sdk
+
+   .. note::
+      If you encounter version mismatches with the rules themselves, you may
+      also need to override ``rules_fuchsia`` using its canonical name (found
+      via the same ``dump_repo_mapping`` process) and pointing it to
+      ``/path/to/fuchsia/scripts/sdk/bazel``.
+
 --------------------
 Working with devices
 --------------------
@@ -158,24 +208,50 @@ To query the current state of the ``bt-host`` component Inspect hierarchy, run:
 Editor configuration
 --------------------
 
-Clangd
-======
-Currently some manual steps are required to get clangd working with Fuchsia
-code (for example, for FIDL server files).
+Clangd setup
+============
+to enable C/C++ code intelligence in your editor, Generate commands databases
+(``compile_commands.json``) with the following command:
 
-#. Execute the following command to generate ``compile_commands.json``. This
-   needs to be done whenever the build graph changes.
+.. code-block:: console
 
-   .. code-block:: console
+   $ bazelisk run //:refresh_compile_commands_for_fuchsia_sdk
 
-      bazelisk run //:refresh_compile_commands_for_fuchsia_sdk
+This will create a ``.compile_commands`` directory with a number of
+subdirectories. For example:
 
-#. Add this flag to your clangd configuration, fixing the full path to your
-   Pigweed checkout:
+* ``k8-fastbuild``: The default host configuration (linux), used when you run
+  a test like ``bazelisk test //pw_status:status_test``. For macOS hosts,
+  this is named ``darwin_arm64-fastbuild``.
+* ``k8-opt-exec``: Host "exec" configuration. This is used to build tools
+  like ``protoc`` that are required for various stages of the build. For macOS
+  hosts, this is named ``darwin_arm64-opt-exec``.
+* ``fuchsia_x64-fastbuild-ST-89a3eb73aaef``: Code intelligence for Fuchsia
+  targets in ``pw_bluetooth_sapphire``.
 
-   .. code-block:: console
+Each of these directories provide a different view of the build graph. This
+ensures ``#if`` conditions and defines correctly match the configuration, giving
+you the most accurate code intelligence possible.
 
-      --compile-commands-dir=/path/to/pigweed/.compile_commands/fuchsia
+.. note::
+
+   Not all configurations cover the same libraries, tests, and binaries. For
+   example, the ``//:update_host_googletest_compile_commands`` command will
+   cover much more of Pigweed (and ``pw_bluetooth_proxy``), but is configured
+   specifically for host+Googletest.
+
+Select one of these configurations by directing ``clangd`` to use the associated
+directory:
+
+.. code-block:: console
+
+   --compile-commands-dir=/path/to/pigweed/.compile_commands/fuchsia_x64-fastbuild-ST-89a3eb73aaef
+
+.. note::
+
+   `b/469437909 <https://pwbug.dev/469437909>`__ The hex sequence at the end of
+   the Fuchsia platform name is unfortunately unstable, and can change
+   whenever different flags are passed to Bazel.
 
 --------------
 Infrastructure

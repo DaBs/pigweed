@@ -18,6 +18,7 @@
 #include "pw_bluetooth_sapphire/internal/host/common/byte_buffer.h"
 #include "pw_bluetooth_sapphire/internal/host/common/device_address.h"
 #include "pw_bluetooth_sapphire/internal/host/common/macros.h"
+#include "pw_bluetooth_sapphire/internal/host/hci-spec/big_info.h"
 #include "pw_bluetooth_sapphire/internal/host/hci-spec/le_connection_parameters.h"
 #include "pw_bluetooth_sapphire/internal/host/hci-spec/protocol.h"
 #include "pw_bluetooth_sapphire/internal/host/testing/fake_gatt_server.h"
@@ -32,6 +33,12 @@ class FakeController;
 // FakePeer is used to emulate a remote Bluetooth device.
 class FakePeer {
  public:
+  struct PeriodicAdvertisingSyncTransfer {
+    DeviceAddress peer_address;
+    uint8_t advertising_sid;
+    uint16_t service_data;
+  };
+
   // NOTE: Setting |connectable| to true will result in a "Connectable and
   // Scannable Advertisement" (i.e. ADV_IND) even if |scannable| is set to
   // false. This is OK since we use |scannable| to drive the receipt of Scan
@@ -94,6 +101,17 @@ class FakePeer {
   const DeviceAddress& address() const { return address_; }
   int8_t rssi() const { return -1; }
   int8_t tx_power() const { return -2; }
+
+  // LE extended advertising attributes
+  uint8_t advertising_sid() const { return advertising_sid_; }
+  void set_advertising_sid(uint8_t value) { advertising_sid_ = value; }
+
+  uint16_t periodic_advertising_interval() const {
+    return periodic_advertising_interval_;
+  }
+  void set_periodic_advertising_interval(uint16_t value) {
+    periodic_advertising_interval_ = value;
+  }
 
   // The local name of the device. Used in HCI Remote Name Request event.
   std::string name() const { return name_; }
@@ -207,6 +225,12 @@ class FakePeer {
   // scan response.
   DynamicByteBuffer BuildExtendedScanResponseEvent() const;
 
+  DynamicByteBuffer BuildPeriodicAdvertisingReportEvent(
+      hci_spec::SyncHandle sync_handle, uint8_t advertising_sid);
+
+  std::optional<DynamicByteBuffer> BuildBigInfoAdvertisingReportEvent(
+      hci_spec::SyncHandle sync_handle, uint8_t advertising_sid) const;
+
   // Populate an LEExtendedAdvertisingReportData as though it was received from
   // this fake peer
   void FillExtendedAdvertisingReport(
@@ -215,8 +239,36 @@ class FakePeer {
       bool is_fragmented,
       bool is_scan_response) const;
 
+  void AddPeriodicAdvertisement(
+      uint8_t advertising_sid,
+      DynamicByteBuffer data,
+      std::optional<hci_spec::BroadcastIsochronousGroupInfo> big_info =
+          std::nullopt);
+
+  void RemovePeriodicAdvertisement(uint8_t advertising_sid);
+
+  bool HasPeriodicAdvertisement(uint8_t advertising_sid) {
+    return periodic_advertisements_.count(advertising_sid);
+  }
+
+  void AddPeriodicAdvertisingSyncTransfer(
+      PeriodicAdvertisingSyncTransfer transfer) {
+    received_periodic_advertising_sync_transfers_.emplace(
+        std::make_pair(transfer.peer_address, transfer.advertising_sid),
+        transfer);
+  }
+
+  std::optional<PeriodicAdvertisingSyncTransfer>
+  FindPeriodicAdvertisingSyncTransfer(DeviceAddress peer_address, uint8_t sid);
+
  private:
   friend class FakeController;
+
+  struct PeriodicAdvertisement {
+    DynamicByteBuffer data;
+    uint16_t event_counter;
+    std::optional<hci_spec::BroadcastIsochronousGroupInfo> big_info;
+  };
 
   // Called by a FakeController when a FakePeer is registered with it.
   void set_controller(FakeController* ctrl) { controller_ = ctrl; }
@@ -254,6 +306,10 @@ class FakePeer {
   bool use_extended_advertising_pdus_ = false;
   bool send_advertising_report_;
 
+  uint8_t advertising_sid_ = bt::hci_spec::kAdvertisingSidInvalid;
+  uint16_t periodic_advertising_interval_ =
+      bt::hci_spec::kPeriodicAdvertisingIntervalInvalid;
+
   pw::bluetooth::emboss::StatusCode connect_status_;
   pw::bluetooth::emboss::StatusCode connect_response_;
   bool force_pending_connect_;  // Causes connection requests to remain pending.
@@ -272,6 +328,13 @@ class FakePeer {
 
   DynamicByteBuffer advertising_data_;
   DynamicByteBuffer scan_response_;
+
+  std::unordered_map<uint8_t /*SID*/, PeriodicAdvertisement>
+      periodic_advertisements_;
+
+  std::map<std::pair<DeviceAddress, uint8_t /*SID*/>,
+           PeriodicAdvertisingSyncTransfer>
+      received_periodic_advertising_sync_transfers_;
 
   // Open connection handles.
   HandleSet logical_links_;

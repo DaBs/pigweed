@@ -12,26 +12,126 @@
 # License for the specific language governing permissions and limitations under
 # the License.
 
+load("@com_google_protobuf//bazel:proto_library.bzl", "proto_library")
+load("@com_google_protobuf//bazel:py_proto_library.bzl", "py_proto_library")
+load("@com_google_protobuf//bazel/toolchains:proto_lang_toolchain.bzl", "proto_lang_toolchain")
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
+load("@rules_python//python/entry_points:py_console_script_binary.bzl", "py_console_script_binary")
 load("@rules_python//sphinxdocs:sphinx_docs_library.bzl", "sphinx_docs_library")
 load("//pw_build:compatibility.bzl", "incompatible_with_mcu")
 load("//pw_build:glob_dirs.bzl", "glob_dirs", "match_dir", "match_dir_internal")
-load("//pw_build:load_phase_test.bzl", "pw_string_comparison_test", "pw_string_list_comparison_test", "return_error")
+load("//pw_build:load_phase_test.bzl", "pw_bool_comparison_test", "pw_string_comparison_test", "pw_string_list_comparison_test", "return_error")
+load("//pw_build:pigweed_is_root.bzl", "pigweed_is_root")
 load("//pw_build:pw_cc_binary.bzl", "pw_cc_binary_with_map")
 load("//pw_build:pw_cc_blob_library.bzl", "pw_cc_blob_info", "pw_cc_blob_library")
 load("//pw_build:pw_copy_and_patch_file_test.bzl", "pw_copy_and_patch_file_test")
 load("//pw_build:pw_py_importable_runfile.bzl", "pw_py_importable_runfile")
 load("//pw_unit_test:pw_cc_test.bzl", "pw_cc_test")
+load(":pw_pylint_test.bzl", "pw_pylint_test_suite")
 
 package(default_visibility = ["//visibility:public"])
 
 licenses(["notice"])
+
+label_flag(
+    name = "pylint",
+    build_setting_default = ":pigweed_pip_pylint",
+)
+
+py_console_script_binary(
+    name = "pigweed_pip_pylint",
+    pkg = "@pigweed_python_packages//pylint",
+    script = "pylint",
+    # TODO: https://github.com/bazel-contrib/rules_python/issues/3126 - Remove
+    # this tag once the bug in rules_python is fixed.
+    tags = ["nomypy"],
+)
+
+label_flag(
+    name = "pylintrc",
+    build_setting_default = "//pw_build/bazel_internal:empty_file_target",
+)
 
 config_setting(
     name = "kythe",
     values = {
         "define": "kythe_corpus=pigweed.googlesource.com/pigweed/pigweed",
     },
+)
+
+alias(
+    name = "python_protobuf_runtime",
+    actual = select({
+        "@platforms//os:linux": "@pigweed_python_packages//protobuf",
+        "@platforms//os:macos": "@pigweed_python_packages//protobuf",
+        "@platforms//os:windows": "@pigweed_python_packages//protobuf",
+        "//conditions:default": "@com_google_protobuf//:protobuf_python",
+    }),
+)
+
+# This toolchain targets python proto libraries using the python_protobuf_runtime.
+# It is used by py_proto_library to generate python proto code.
+proto_lang_toolchain(
+    name = "pw_python_proto_toolchain",
+    command_line = "--python_out=%s",
+    progress_message = "Generating Python proto_library %{label}",
+    runtime = ":python_protobuf_runtime",
+    toolchain_type = "@com_google_protobuf//bazel/private:python_toolchain_type",
+)
+
+proto_library(
+    name = "workflows_proto",
+    srcs = [
+        "proto/workflows.proto",
+    ],
+    # Make private until the proto stabilizes.
+    visibility = ["//:__subpackages__"],
+    deps = [
+        "@com_google_protobuf//:any_proto",
+    ],
+)
+
+py_proto_library(
+    name = "workflows_proto_py_pb2",
+    deps = [":workflows_proto"],
+)
+
+proto_library(
+    name = "build_driver_proto",
+    srcs = [
+        "proto/build_driver.proto",
+    ],
+    # Restrict API to Pigweed until the api stabilizes.
+    visibility = ["//:__subpackages__"],
+    deps = [
+        ":workflows_proto",
+    ],
+)
+
+py_proto_library(
+    name = "build_driver_proto_py_pb2",
+    # Restrict API to Pigweed until the api stabilizes.
+    visibility = ["//:__subpackages__"],
+    deps = [":build_driver_proto"],
+)
+
+proto_library(
+    name = "pigweed_build_driver",
+    srcs = [
+        "proto/pigweed_build_driver.proto",
+    ],
+    # Restrict API to Pigweed until the api stabilizes.
+    visibility = ["//:__subpackages__"],
+    deps = [
+        ":workflows_proto",
+    ],
+)
+
+py_proto_library(
+    name = "pigweed_build_driver_py_pb2",
+    # Restrict API to Pigweed until the api stabilizes.
+    visibility = ["//:__subpackages__"],
+    deps = [":pigweed_build_driver"],
 )
 
 pw_cc_blob_info(
@@ -47,6 +147,12 @@ pw_cc_blob_info(
     symbol_name = "kSecondBlob0123",
 )
 
+pw_cc_blob_info(
+    name = "test_blob_checksum",
+    file_path = "test_blob_0123.bin",
+    symbol_name = "kBlobWithChecksum",
+)
+
 pw_cc_blob_library(
     name = "test_blob",
     blobs = [
@@ -57,10 +163,26 @@ pw_cc_blob_library(
     out_header = "pw_build/test_blob.h",
 )
 
+pw_cc_blob_library(
+    name = "test_blob_with_checksum",
+    blobs = [
+        ":test_blob_checksum",
+    ],
+    checksum = "CRC32",
+    namespace = "test::checksum_ns",
+    out_header = "pw_build/test_blob_with_checksum.h",
+)
+
 pw_cc_test(
     name = "cc_blob_library_test",
     srcs = ["cc_blob_library_test.cc"],
     deps = [":test_blob"],
+)
+
+pw_cc_test(
+    name = "cc_blob_library_checksum_test",
+    srcs = ["cc_blob_library_checksum_test.cc"],
+    deps = [":test_blob_with_checksum"],
 )
 
 pw_cc_binary_with_map(
@@ -87,7 +209,7 @@ pw_cc_test(
 label_flag(
     name = "default_module_config",
     # The default module config is empty.
-    build_setting_default = ":empty_cc_library",
+    build_setting_default = "@rules_cc//:empty_lib",
 )
 
 cc_library(
@@ -114,8 +236,9 @@ pw_cc_test(
 # This empty library is used as a placeholder for label flags that need to
 # point to a library of some kind, but don't actually need the dependency to
 # amount to anything.
-cc_library(
+alias(
     name = "empty_cc_library",
+    actual = "@rules_cc//:empty_lib",
 )
 
 # A special target used instead of a cc_library as the default condition in
@@ -165,6 +288,7 @@ cc_library(
 pw_cc_test(
     name = "linker_symbol_test",
     srcs = ["linker_symbol_test.cc"],
+    features = ["-ctad_warnings"],
     linkopts = [
         "-T$(execpath linker_symbol_test.ld)",
     ],
@@ -177,11 +301,37 @@ pw_cc_test(
     ],
 )
 
+cc_library(
+    name = "sandbox_test_visible_header",
+    hdrs = ["public/pw_build/internal/test_header_with_dep.h"],
+    strip_include_prefix = "public",
+)
+
+cc_library(
+    name = "sandbox_test_invisible_header",
+    hdrs = ["public/pw_build/internal/test_header_without_dep.h"],
+    strip_include_prefix = "public",
+)
+
+pw_cc_test(
+    name = "sandbox_test",
+    srcs = [
+        "absolute_path_source_file.cc",
+        "sandbox_absolute_source_test.cc",
+        "sandbox_test.cc",
+    ],
+    defines = ["SANDBOX_ENABLED=1"],
+    deps = [":sandbox_test_visible_header"],
+)
+
 pw_string_list_comparison_test(
     name = "simple_glob",
     actual = glob_dirs(
         ["test_data/**"],
-        exclude = ["test_data/pw_copy_and_patch_file/**"],
+        exclude = [
+            "test_data/pw_copy_and_patch_file/**",
+            "test_data/pw_rust_crates_extension/**",
+        ],
     ),
     expected = [
         "test_data",
@@ -266,6 +416,21 @@ pw_string_list_comparison_test(
     ],
 )
 
+pw_string_list_comparison_test(
+    name = "no_match_subpackage",
+    actual = glob_dirs(
+        ["test_data/glob_dirs/subpackage"],
+        allow_empty = True,
+    ),
+    expected = [],
+)
+
+pw_bool_comparison_test(
+    name = "pigweed_is_root_test",
+    actual = pigweed_is_root(),
+    expected = True,
+)
+
 pw_copy_and_patch_file_test(
     name = "patch_file_basic",
     src = "test_data/pw_copy_and_patch_file/basic.txt",
@@ -300,7 +465,11 @@ filegroup(
 sphinx_docs_library(
     name = "docs",
     srcs = [
+        "CMakeLists.txt",
         "bazel.rst",
+        "bazel_constraints.rst",
+        "bazel_helpers.rst",
+        "bazel_rules.rst",
         "cmake.rst",
         "docs.rst",
         "gn.rst",
@@ -308,12 +477,28 @@ sphinx_docs_library(
         "pigweed.bazelrc",
         "pigweed_recommended.bazelrc",
         "project_builder.rst",
+        "proto/pigweed_build_driver.proto",
+        "proto/workflows.proto",
         "python.gni",
         "python.rst",
         "python_api.rst",
         "python_gn_args.gni",
+        "workflows_build_drivers.rst",
+        "workflows_launcher.rst",
         "//pw_build/py:docs",
     ],
     prefix = "pw_build/",
     target_compatible_with = incompatible_with_mcu(),
 )
+
+# This target is used by the analysis tests in pw_pylint_test to confirm that
+# pw_pylint.bzl is working.
+py_console_script_binary(
+    name = "pw_pylint_test_test_target",
+    pkg = "@pigweed_python_packages//pylint",
+    script = "pylint",
+    tags = ["manual"],
+    visibility = ["//visibility:private"],
+)
+
+pw_pylint_test_suite(name = "pw_pylint_test")

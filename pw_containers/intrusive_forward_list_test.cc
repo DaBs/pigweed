@@ -29,6 +29,7 @@ namespace {
 // Test fixtures
 
 using ::pw::IntrusiveForwardList;
+using ::pw::IntrusiveForwardListItem;
 
 class Item : public IntrusiveForwardList<Item>::Item {
  public:
@@ -161,7 +162,7 @@ TEST(IntrusiveForwardListTest, Construct_DuplicateItems) {
 }
 #endif  // TESTING_CHECK_FAILURES_IS_SUPPORTED
 
-TEST(IntrusiveListTest, Construct_Move) {
+TEST(IntrusiveForwardListTest, Construct_Move) {
   std::array<Item, 4> items1{{{0}, {1}, {2}, {3}}};
   List list1(items1.begin(), items1.end());
   List list2(std::move(list1));
@@ -176,7 +177,7 @@ TEST(IntrusiveListTest, Construct_Move) {
   list2.clear();
 }
 
-TEST(IntrusiveListTest, Construct_Move_Empty) {
+TEST(IntrusiveForwardListTest, Construct_Move_Empty) {
   List list1;
   List list2(std::move(list1));
 
@@ -184,7 +185,7 @@ TEST(IntrusiveListTest, Construct_Move_Empty) {
   EXPECT_TRUE(list2.empty());
 }
 
-TEST(IntrusiveListTest, Assign_Move) {
+TEST(IntrusiveForwardListTest, Assign_Move) {
   std::array<Item, 4> items1{{{0}, {1}, {2}, {3}}};
   std::array<Item, 2> items2{{{4}, {5}}};
   List list1(items1.begin(), items1.end());
@@ -202,7 +203,7 @@ TEST(IntrusiveListTest, Assign_Move) {
   list2.clear();
 }
 
-TEST(IntrusiveListTest, Assign_Move_Empty) {
+TEST(IntrusiveForwardListTest, Assign_Move_Empty) {
   std::array<Item, 3> items1{{{0}, {1}, {2}}};
   List list1(items1.begin(), items1.end());
   List list2;
@@ -235,6 +236,42 @@ TEST(IntrusiveForwardListTest, Assign_EmptyRange) {
 }
 
 // Element access unit tests
+
+TEST(IntrusiveForwardListTest, IteratorIsDefaultConstructible) {
+  List list;
+  List::iterator iter;
+  EXPECT_NE(iter, list.begin());
+  EXPECT_NE(iter, list.begin());
+  EXPECT_EQ(iter, List::iterator());
+}
+
+TEST(IntrusiveForwardListTest, IteratorIsCopyConstructible) {
+  List list;
+  List::iterator iter1 = list.begin();
+  List::iterator iter2(iter1);
+  EXPECT_EQ(iter2, list.begin());
+}
+
+TEST(IntrusiveForwardListTest, IteratorCopyAssignable) {
+  List list;
+  List::iterator iter1 = list.begin();
+  List::iterator iter2 = iter1;
+  EXPECT_EQ(iter2, list.begin());
+}
+
+TEST(IntrusiveForwardListTest, IteratorisMoveConstructible) {
+  List list;
+  List::iterator iter1 = list.begin();
+  List::iterator iter2(std::move(iter1));
+  EXPECT_EQ(iter2, list.begin());
+}
+
+TEST(IntrusiveForwardListTest, IteratorMoveAssignable) {
+  List list;
+  List::iterator iter1 = list.begin();
+  List::iterator iter2 = std::move(iter1);
+  EXPECT_EQ(iter2, list.begin());
+}
 
 TEST(IntrusiveForwardListTest, ListFront) {
   Item item1(1);
@@ -1381,8 +1418,10 @@ struct Foo {};
 
 class BadItem : public IntrusiveForwardList<Foo>::Item {};
 
-[[maybe_unused]] IntrusiveForwardList<BadItem>
-    derived_from_incompatible_item_type;
+[[maybe_unused]] void IncompatibleItem() {
+  IntrusiveForwardList<BadItem> derived_from_incompatible_item_type;
+  (void)derived_from_incompatible_item_type.front();
+}
 
 #elif PW_NC_TEST(DoesNotInheritFromItem)
 PW_NC_EXPECT(
@@ -1391,7 +1430,10 @@ PW_NC_EXPECT(
 
 struct NotAnItem {};
 
-[[maybe_unused]] IntrusiveForwardList<NotAnItem> list;
+[[maybe_unused]] void DoesNotInheritFrom() {
+  IntrusiveForwardList<NotAnItem> list;
+  (void)list.front();
+}
 
 #endif  // PW_NC_TEST
 
@@ -1417,6 +1459,14 @@ TEST(IntrusiveForwardListTest, MoveItemsToVector) {
   // TODO(b/313899658): Vector has an MSAN bug in its destructor when clearing
   // items that reference themselves. Workaround it by manually clearing.
   vec.clear();
+}
+
+TEST(IntrusiveForwardListItem, Compiles) {
+  IntrusiveForwardListItem<bool> item(true);
+  IntrusiveForwardList<IntrusiveForwardListItem<bool>> list;
+  list.push_front(item);
+  EXPECT_TRUE(list.begin()->item());
+  list.clear();
 }
 
 }  // namespace

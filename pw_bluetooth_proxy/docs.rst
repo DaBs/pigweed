@@ -18,7 +18,7 @@ power usage).
 The proxy acts as a proxy of all host controller interface (HCI) packets between
 the host and the controller.
 
-:cpp:class:`pw::bluetooth::proxy::ProxyHost` acts as the main coordinator for
+:cc:`pw::bluetooth::proxy::ProxyHost` acts as the main coordinator for
 proxy functionality.
 
 .. literalinclude:: proxy_host_test.cc
@@ -97,16 +97,36 @@ Get started
       2. Then add ``pw_bluetooth_proxy`` to
       the ``DEPS`` list in your cmake target:
 
+Module configuration
+====================
+This module has configuration options that globally affect the behavior of the
+:cc:`pw::bluetooth::proxy::ProxyHost` via compile-time configuration. See the
+:ref:`module documentation <module-structure-compile-time-configuration>` for
+more details.
+
+Module configuration options include:
+
+- :cc:`PW_BLUETOOTH_PROXY_INTERNAL_ALLOCATOR_SIZE`: The
+  :cc:`pw::bluetooth::proxy::ProxyHost` can either use a provided allocator or
+  provide an internal one. To use an internal allocator, set the value of
+  this option to a non-zero value and omit the ``allocator`` parameter from the
+  ``ProxyHost`` constructor invocation. When providing an allocator, it is
+  strongly recommended to set the value of this option to zero to avoiding
+  reserving space that will not be used.
+- :cc:`PW_BLUETOOTH_PROXY_ASYNC`: This module supports two modes of operation,
+  both of which provide thread-safe APIs. When this option is zero (the
+  default), it will use synchronization primitives to allow for parallel
+  execution. When this option is non-zero, it will asynchronously execute tasks
+  using a provided :cc`pw::async2::Dispatcher`. When using this mode of
+  operation, an allocator and a dispatcher must be provided that outlive the
+  :cc:`pw::bluetooth::proxy::ProxyHost`.
+
 .. _module-pw_bluetooth_proxy-reference:
 
 -------------
 API reference
 -------------
-
-pw::bluetooth::proxy::ProxyHost
-===============================
-.. doxygenclass:: pw::bluetooth::proxy::ProxyHost
-   :members:
+Moved: :cc:`pw_bluetooth_proxy`
 
 .. _module-pw_bluetooth_proxy-size-reports:
 
@@ -115,9 +135,7 @@ Code size analysis
 ------------------
 Delta when constructing a proxy and just sending packets through.
 
-.. TODO: b/388905812 - Re-enable the size report.
-.. .. include:: use_passthrough_proxy_size_report
-.. include:: ../size_report_notice
+.. include:: use_passthrough_proxy_size_report
 
 .. _module-pw_bluetooth_proxy-roadmap:
 

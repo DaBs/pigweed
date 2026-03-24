@@ -12,14 +12,13 @@
 # License for the specific language governing permissions and limitations under
 # the License.
 
-load("@rules_python//python:defs.bzl", "py_library")
-load("//pw_build:python.bzl", "pw_py_test")
+load("//pw_build:python.bzl", "pw_py_library", "pw_py_test")
 
 package(default_visibility = ["//visibility:public"])
 
 licenses(["notice"])
 
-py_library(
+pw_py_library(
     name = "pw_module",
     srcs = [
         "pw_module/__init__.py",
@@ -31,7 +30,12 @@ py_library(
         "pw_module/templates/helpers/__init__.py",
     ],
     imports = ["."],
-    deps = ["//pw_cli/py:pw_cli"],
+    deps = [
+        "//pw_build/py:pw_build",
+        "//pw_cli/py:pw_cli",
+        "@pigweed_python_packages//jinja2",
+        "@pigweed_python_packages//prompt_toolkit",
+    ],
 )
 
 pw_py_test(
@@ -43,4 +47,10 @@ pw_py_test(
     deps = [
         ":pw_module",
     ],
+)
+
+pw_py_test(
+    name = "check_test",
+    srcs = ["check_test.py"],
+    deps = [":pw_module"],
 )

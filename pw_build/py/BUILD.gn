@@ -16,6 +16,40 @@ import("//build_overrides/pigweed.gni")
 
 import("$dir_pw_build/python.gni")
 
+pw_python_package("workflows") {
+  generate_setup = {
+    metadata = {
+      name = "pw_workflows"
+      version = "0.0.1"
+    }
+  }
+  sources = [
+    "pw_build/__init__.py",
+    "pw_build/workflows/bazel_driver.py",
+    "pw_build/workflows/build_driver.py",
+    "pw_build/workflows/build_plugin.py",
+    "pw_build/workflows/describe.py",
+    "pw_build/workflows/launcher.py",
+    "pw_build/workflows/manager.py",
+    "pw_build/workflows/private/validator.py",
+  ]
+  tests = [
+    "bazel_driver_test.py",
+    "workflows_launcher_test.py",
+    "workflows_validator_test.py",
+    "workflows_manager_test.py",
+  ]
+  python_deps = [
+    "$dir_pw_build/py",
+    "$dir_pw_cli/py",
+    "$dir_pw_config_loader/py",
+  ]
+  pylintrc = "$dir_pigweed/.pylintrc"
+  mypy_ini = "$dir_pigweed/.mypy.ini"
+  ruff_toml = "$dir_pigweed/.ruff.toml"
+  proto_library = "..:workflows_proto"
+}
+
 pw_python_package("py") {
   setup = [
     "pyproject.toml",
@@ -50,30 +84,32 @@ pw_python_package("py") {
     "pw_build/merge_profraws.py",
     "pw_build/mirror_tree.py",
     "pw_build/nop.py",
-    "pw_build/pigweed_upstream_build.py",
     "pw_build/pip_install_python_deps.py",
     "pw_build/project_builder.py",
     "pw_build/project_builder_argparse.py",
     "pw_build/project_builder_context.py",
     "pw_build/project_builder_prefs.py",
-    "pw_build/project_builder_presubmit_runner.py",
     "pw_build/python_package.py",
     "pw_build/python_runfiles.py",
     "pw_build/python_runner.py",
     "pw_build/runfiles_manager.py",
     "pw_build/wrap_ninja.py",
+    "pw_build/zephyr_twister_runner.py",
     "pw_build/zip.py",
   ]
   tests = [
     "bazel_query_test.py",
-    "build_recipe_test.py",
     "bazel_to_gn_test.py",
+    "build_recipe_test.py",
     "create_python_tree_test.py",
     "file_prefix_map_test.py",
     "generate_cc_blob_library_test.py",
+    "generated_tests_test.py",
+    "generated_tests_example_test.py",
     "gn_target_test.py",
     "gn_writer_test.py",
     "project_builder_prefs_test.py",
+    "project_builder_test.py",
     "python_runner_test.py",
     "runfiles_manager_test.py",
     "zip_test.py",
@@ -82,9 +118,34 @@ pw_python_package("py") {
     "$dir_pw_cli/py",
     "$dir_pw_config_loader/py",
     "$dir_pw_env_setup/py",
-    "$dir_pw_presubmit/py",
   ]
   python_test_deps = [ "gn_tests:test_dist1" ]
+  pylintrc = "$dir_pigweed/.pylintrc"
+  mypy_ini = "$dir_pigweed/.mypy.ini"
+  ruff_toml = "$dir_pigweed/.ruff.toml"
+  inputs = [
+    "pw_build/zephyr_default_CMakeLists.txt",
+    "pw_build/zephyr_default_prj.conf",
+  ]
+}
+
+# This is a separate package to avoid dependency cycles with pw_build.
+pw_python_package("pigweed_upstream_build") {
+  generate_setup = {
+    metadata = {
+      name = "pigweed_upstream_build"
+      version = "0.0.1"
+    }
+  }
+  sources = [
+    "pigweed_upstream_build/__init__.py",
+    "pigweed_upstream_build/__main__.py",
+    "pw_build/project_builder_presubmit_runner.py",
+  ]
+  python_deps = [
+    "$dir_pw_build/py",
+    "$dir_pw_presubmit/py",
+  ]
   pylintrc = "$dir_pigweed/.pylintrc"
   mypy_ini = "$dir_pigweed/.mypy.ini"
   ruff_toml = "$dir_pigweed/.ruff.toml"

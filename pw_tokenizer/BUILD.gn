@@ -19,8 +19,8 @@ import("$dir_pw_bloat/bloat.gni")
 import("$dir_pw_build/cc_blob_library.gni")
 import("$dir_pw_build/module_config.gni")
 import("$dir_pw_build/target_types.gni")
-import("$dir_pw_docgen/docs.gni")
 import("$dir_pw_fuzzer/fuzzer.gni")
+import("$dir_pw_perf_test/perf_test.gni")
 import("$dir_pw_protobuf_compiler/proto.gni")
 import("$dir_pw_unit_test/test.gni")
 
@@ -102,6 +102,9 @@ pw_source_set("pw_tokenizer") {
     "tokenize.cc",
   ]
   friend = [ ":*" ]
+
+  # TODO(b/259746255): Remove this when everything compiles with -Wconversion.
+  configs = [ "$dir_pw_build:conversion_warnings" ]
 }
 
 pw_source_set("base64") {
@@ -114,6 +117,9 @@ pw_source_set("base64") {
     dir_pw_base64,
     dir_pw_preprocessor,
   ]
+
+  # TODO(b/259746255): Remove this when everything compiles with -Wconversion.
+  configs = [ "$dir_pw_build:conversion_warnings" ]
 }
 
 pw_source_set("decoder") {
@@ -144,6 +150,41 @@ pw_source_set("decoder") {
     "token_database.cc",
   ]
   friend = [ ":*" ]
+
+  # TODO(b/259746255): Remove this when everything compiles with -Wconversion.
+  configs = [ "$dir_pw_build:conversion_warnings" ]
+}
+
+config("detokenize_from_this_program_linker_script") {
+  inputs = [ "add_detokenize_from_this_program_sections.ld" ]
+  ldflags = [
+    "-T",
+    rebase_path("add_detokenize_from_this_program_sections.ld", root_build_dir),
+  ]
+
+  # TODO: https://pwbug.dev/450130202 - Set this visibility to private when
+  # :detokenize_from_this_program automatically includes it.
+}
+
+pw_source_set("detokenize_from_this_program") {
+  public_configs = [ ":public_include_path" ]
+  public = [ "public/pw_tokenizer/detokenize_from_this_program.h" ]
+  sources = [ "detokenize_from_this_program.cc" ]
+  public_deps = [
+    ":decoder",
+    dir_pw_result,
+  ]
+
+  # TODO: https://pwbug.dev/450130202 - Automatically use
+  # detokenize_from_this_program_linker_script when :pw_tokenizer no longer
+  # automatically includes :linker_script which conflicts.
+  #
+  # Until that is resolved, consumers of this target should also specifiy:
+  #
+  #   configs = [ "$dir_pw_tokenizer:detokenize_from_this_program_linker_script" ]
+  #
+  # This is safe because configs specified in a target's "configs" list apply
+  # before those speicified on dependencies.
 }
 
 pw_source_set("csv") {
@@ -151,6 +192,9 @@ pw_source_set("csv") {
   sources = [ "csv.cc" ]
   deps = [ dir_pw_log ]
   visibility = [ ":*" ]
+
+  # TODO(b/259746255): Remove this when everything compiles with -Wconversion.
+  configs = [ "$dir_pw_build:conversion_warnings" ]
 }
 
 pw_test("csv_test") {
@@ -187,6 +231,7 @@ pw_test_group("tests") {
     ":base64_test",
     ":decode_test",
     ":detokenize_test",
+    ":detokenize_from_this_program_test",
     ":enum_test",
     ":encode_args_test",
     ":hash_test",
@@ -245,17 +290,58 @@ pw_test("decode_test") {
   enable_if = pw_build_EXECUTABLE_TARGET_TYPE != "arduino_executable"
 }
 
+pw_python_action("generate_data_driven_detokenize_test") {
+  script = "$dir_pw_tokenizer/py/data_driven_detokenize_test.py"
+  outputs = [ "$target_gen_dir/data_driven_detokenize_test.cc" ]
+  args = [
+    "--generate-cc-test",
+    rebase_path(outputs[0], root_build_dir),
+  ]
+  python_deps = [
+    "$dir_pw_build/py",
+    "py",
+  ]
+  visibility = [ ":*" ]
+}
+
 pw_test("detokenize_test") {
   sources = [ "detokenize_test.cc" ]
   deps = [
+    ":base64",
     ":decoder",
     ":detokenizer_elf_test_blob",
     dir_pw_stream,
   ]
+  source_gen_deps = [ ":generate_data_driven_detokenize_test" ]
 
   # TODO(tonymd): This fails on Teensyduino 1.54 beta core. It may be related to
   # linking in stl functions. Will debug when 1.54 is released.
   enable_if = pw_build_EXECUTABLE_TARGET_TYPE != "arduino_executable"
+}
+
+pw_test("detokenize_from_this_program_test") {
+  sources = [ "detokenize_from_this_program_test.cc" ]
+  deps = [
+    ":detokenize_from_this_program",
+    ":pw_tokenizer",
+    dir_pw_bytes,
+  ]
+
+  # This test requires a linker script to load the tokenizer sections. This is
+  # currently only supported on Linux.
+  enable_if = current_os == "linux"
+
+  configs = [ "$dir_pw_tokenizer:detokenize_from_this_program_linker_script" ]
+}
+
+pw_perf_test("detokenize_perf_test") {
+  sources = [ "detokenize_perf_test.cc" ]
+  deps = [
+    ":decoder",
+    "$dir_pw_assert:check",
+    dir_pw_bytes,
+    dir_pw_span,
+  ]
 }
 
 pw_test("encode_args_test") {
@@ -295,8 +381,10 @@ pw_test("tokenize_test") {
   ]
   deps = [
     ":pw_tokenizer",
+    "$dir_pw_string:string",
     "$dir_pw_varint",
   ]
+  negative_compilation_tests = true
 }
 
 pw_test("tokenize_c99_test") {
@@ -337,69 +425,6 @@ pw_fuzzer("detokenize_fuzzer") {
 pw_proto_library("proto") {
   sources = [ "pw_tokenizer_proto/options.proto" ]
   python_package = "py"
-}
-
-declare_args() {
-  # pw_JAVA_NATIVE_INTERFACE_INCLUDE_DIRS specifies the paths to use for
-  # building Java Native Interface libraries. If no paths are provided, targets
-  # that require JNI may not build correctly.
-  #
-  # Example JNI include paths for a Linux system:
-  #
-  #   pw_JAVA_NATIVE_INTERFACE_INCLUDE_DIRS = [
-  #     "/usr/local/buildtools/java/jdk/include/",
-  #     "/usr/local/buildtools/java/jdk/include/linux",
-  #   ]
-  #
-  pw_JAVA_NATIVE_INTERFACE_INCLUDE_DIRS = []
-}
-
-# Create a shared library for the tokenizer JNI wrapper. The include paths for
-# the JNI headers must be available in the system or provided with the
-# pw_JAVA_NATIVE_INTERFACE_INCLUDE_DIRS variable.
-pw_shared_library("detokenizer_jni") {
-  public_configs = [ ":public_include_path" ]
-  include_dirs = pw_JAVA_NATIVE_INTERFACE_INCLUDE_DIRS
-  sources = [ "java/dev/pigweed/tokenizer/detokenizer.cc" ]
-  public_deps = [
-    ":decoder",
-    "$dir_pw_preprocessor",
-  ]
-  deps = [ dir_pw_span ]
-}
-
-pw_doc_group("docs") {
-  inputs = [
-    "Kconfig",
-    "py/pw_tokenizer/encode.py",
-    "public/pw_tokenizer/internal/tokenize_string.h",
-  ]
-  sources = [
-    "api.rst",
-    "detokenization.rst",
-    "docs.rst",
-    "get_started.rst",
-    "token_databases.rst",
-    "tokenization.rst",
-  ]
-  report_deps = [ ":tokenizer_size_report" ]
-}
-
-# Pigweed tokenizer size report.
-pw_size_diff("tokenizer_size_report") {
-  title = "Pigweed tokenizer size report"
-  binaries = [
-    {
-      target = "size_report:tokenize_string"
-      base = "size_report:tokenize_string_base"
-      label = "tokenize a string"
-    },
-    {
-      target = "size_report:tokenize_string_expr"
-      base = "size_report:tokenize_string_expr_base"
-      label = "tokenize a string expression"
-    },
-  ]
 }
 
 pw_cc_blob_library("detokenizer_elf_test_blob") {

@@ -643,6 +643,35 @@ DynamicByteBuffer AclLeCreditBasedConnectionRsp(
       UpperBits(static_cast<uint16_t>(result))));
 }
 
+DynamicByteBuffer AclFlowControlCreditInd(
+    l2cap::CommandId id,
+    hci_spec::ConnectionHandle link_handle,
+    l2cap::ChannelId cid,
+    uint16_t credits) {
+  return DynamicByteBuffer(StaticByteBuffer(
+      // ACL data header (link_handle, length: 12 bytes)
+      LowerBits(link_handle),
+      UpperBits(link_handle),
+      0x0c,
+      0x00,
+      // L2CAP B-frame header: length 8, channel-id 5 (LE signaling)
+      0x08,
+      0x00,
+      0x05,
+      0x00,
+      // L2CAP flow control credit ind, id 0x16, length 4
+      l2cap::kLEFlowControlCredit,
+      id,
+      0x04,
+      0x00,
+      // Channel ID
+      LowerBits(cid),
+      UpperBits(cid),
+      // Credits
+      LowerBits(credits),
+      UpperBits(credits)));
+}
+
 DynamicByteBuffer AclSFrame(hci_spec::ConnectionHandle link_handle,
                             l2cap::ChannelId channel_id,
                             l2cap::internal::SupervisoryFunction function,
@@ -719,6 +748,58 @@ DynamicByteBuffer AclIFrame(hci_spec::ConnectionHandle link_handle,
   payload.Copy(&payload_destination);
   acl_packet[acl_packet.size() - 2] = LowerBits(fcs.fcs);
   acl_packet[acl_packet.size() - 1] = UpperBits(fcs.fcs);
+  return acl_packet;
+}
+
+DynamicByteBuffer AclKFrame(hci_spec::ConnectionHandle link_handle,
+                            l2cap::ChannelId channel_id,
+                            const ByteBuffer& payload) {
+  const uint16_t sdu_size = payload.size();
+  const uint16_t pdu_size = sdu_size + sizeof(sdu_size);
+  const uint16_t acl_size = pdu_size + sizeof(BasicHeader);
+  StaticByteBuffer headers(
+      // ACL data header: link handle, length
+      LowerBits(link_handle),
+      UpperBits(link_handle),
+      LowerBits(acl_size),
+      UpperBits(acl_size),
+      // L2CAP B-frame header: pdu length, channel-id
+      LowerBits(pdu_size),
+      UpperBits(pdu_size),
+      LowerBits(channel_id),
+      UpperBits(channel_id),
+      // L2CAP SDU length
+      LowerBits(sdu_size),
+      UpperBits(sdu_size));
+
+  DynamicByteBuffer acl_packet(headers.size() + payload.size());
+  headers.Copy(&acl_packet);
+  auto payload_destination = acl_packet.mutable_view(headers.size());
+  payload.Copy(&payload_destination);
+  return acl_packet;
+}
+
+DynamicByteBuffer AclBFrame(hci_spec::ConnectionHandle link_handle,
+                            l2cap::ChannelId channel_id,
+                            const ByteBuffer& payload) {
+  const uint16_t pdu_size = payload.size();
+  const uint16_t acl_size = pdu_size + sizeof(BasicHeader);
+  StaticByteBuffer headers(
+      // ACL data header: link handle, length
+      LowerBits(link_handle),
+      UpperBits(link_handle),
+      LowerBits(acl_size),
+      UpperBits(acl_size),
+      // L2CAP B-frame header: pdu length, channel-id
+      LowerBits(pdu_size),
+      UpperBits(pdu_size),
+      LowerBits(channel_id),
+      UpperBits(channel_id));
+
+  DynamicByteBuffer acl_packet(headers.size() + payload.size());
+  headers.Copy(&acl_packet);
+  auto payload_destination = acl_packet.mutable_view(headers.size());
+  payload.Copy(&payload_destination);
   return acl_packet;
 }
 

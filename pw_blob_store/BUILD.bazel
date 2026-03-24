@@ -14,6 +14,8 @@
 
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("@rules_python//sphinxdocs:sphinx_docs_library.bzl", "sphinx_docs_library")
+load("//pw_bloat:pw_size_diff.bzl", "pw_size_diff")
+load("//pw_bloat:pw_size_table.bzl", "pw_size_table")
 load("//pw_build:compatibility.bzl", "incompatible_with_mcu")
 load("//pw_unit_test:pw_cc_test.bzl", "pw_cc_test")
 
@@ -31,6 +33,7 @@ cc_library(
         "public/pw_blob_store/blob_store.h",
         "public/pw_blob_store/internal/metadata_format.h",
     ],
+    features = ["-conversion_warnings"],
     implementation_deps = ["//pw_assert:check"],
     strip_include_prefix = "public",
     deps = [
@@ -51,6 +54,10 @@ cc_library(
     name = "flat_file_system_entry",
     srcs = ["flat_file_system_entry.cc"],
     hdrs = ["public/pw_blob_store/flat_file_system_entry.h"],
+    features = [
+        "-conversion_warnings",
+        "-ctad_warnings",
+    ],
     implementation_deps = ["//pw_assert:check"],
     strip_include_prefix = "public",
     deps = [
@@ -66,6 +73,10 @@ pw_cc_test(
     name = "blob_store_test",
     srcs = [
         "blob_store_test.cc",
+    ],
+    features = [
+        "-conversion_warnings",
+        "-ctad_warnings",
     ],
     # TODO: b/385375184 - Fix this test!
     tags = ["noubsan"],
@@ -85,6 +96,7 @@ pw_cc_test(
     srcs = [
         "blob_store_chunk_write_test.cc",
     ],
+    features = ["-conversion_warnings"],
     deps = [
         ":pw_blob_store",
         "//pw_kvs:crc16",
@@ -100,6 +112,10 @@ pw_cc_test(
     srcs = [
         "blob_store_deferred_write_test.cc",
     ],
+    features = [
+        "-conversion_warnings",
+        "-ctad_warnings",
+    ],
     deps = [
         ":pw_blob_store",
         "//pw_kvs:crc16",
@@ -113,6 +129,10 @@ pw_cc_test(
 pw_cc_test(
     name = "flat_file_system_entry_test",
     srcs = ["flat_file_system_entry_test.cc"],
+    features = [
+        "-conversion_warnings",
+        "-ctad_warnings",
+    ],
     deps = [
         ":flat_file_system_entry",
         ":pw_blob_store",
@@ -124,10 +144,34 @@ pw_cc_test(
     ],
 )
 
+pw_size_diff(
+    name = "basic_blob_size_diff",
+    base = "//pw_blob_store/size_report:base",
+    label = "BlobStore",
+    target = "//pw_blob_store/size_report:basic_blob",
+)
+
+pw_size_diff(
+    name = "deferred_write_blob_size_diff",
+    base = "//pw_blob_store/size_report:base",
+    label = "BlobStore with deferred write",
+    target = "//pw_blob_store/size_report:deferred_write_blob",
+)
+
+pw_size_table(
+    name = "blob_size",
+    reports = [
+        ":basic_blob_size_diff",
+        ":deferred_write_blob_size_diff",
+    ],
+)
+
 sphinx_docs_library(
     name = "docs",
     srcs = [
         "docs.rst",
+        ":blob_size",
+        "//pw_blob_store/size_report:docs",
     ],
     prefix = "pw_blob_store/",
     target_compatible_with = incompatible_with_mcu(),

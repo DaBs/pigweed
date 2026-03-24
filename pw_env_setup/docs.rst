@@ -1,8 +1,8 @@
 .. _module-pw_env_setup:
 
-------------
+============
 pw_env_setup
-------------
+============
 .. pigweed-module::
    :name: pw_env_setup
 
@@ -53,12 +53,12 @@ runs bootstrap.
 
 On POSIX systems, the environment can be deactivated by running ``deactivate``.
 
-==================================
+----------------------------------
 Using pw_env_setup in your project
-==================================
+----------------------------------
 
 Downstream Projects Using Pigweed's Packages
-********************************************
+============================================
 
 Projects using Pigweed can leverage ``pw_env_setup`` to install Pigweed's
 dependencies or their own dependencies. Projects that only want to use Pigweed's
@@ -98,27 +98,24 @@ assumes `bootstrap.sh` is at the top level of your repository.
 
 Bazel Usage
 -----------
-It is possible to pull in a CIPD dependency into Bazel using WORKSPACE rules
-rather than using `bootstrap.sh`. e.g.
+Bazel projects should pull in CIPD dependencies using repository rules
+rather than relying on `bootstrap.sh`. e.g.
 
 .. code-block:: python
 
-   # WORKSPACE
+   # MODULE.bazel
 
-   load("//pw_env_setup/bazel/cipd_setup:cipd_rules.bzl", "pigweed_deps")
+   cipd_repository = use_repo_rule("//pw_env_setup/bazel/cipd_setup:cipd_rules.bzl", "cipd_repository")
 
-   # Setup CIPD client and packages.
-   # Required by: pigweed.
-   # Used by modules: all.
-   pigweed_deps()
-
-   load("@cipd_deps//:cipd_init.bzl", "cipd_init")
-
-   cipd_init()
-
+   cipd_repository(
+      name = "qemu",
+      build_file = "//third_party/qemu:qemu.BUILD",
+      path = "fuchsia/third_party/qemu/${platform}",
+      tag = "git_revision:aa90f1161bb17a4863e16ec2f75104cff0752d4e",
+   )
 
 This will make the entire set of Pigweeds remote repositories available to your
-project. Though these repositories will only be donwloaded if you use them. To
+project. Though these repositories will only be downloaded if you use them. To
 get a full list of the remote repositories that this configures, run:
 
 .. code-block:: console
@@ -201,7 +198,7 @@ process. To check for this add the following.
    _pw_eval_sourced "$_pw_sourced"
 
 Downstream Projects Using Different Packages
-********************************************
+============================================
 Projects depending on Pigweed but using additional or different packages should
 copy the Pigweed `sample project`'s ``bootstrap.sh`` and ``pigweed.json`` and
 update the call to ``pw_bootstrap``. Search for "downstream" for other places
@@ -360,6 +357,21 @@ here.
   Python packages. On most systems this is located in
   ``~/.cache/pip/``. Defaults to ``false``.
 
+``pw.pw_env_setup.virtualenv.extra_vars``
+  A dictionary of new environment variables to be automatically added during
+  bootstrapping.
+
+  .. tip::
+    You can nest other environment variables. For example:
+
+    .. code-block:: json
+
+       "virtualenv": {
+          "extra_vars": {
+             "ZEPHYR_SDK_INSTALL_DIR": "${PW_ZEPHYR_SDK_CIPD_INSTALL_DIR}"
+          }
+       }
+
 ``pw.pw_env_setup.optional_submodules``
   By default environment setup will check that all submodules are present in
   the checkout. Any submodules in this list are excluded from that check.
@@ -382,11 +394,6 @@ here.
   Location to write a ``.json`` file containing step-by-step modifications to
   the environment, for reading by tools that don't inherit an environment from
   a sourced ``bootstrap.sh``.
-
-``pw.pw_env_setup.rosetta``
-  Whether to use Rosetta to use amd64 packages on arm64 Macs. Accepted values
-  are  ``never``, ``allow``, and ``force``. For now, ``allow`` means ``force``.
-  At some point in the future ``allow`` will be changed to mean ``never``.
 
 An example of a config file is below.
 
@@ -414,8 +421,7 @@ An example of a config file is below.
            "optional/submodule/two"
          ],
          "gni_file": "tools/environment.gni",
-         "json_file": "tools/environment.json",
-         "rosetta": "allow"
+         "json_file": "tools/environment.json"
        }
      }
    }
@@ -513,7 +519,7 @@ appear before ``b.json``'s, which will appear before ``a.json``'s.
    d.json
 
 Pinning Python Packages
-***********************
+=======================
 Python modules usually express dependencies as ranges, which makes it easier to
 install many Python packages that might otherwise have conflicting dependencies.
 However, this means version of packages can often change underneath us and
@@ -535,7 +541,7 @@ environment, and bootstrap again. Then run the ``list`` command from above
 again, and run ``pw presubmit``.
 
 Environment Variables
-*********************
+=====================
 Input Variables
 ---------------
 The following environment variables affect env setup behavior. Most users will
@@ -621,7 +627,7 @@ The following environment variables are set by env setup.
   Path to Pigweed's virtualenv.
 
 Non-Shell Environments
-**********************
+======================
 If using this outside of bash—for example directly from an IDE or CI
 system—users can process the ``actions.json`` file that's generated in the
 location specified by the environment config. It lists variables to set, clear,
@@ -676,14 +682,14 @@ the GNI file specified in the environment config file.
 
 It's straightforward to use these variables.
 
-.. code-block:: cpp
+.. code-block::
 
    import("//build_overrides/pigweed_environment.gni")
 
    deps = [ "$pw_env_setup_CIPD_PIGWEED/..." ]
 
 Implementation
-**************
+==============
 The environment is set up by installing CIPD and Python packages in
 ``PW_ENVIRONMENT_ROOT`` or ``<checkout>/environment``, and saving modifications
 to environment variables in setup scripts in those directories. To support

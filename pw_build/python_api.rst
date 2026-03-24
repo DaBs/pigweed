@@ -11,3 +11,9 @@ pw_build.runfiles_manager
 -------------------------
 .. automodule:: pw_build.runfiles_manager
    :members:
+
+------------------------
+pw_build.generated_tests
+------------------------
+.. automodule:: pw_build.generated_tests
+   :members:

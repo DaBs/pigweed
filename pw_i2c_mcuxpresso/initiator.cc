@@ -11,12 +11,18 @@
 // WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
 // License for the specific language governing permissions and limitations under
 // the License.
+
+#define PW_LOG_MODULE_NAME "I2C"
+
 #include "pw_i2c_mcuxpresso/initiator.h"
 
 #include <mutex>
 
 #include "fsl_i2c.h"
+#include "pw_assert/check.h"
 #include "pw_chrono/system_clock.h"
+#include "pw_function/scope_guard.h"
+#include "pw_log/log.h"
 #include "pw_status/status.h"
 #include "pw_status/try.h"
 
@@ -34,6 +40,8 @@ Status HalStatusToPwStatus(status_t status) {
       return Status::InvalidArgument();
     case kStatus_I2C_Timeout:
       return Status::DeadlineExceeded();
+    case kStatus_I2C_ArbitrationLost:
+      return Status::Aborted();
     default:
       return Status::Unknown();
   }
@@ -43,6 +51,16 @@ Status HalStatusToPwStatus(status_t status) {
 // inclusive-language: disable
 void McuxpressoInitiator::Enable() {
   std::lock_guard lock(mutex_);
+  EnableLocked();
+}
+
+void McuxpressoInitiator::EnableLocked() {
+  // Acquire the clock_tree element. Note that this function only requires the
+  // IP clock and not the functional clock. However, ClockMcuxpressoClockIp
+  // only provides the combined element, so that's what we use here.
+  // Make sure it's released on any function exits through a scoped guard.
+  PW_CHECK_OK(clock_tree_element_.Acquire());
+  pw::ScopeGuard guard([this] { clock_tree_element_.Release().IgnoreError(); });
 
   i2c_master_config_t master_config;
   I2C_MasterGetDefaultConfig(&master_config);
@@ -58,8 +76,25 @@ void McuxpressoInitiator::Enable() {
 
 void McuxpressoInitiator::Disable() {
   std::lock_guard lock(mutex_);
+  DisableLocked();
+}
+
+void McuxpressoInitiator::DisableLocked() {
+  // Acquire the clock_tree element. Note that this function only requires the
+  // IP clock and not the functional clock. However, ClockMcuxpressoClockIp
+  // only provides the combined element, so that's what we use here.
+  // Make sure it's released on any function exits through a scoped guard.
+  PW_CHECK_OK(clock_tree_element_.Acquire());
+  pw::ScopeGuard guard([this] { clock_tree_element_.Release().IgnoreError(); });
+
   I2C_MasterDeinit(base_);
   enabled_ = false;
+}
+
+void McuxpressoInitiator::ResetLocked() {
+  PW_LOG_WARN("Resetting I2C interface");
+  DisableLocked();
+  EnableLocked();
 }
 
 McuxpressoInitiator::~McuxpressoInitiator() { Disable(); }
@@ -73,19 +108,36 @@ void McuxpressoInitiator::TransferCompleteCallback(I2C_Type*,
   initiator.callback_isl_.lock();
   initiator.transfer_status_ = status;
   initiator.callback_isl_.unlock();
+
+  // We cannot release clock_tree_element_ here since we are in an ISR.
+  // It is released where callback_complete_notification_ is waited on.
   initiator.callback_complete_notification_.release();
 }
 
-Status McuxpressoInitiator::InitiateNonBlockingTransfer(
-    chrono::SystemClock::duration rw_timeout, i2c_master_transfer_t* transfer) {
+Status McuxpressoInitiator::InitiateNonBlockingTransferUntil(
+    chrono::SystemClock::time_point deadline, i2c_master_transfer_t* transfer) {
+  // Acquire the clock_tree_element. Use a scoped guard so it's released from
+  // any function return.
+  PW_CHECK_OK(clock_tree_element_.Acquire());
+  pw::ScopeGuard guard([this] { clock_tree_element_.Release().IgnoreError(); });
+
   const status_t status =
       I2C_MasterTransferNonBlocking(base_, &handle_, transfer);
   if (status != kStatus_Success) {
     return HalStatusToPwStatus(status);
   }
 
-  if (!callback_complete_notification_.try_acquire_for(rw_timeout)) {
-    I2C_MasterTransferAbort(base_, &handle_);
+  if (!callback_complete_notification_.try_acquire_until(deadline)) {
+    // If we're going to restart the interface for this bus, ignore trying to
+    // abort the transfer. Otherwise, we need to keep things synced, so wait
+    // for the transfer to abort.
+    if (!config_.auto_restart_interface) {
+      // Caveat emptor: this busy-waits for the controller to reset to the
+      // idle state, which means potentially this could be an unbounded wait
+      // if a peripheral is stuck! See also I2C_RETRY_WAIT.
+      I2C_MasterTransferAbort(base_, &handle_);
+    }
+
     return Status::DeadlineExceeded();
   }
 
@@ -96,72 +148,78 @@ Status McuxpressoInitiator::InitiateNonBlockingTransfer(
   return HalStatusToPwStatus(transfer_status);
 }
 
-// Performs non-blocking I2C write, read and read-after-write depending on the
-// tx and rx buffer states.
-Status McuxpressoInitiator::DoWriteReadFor(
-    Address device_address,
-    ConstByteSpan tx_buffer,
-    ByteSpan rx_buffer,
-    chrono::SystemClock::duration timeout) {
-  if (timeout <= chrono::SystemClock::duration::zero()) {
-    return Status::DeadlineExceeded();
+Status McuxpressoInitiator::TransferSequenceUntilLocked(
+    span<const Message> messages, chrono::SystemClock::time_point deadline) {
+  for (unsigned int i = 0; i < messages.size(); ++i) {
+    const Message& msg = messages[i];
+
+    uint32_t i2c_flags = kI2C_TransferDefaultFlag;
+
+    if (msg.IsWriteContinuation()) {
+      i2c_flags |= kI2C_TransferNoStartFlag;
+    } else if (i > 0) {
+      // Use repeated start flag for all but the first message.
+      i2c_flags |= kI2C_TransferRepeatedStartFlag;
+    }
+
+    // No stop flag prior to the final message.
+    if (i < messages.size() - 1) {
+      i2c_flags |= kI2C_TransferNoStopFlag;
+    }
+    i2c_master_transfer_t transfer{
+        .flags = i2c_flags,
+        .slaveAddress =
+            msg.GetAddress().GetSevenBit(),  // Will CHECK if >7 bits.
+        .direction = msg.IsRead() ? kI2C_Read : kI2C_Write,
+        .subaddress = 0,
+        .subaddressSize = 0,
+        // Cast GetData() here because GetMutableData() is for Writes only.
+        .data = const_cast<std::byte*>(msg.GetData().data()),
+        .dataSize = msg.GetData().size()};
+
+    PW_TRY(InitiateNonBlockingTransferUntil(deadline, &transfer));
   }
+  return pw::OkStatus();
+}
 
-  const uint8_t address = device_address.GetSevenBit();
+// Performs a sequence of non-blocking I2C reads and writes.
+Status McuxpressoInitiator::DoTransferFor(
+    span<const Message> messages, chrono::SystemClock::duration timeout) {
+  chrono::SystemClock::time_point deadline =
+      chrono::SystemClock::TimePointAfterAtLeast(timeout);
+
   std::lock_guard lock(mutex_);
-
   if (!enabled_) {
     return Status::FailedPrecondition();
   }
 
-  if (!tx_buffer.empty() && rx_buffer.empty()) {
-    i2c_master_transfer_t transfer{kI2C_TransferDefaultFlag,
-                                   address,
-                                   kI2C_Write,
-                                   0,
-                                   0,
-                                   const_cast<std::byte*>(tx_buffer.data()),
-                                   tx_buffer.size()};
-    return InitiateNonBlockingTransfer(timeout, &transfer);
-  } else if (tx_buffer.empty() && !rx_buffer.empty()) {
-    i2c_master_transfer_t transfer{kI2C_TransferDefaultFlag,
-                                   address,
-                                   kI2C_Read,
-                                   0,
-                                   0,
-                                   rx_buffer.data(),
-                                   rx_buffer.size()};
-    return InitiateNonBlockingTransfer(timeout, &transfer);
-  } else if (!tx_buffer.empty() && !rx_buffer.empty()) {
-    i2c_master_transfer_t w_transfer{kI2C_TransferNoStopFlag,
-                                     address,
-                                     kI2C_Write,
-                                     0,
-                                     0,
-                                     const_cast<std::byte*>(tx_buffer.data()),
-                                     tx_buffer.size()};
-    const chrono::SystemClock::time_point deadline =
-        chrono::SystemClock::TimePointAfterAtLeast(timeout);
-    PW_TRY(InitiateNonBlockingTransfer(timeout, &w_transfer));
-    i2c_master_transfer_t r_transfer{kI2C_TransferRepeatedStartFlag,
-                                     address,
-                                     kI2C_Read,
-                                     0,
-                                     0,
-                                     rx_buffer.data(),
-                                     rx_buffer.size()};
-    const chrono::SystemClock::duration time_remaining =
-        deadline - chrono::SystemClock::now();
-    if (time_remaining <= chrono::SystemClock::duration::zero()) {
-      // Abort transfer in an unlikely scenario of timeout even with
-      // successful write.
-      I2C_MasterTransferAbort(base_, &handle_);
-      return Status::DeadlineExceeded();
+  do {
+    auto status = TransferSequenceUntilLocked(messages, deadline);
+
+    if (status.IsAborted()) {
+      // Arbitration loss. Attempt the transaction again.
+      continue;
     }
-    return InitiateNonBlockingTransfer(time_remaining, &r_transfer);
-  } else {
-    return Status::InvalidArgument();
-  }
+
+    if (status.IsDeadlineExceeded() && config_.auto_restart_interface) {
+      // If we've exceeded our deadline, our transaction never
+      // successfully completed. This could indicate a stuck I2C
+      // interface, a device that stretched the clock beyond the deadline,
+      // or repeated arbitration losses (followed by one of the previous
+      // issues).
+      //
+      // Unfortunately, we have observed on RT595 platforms that the I2C
+      // interface can get stuck and fail to transmit at all, with no
+      // indication in the status registers that anything is wrong,
+      // requiring a full reset.
+      ResetLocked();
+    }
+
+    return status;
+  } while (chrono::SystemClock::now() < deadline);
+
+  return Status::DeadlineExceeded();
 }
 // inclusive-language: enable
+
 }  // namespace pw::i2c

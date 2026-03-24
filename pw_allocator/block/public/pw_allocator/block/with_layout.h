@@ -28,6 +28,8 @@ struct BaseWithLayout {};
 
 }  // namespace internal
 
+/// @submodule{pw_allocator,block_mixins}
+
 /// Mix-in for blocks that can retrieve the layout used to allocate them.
 ///
 /// Block mix-ins are stateless and trivially constructible. See `BasicBlock`
@@ -95,6 +97,8 @@ struct has_layout : std::is_base_of<internal::BaseWithLayout, BlockType> {};
 /// Helper variable template for `has_layout<BlockType>::value`.
 template <typename BlockType>
 constexpr bool has_layout_v = has_layout<BlockType>::value;
+
+/// @}
 
 // Template method implementations.
 
@@ -168,9 +172,9 @@ constexpr BlockResult<Derived> BlockWithLayout<Derived>::DoFree(
   // Reclaim bytes that were shifted to prev when the block allocated.
   size_t old_prev_size = prev->OuterSize();
   prev->DoResize(prev_size, true).IgnoreUnlessStrict();
-  return BlockResult(prev->Next(),
-                     BlockResultPrev::kResizedSmaller,
-                     old_prev_size - prev->OuterSize());
+  return BlockResult<Derived>(prev->Next(),
+                              BlockResultPrev::kResizedSmaller,
+                              old_prev_size - prev->OuterSize());
 }
 
 }  // namespace pw::allocator

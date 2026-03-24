@@ -22,9 +22,9 @@ namespace bt::gap::testing {
 
 FakeAdapter::FakeAdapter(pw::async::Dispatcher& pw_dispatcher)
     : init_state_(InitState::kNotInitialized),
+      pw_dispatcher_(pw_dispatcher),
       fake_le_(std::make_unique<FakeLowEnergy>(this)),
       fake_bredr_(std::make_unique<FakeBrEdr>()),
-      pw_dispatcher_(pw_dispatcher),
       heap_dispatcher_(pw_dispatcher),
       peer_cache_(pw_dispatcher),
       weak_self_(this) {}
@@ -117,6 +117,10 @@ void FakeAdapter::FakeLowEnergy::Connect(
     // NOTE: This assumes there is only 1 connection handle in tests.
     PW_CHECK(connections_.erase(handle->peer_identifier()));
   };
+  auto transfer_sync_fn =
+      [](auto, auto, auto, pw::Callback<void(hci::Result<>)> cb) {
+        cb(fit::error(Error(HostError::kNotSupported)));
+      };
   auto handle =
       std::make_unique<LowEnergyConnectionHandle>(peer_id,
                                                   /*handle=*/1,
@@ -124,7 +128,8 @@ void FakeAdapter::FakeLowEnergy::Connect(
                                                   std::move(accept_cis_cb),
                                                   std::move(bondable_cb),
                                                   std::move(security_cb),
-                                                  std::move(role_cb));
+                                                  std::move(role_cb),
+                                                  std::move(transfer_sync_fn));
   connections_[peer_id] = Connection{peer_id, connection_options, handle.get()};
   callback(fit::ok(std::move(handle)));
 }
@@ -228,22 +233,39 @@ void FakeAdapter::FakeLowEnergy::StartAdvertising(
 
 void FakeAdapter::FakeLowEnergy::StartDiscovery(
     bool active,
-    std::vector<hci::DiscoveryFilter> discovery_filters,
+    std::vector<hci::DiscoveryFilter> /*discovery_filters*/,
     SessionCallback callback) {
   auto session = std::make_unique<LowEnergyDiscoverySession>(
       next_scan_id_++,
       active,
-      std::move(discovery_filters),
-      *adapter_->peer_cache(),
       adapter_->pw_dispatcher_,
+      /*=notify_cached_results_cb=*/
+      [](LowEnergyDiscoverySession* /*s*/) {},
       /*on_stop_cb=*/
-      [this](LowEnergyDiscoverySession* s) { discovery_sessions_.erase(s); },
-      /*cached_scan_results_fn=*/
-      [this]() -> const std::unordered_set<PeerId>& {
-        return cached_scan_results_;
-      });
+      [this](LowEnergyDiscoverySession* s) { discovery_sessions_.erase(s); });
   discovery_sessions_.insert(session.get());
   callback(std::move(session));
+}
+
+hci::Result<PeriodicAdvertisingSyncHandle>
+FakeAdapter::FakeLowEnergy::SyncToPeriodicAdvertisement(
+    PeerId peer,
+    uint8_t advertising_sid,
+    SyncOptions options,
+    PeriodicAdvertisingSyncDelegate& delegate) {
+  if (sync_to_periodic_advertisement_error_) {
+    return fit::error(sync_to_periodic_advertisement_error_.value());
+  }
+
+  hci::SyncId sync_id = next_sync_id_++;
+  PeriodicAdvertisingSyncHandle handle(sync_id, [this, sync_id]() {
+    periodic_advertisement_syncs_.erase(sync_id);
+  });
+  auto [_, inserted] = periodic_advertisement_syncs_.try_emplace(
+      sync_id,
+      PeriodicAdvertisementSync{peer, advertising_sid, options, delegate});
+  PW_CHECK(inserted);
+  return fit::ok(std::move(handle));
 }
 
 void FakeAdapter::FakeLowEnergy::EnablePrivacy(bool enabled) {

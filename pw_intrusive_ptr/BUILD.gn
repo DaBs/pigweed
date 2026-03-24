@@ -15,7 +15,6 @@
 import("//build_overrides/pigweed.gni")
 
 import("$dir_pw_build/target_types.gni")
-import("$dir_pw_docgen/docs.gni")
 import("$dir_pw_unit_test/test.gni")
 
 config("public_include_path") {
@@ -28,6 +27,7 @@ pw_source_set("pw_intrusive_ptr") {
   public = [
     "public/pw_intrusive_ptr/internal/ref_counted_base.h",
     "public/pw_intrusive_ptr/intrusive_ptr.h",
+    "public/pw_intrusive_ptr/recyclable.h",
     "public/pw_intrusive_ptr/ref_counted.h",
   ]
   sources = [ "ref_counted_base.cc" ]
@@ -38,10 +38,6 @@ pw_source_set("pw_intrusive_ptr") {
 pw_source_set("pw_recyclable") {
   public_configs = [ ":public_include_path" ]
   public = [ "public/pw_intrusive_ptr/recyclable.h" ]
-}
-
-pw_doc_group("docs") {
-  sources = [ "docs.rst" ]
 }
 
 pw_test_group("tests") {

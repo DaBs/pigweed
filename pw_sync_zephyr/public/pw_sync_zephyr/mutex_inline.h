@@ -21,7 +21,9 @@
 
 namespace pw::sync {
 
-inline Mutex::Mutex() : native_type_() { k_mutex_init(&native_type_); }
+inline Mutex::Mutex() : native_type_() {
+  PW_ASSERT(k_mutex_init(&native_type_) == 0);
+}
 
 inline Mutex::~Mutex() = default;
 

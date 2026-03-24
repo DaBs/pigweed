@@ -21,6 +21,7 @@
 
 #include "pw_assert/check.h"
 #include "pw_bytes/span.h"
+#include "pw_function/scope_guard.h"
 #include "pw_protobuf/internal/codegen.h"
 #include "pw_protobuf/serialized_size.h"
 #include "pw_protobuf/stream_decoder.h"
@@ -28,7 +29,9 @@
 #include "pw_span/span.h"
 #include "pw_status/status.h"
 #include "pw_status/try.h"
+#include "pw_stream/limited_stream.h"
 #include "pw_stream/memory_stream.h"
+#include "pw_stream/null_stream.h"
 #include "pw_stream/stream.h"
 #include "pw_string/string.h"
 #include "pw_varint/varint.h"
@@ -37,16 +40,61 @@ namespace pw::protobuf {
 
 using internal::VarintType;
 
-StreamEncoder StreamEncoder::GetNestedEncoder(uint32_t field_number,
-                                              bool write_when_empty) {
+Status StreamEncoder::DoWriteNestedMessage(
+    uint32_t field_number,
+    AnyMessageWriter const& write_message,
+    bool write_when_empty) {
   PW_CHECK(!nested_encoder_open());
+  PW_TRY(status_);
 
-  nested_field_number_ = field_number;
   if (!ValidFieldNumber(field_number)) {
-    status_.Update(Status::InvalidArgument());
-    return StreamEncoder(*this, ByteSpan(), false);
+    status_ = Status::InvalidArgument();
+    PW_TRY(status_);
   }
 
+  // Lock.
+  nested_field_number_ = field_number;
+  ScopeGuard unlock([this] { nested_field_number_ = 0; });
+
+  ByteSpan scratch = GetNestedScratchBuffer(field_number);
+
+  // First pass: we simply count the number of bytes encoded by the fields in
+  // the submessage.
+  stream::CountingNullStream count_stream;
+  StreamEncoder count_encoder(count_stream, scratch);
+
+  status_ = write_message(count_encoder);
+  PW_TRY(status_);
+
+  // Now we know the exact size of the submessage.
+  const size_t num_bytes = count_stream.bytes_written();
+
+  if (num_bytes > 0 || write_when_empty) {
+    // With the field size known, we can write the header.
+    status_ = WriteLengthDelimitedKeyAndLengthPrefix(
+        field_number, num_bytes, writer_);
+    PW_TRY(status_);
+
+    // Ensure the caller cannot write more bytes in the second pass than they
+    // did in the first.
+    stream::LimitedStreamWriter write_stream(writer_, num_bytes);
+    StreamEncoder write_encoder(write_stream, scratch);
+
+    // Second pass: Actually write the fields to the stream.
+    status_ = write_message(write_encoder);
+    PW_TRY(status_);
+
+    // Verify that they wrote the same number of bytes as the first pass.
+    if (write_stream.bytes_written() != num_bytes) {
+      status_ = Status::OutOfRange();
+      PW_TRY(status_);
+    }
+  }
+
+  return OkStatus();
+}
+
+ByteSpan StreamEncoder::GetNestedScratchBuffer(uint32_t field_number) {
   // Pass the unused space of the scratch buffer to the nested encoder to use
   // as their scratch buffer.
   size_t key_size =
@@ -69,6 +117,20 @@ StreamEncoder StreamEncoder::GetNestedEncoder(uint32_t field_number,
   } else {
     nested_buffer = ByteSpan();
   }
+  return nested_buffer;
+}
+
+StreamEncoder StreamEncoder::GetNestedEncoder(uint32_t field_number,
+                                              bool write_when_empty) {
+  PW_CHECK(!nested_encoder_open());
+
+  nested_field_number_ = field_number;
+  if (!ValidFieldNumber(field_number)) {
+    status_.Update(Status::InvalidArgument());
+    return StreamEncoder(*this, ByteSpan(), false);
+  }
+
+  ByteSpan nested_buffer = GetNestedScratchBuffer(field_number);
   return StreamEncoder(*this, nested_buffer, write_when_empty);
 }
 
@@ -145,6 +207,28 @@ Status StreamEncoder::WriteLengthDelimitedField(uint32_t field_number,
   return status_;
 }
 
+Status StreamEncoder::WriteLengthDelimitedFieldFromCallback(
+    uint32_t field_number,
+    size_t num_bytes,
+    const Function<Status(stream::Writer&)>& write_func) {
+  if (num_bytes == 0) {
+    return OkStatus();
+  }
+
+  PW_TRY(UpdateStatusForWrite(field_number, WireType::kDelimited, num_bytes));
+  status_.Update(
+      WriteLengthDelimitedKeyAndLengthPrefix(field_number, num_bytes, writer_));
+
+  stream::LimitedStreamWriter write_stream(writer_, num_bytes);
+  status_.Update(write_func(write_stream));
+
+  if (write_stream.bytes_written() != num_bytes) {
+    status_.Update(Status::DataLoss());
+  }
+
+  return status_;
+}
+
 Status StreamEncoder::WriteLengthDelimitedFieldFromStream(
     uint32_t field_number,
     stream::Reader& bytes_reader,
@@ -208,15 +292,16 @@ Status StreamEncoder::WritePackedFixed(uint32_t field_number,
   WriteVarint(values.size_bytes())
       .IgnoreError();  // TODO: b/242598609 - Handle Status properly
 
+  auto element_size = static_cast<span<std::byte>::difference_type>(elem_size);
   for (auto val_start = values.begin(); val_start != values.end();
-       val_start += elem_size) {
+       val_start += element_size) {
     // Allocates 8 bytes so both 4-byte and 8-byte types can be encoded as
     // little-endian for serialization.
     std::array<std::byte, sizeof(uint64_t)> data;
     if (endian::native == endian::little) {
-      std::copy(val_start, val_start + elem_size, std::begin(data));
+      std::copy(val_start, val_start + element_size, std::begin(data));
     } else {
-      std::reverse_copy(val_start, val_start + elem_size, std::begin(data));
+      std::reverse_copy(val_start, val_start + element_size, std::begin(data));
     }
     status_.Update(writer_.Write(span(data).first(elem_size)));
     PW_TRY(status_);
@@ -450,7 +535,7 @@ Status StreamEncoder::Write(span<const std::byte> message,
               }
               value = field.varint_type() == VarintType::kZigZag
                           ? varint::ZigZagEncode(optional->value())
-                          : optional->value();
+                          : static_cast<uint64_t>(optional->value());
             }
           } else if (field.elem_size() == sizeof(uint32_t)) {
             if (field.varint_type() == VarintType::kUnsigned) {
@@ -470,7 +555,7 @@ Status StreamEncoder::Write(span<const std::byte> message,
               }
               value = field.varint_type() == VarintType::kZigZag
                           ? varint::ZigZagEncode(optional->value())
-                          : optional->value();
+                          : static_cast<uint64_t>(optional->value());
             }
           } else if (field.elem_size() == sizeof(bool)) {
             const auto* optional =
@@ -495,7 +580,7 @@ Status StreamEncoder::Write(span<const std::byte> message,
               value = varint::ZigZagEncode(
                   *reinterpret_cast<const int64_t*>(values.data()));
             } else if (field.varint_type() == VarintType::kNormal) {
-              value = *reinterpret_cast<const int64_t*>(values.data());
+              value = *reinterpret_cast<const uint64_t*>(values.data());
             } else {
               value = *reinterpret_cast<const uint64_t*>(values.data());
             }
@@ -507,7 +592,8 @@ Status StreamEncoder::Write(span<const std::byte> message,
               value = varint::ZigZagEncode(
                   *reinterpret_cast<const int32_t*>(values.data()));
             } else if (field.varint_type() == VarintType::kNormal) {
-              value = *reinterpret_cast<const int32_t*>(values.data());
+              value = static_cast<uint64_t>(
+                  *reinterpret_cast<const int32_t*>(values.data()));
             } else {
               value = *reinterpret_cast<const uint32_t*>(values.data());
             }

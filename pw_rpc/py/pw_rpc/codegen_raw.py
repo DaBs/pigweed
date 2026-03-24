@@ -43,7 +43,7 @@ def _proto_filename_to_stub_header(proto_file: str) -> str:
 
 
 def _function(method: ProtoServiceMethod) -> str:
-    return f'{client_call_type(method, "Raw")} {method.name()}'
+    return f'auto {method.name()}'
 
 
 def _user_args(method: ProtoServiceMethod) -> Iterable[str]:
@@ -96,19 +96,17 @@ class RawCodeGenerator(CodeGenerator):
     def client_member_function(
         self, method: ProtoServiceMethod, *, dynamic: bool
     ) -> None:
-        if dynamic:
-            self.line('// DynamicClient is not implemented for raw RPC')
-            return
 
         self.line(f'{_function(method)}(')
         self.indented_list(*_user_args(method), end=') const {')
 
         with self.indent():
             base = 'Stream' if method.server_streaming() else 'Unary'
+            start_method = 'StartDynamic' if dynamic else 'Start'
             self.line(
                 f'return {RPC_NAMESPACE}::internal::'
                 f'{base}ResponseClientCall::'
-                f'Start<{client_call_type(method, "Raw")}>('
+                f'{start_method}<{client_call_type(method, "Raw")}>('
             )
 
             service_client = RPC_NAMESPACE + '::internal::ServiceClient'

@@ -139,9 +139,11 @@ class CppIdeFeaturesData:
 
     def serialized(self) -> dict[str, Any]:
         return {
-            'current_target': self.current_target.serialized()
-            if self.current_target is not None
-            else None,
+            'current_target': (
+                self.current_target.serialized()
+                if self.current_target is not None
+                else None
+            ),
             'targets': {
                 name: target_data.serialized()
                 for name, target_data in self.targets.items()
@@ -161,11 +163,11 @@ class CppIdeFeaturesData:
     @classmethod
     def deserialize(cls, **data) -> CppIdeFeaturesData:
         return cls(
-            current_target=CppIdeFeaturesTarget.deserialize(
-                **data['current_target']
-            )
-            if data['current_target'] is not None
-            else None,
+            current_target=(
+                CppIdeFeaturesTarget.deserialize(**data['current_target'])
+                if data['current_target'] is not None
+                else None
+            ),
             targets={
                 name: CppIdeFeaturesTarget.deserialize(**target_data)
                 for name, target_data in data['targets'].items()
@@ -222,13 +224,13 @@ class CppIdeFeaturesState:
     @property
     def targets(self) -> dict[str, CppIdeFeaturesTarget]:
         with self._file() as state:
-            exclude_predicate = (
-                lambda x: x not in self.settings.targets_exclude
+            exclude_predicate = lambda x: (
+                x not in self.settings.targets_exclude
                 if len(self.settings.targets_exclude) > 0
                 else lambda x: True
             )
-            include_predicate = (
-                lambda x: x in self.settings.targets_include
+            include_predicate = lambda x: (
+                x in self.settings.targets_include
                 if len(self.settings.targets_include) > 0
                 else lambda x: True
             )

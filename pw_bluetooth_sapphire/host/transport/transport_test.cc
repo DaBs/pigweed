@@ -14,6 +14,8 @@
 
 #include "pw_bluetooth_sapphire/internal/host/transport/transport.h"
 
+#include <pw_result/result.h>
+
 #include "pw_bluetooth_sapphire/internal/host/common/byte_buffer.h"
 #include "pw_bluetooth_sapphire/internal/host/common/inspect.h"
 #include "pw_bluetooth_sapphire/internal/host/hci-spec/protocol.h"
@@ -49,7 +51,7 @@ TEST_F(TransportTest,
   EXPECT_CMD_PACKET_OUT(test_device(), req_reset);
 
   size_t cb_count = 0;
-  CommandChannel::TransactionId id1, id2;
+  pw::Result<CommandChannel::TransactionId> id1, id2;
   auto cb = [&cb_count](CommandChannel::TransactionId /*callback_id*/,
                         const EventPacket& /*event*/) { cb_count++; };
 
@@ -57,12 +59,12 @@ TEST_F(TransportTest,
       hci::CommandPacket::New<pw::bluetooth::emboss::ResetCommandWriter>(
           hci_spec::kReset);
   id1 = cmd_channel()->SendCommand(std::move(packet), cb);
-  ASSERT_NE(0u, id1);
+  ASSERT_TRUE(id1.ok());
 
   packet = hci::CommandPacket::New<pw::bluetooth::emboss::ResetCommandWriter>(
       hci_spec::kReset);
   id2 = cmd_channel()->SendCommand(std::move(packet), cb);
-  ASSERT_NE(0u, id2);
+  ASSERT_TRUE(id2.ok());
 
   // Run the loop until the command timeout task gets scheduled.
   RunUntilIdle();

@@ -18,17 +18,16 @@ package {
 
 cc_library_static {
     name: "pw_result",
-    cpp_std: "c++20",
-    vendor_available: true,
-    host_supported: true,
+    defaults: [
+        "pw_android_common_backends",
+        "pw_android_common_target_support",
+    ],
     export_include_dirs: [
         "public",
     ],
-    defaults: [
-        "pw_android_common_backends",
-    ],
     header_libs: [
         "pw_assert",
+        "pw_containers_headers",
     ],
     static_libs: [
         "pw_preprocessor",

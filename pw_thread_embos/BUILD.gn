@@ -18,7 +18,6 @@ import("$dir_pw_build/error.gni")
 import("$dir_pw_build/module_config.gni")
 import("$dir_pw_build/target_types.gni")
 import("$dir_pw_chrono/backend.gni")
-import("$dir_pw_docgen/docs.gni")
 import("$dir_pw_thread/backend.gni")
 import("$dir_pw_unit_test/test.gni")
 
@@ -43,7 +42,7 @@ pw_source_set("config") {
   public = [ "public/pw_thread_embos/config.h" ]
   public_configs = [ ":public_include_path" ]
   public_deps = [
-    "$dir_pw_third_party/embos",
+    "$pw_external_embos",
     pw_thread_embos_CONFIG,
   ]
 }
@@ -57,7 +56,7 @@ pw_source_set("id") {
   public_deps = [
     "$dir_pw_assert",
     "$dir_pw_interrupt:context",
-    "$dir_pw_third_party/embos",
+    "$pw_external_embos",
   ]
   public = [
     "id_public_overrides/pw_thread_backend/id_inline.h",
@@ -99,9 +98,9 @@ if (pw_chrono_SYSTEM_CLOCK_BACKEND != "" && pw_thread_SLEEP_BACKEND != "") {
       ":check_system_clock_backend",
       "$dir_pw_assert",
       "$dir_pw_chrono_embos:system_clock",
-      "$dir_pw_third_party/embos",
       "$dir_pw_thread:sleep.facade",
       "$dir_pw_thread:thread",
+      "$pw_external_embos",
     ]
   }
 }
@@ -122,9 +121,9 @@ pw_source_set("thread") {
     ":config",
     "$dir_pw_assert",
     "$dir_pw_string",
-    "$dir_pw_third_party/embos",
     "$dir_pw_thread:id",
     "$dir_pw_thread:thread.facade",
+    "$pw_external_embos",
     dir_pw_function,
     dir_pw_span,
   ]
@@ -157,8 +156,8 @@ pw_source_set("yield") {
   ]
   public_deps = [
     "$dir_pw_assert",
-    "$dir_pw_third_party/embos",
     "$dir_pw_thread:thread",
+    "$pw_external_embos",
   ]
   deps = [ "$dir_pw_thread:yield.facade" ]
 }
@@ -166,7 +165,7 @@ pw_source_set("yield") {
 pw_source_set("util") {
   public_configs = [ ":public_include_path" ]
   public_deps = [
-    "$dir_pw_third_party/embos",
+    "$pw_external_embos",
     dir_pw_function,
     dir_pw_status,
   ]
@@ -178,9 +177,9 @@ pw_source_set("snapshot") {
   public_configs = [ ":public_include_path" ]
   public_deps = [
     ":config",
-    "$dir_pw_third_party/embos",
     "$dir_pw_thread:protos.pwpb",
     "$dir_pw_thread:snapshot",
+    "$pw_external_embos",
     dir_pw_bytes,
     dir_pw_function,
     dir_pw_log,
@@ -214,8 +213,4 @@ pw_test("thread_backend_test") {
     ":non_portable_test_thread_options",
     "$dir_pw_thread:thread_facade_test",
   ]
-}
-
-pw_doc_group("docs") {
-  sources = [ "docs.rst" ]
 }

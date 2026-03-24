@@ -19,7 +19,10 @@
 #include "pw_unit_test/framework.h"
 #include "pw_unit_test/simple_printing_event_handler.h"
 
-int main() {
+int main(int argc, char** argv) {
+  // Make the binary compatible with pw_unit_test:googletest. Has no effect
+  // when using pw_unit_test:light.
+  testing::InitGoogleTest(&argc, argv);
   pw::unit_test::SimplePrintingEventHandler handler(
       [](std::string_view s, bool append_newline) {
         if (append_newline) {

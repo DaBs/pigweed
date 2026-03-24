@@ -15,7 +15,6 @@
 import("//build_overrides/pigweed.gni")
 
 import("$dir_pw_build/target_types.gni")
-import("$dir_pw_docgen/docs.gni")
 import("$dir_pw_unit_test/test.gni")
 
 config("linker_script") {
@@ -99,14 +98,6 @@ if (current_os == "mac" || current_os == "win") {
   }
 }
 
-pw_doc_group("docs") {
-  sources = [ "docs.rst" ]
-  inputs = [
-    "add_build_id_to_default_linker_script.ld",
-    "build_id_linker_snippet.ld",
-  ]
-}
-
 pw_test_group("tests") {
   tests = [ ":build_id_test" ]
 }
@@ -120,12 +111,11 @@ pw_test("build_id_test") {
   sources = [ "build_id_test.cc" ]
 }
 
-# git_build_info embedding isn't supported in GN build
-# Reference to satisfy presubmit.
-copy("git_build_info_files") {
+# These are not supported in GN build
+pw_ignore_group("bazel_workspace_required") {
   sources = [
+    "build_origin_test.cc",
     "git_build_info_test.cc",
     "substitute_workspace_status_tool.py",
   ]
-  outputs = [ "$target_gen_dir/{{source_file_part}}" ]
 }

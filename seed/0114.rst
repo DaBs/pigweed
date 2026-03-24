@@ -536,8 +536,8 @@ however.
      [[nodiscard]] WriteToken LastFlushed() const = 0;
 
      // The max_bytes argument is ignored for datagram-oriented channels.
-     virtual MaybeReady<Result<MultiBuf>> DoReadPoll(
-         async::Context& cx, size_t max_bytes) = 0;
+     virtual MaybeReady<Result<MultiBuf>> DoReadPoll(async::Context& cx,
+                                                     size_t max_bytes) = 0;
 
      virtual DoSeek(ptrdiff_t position, Whence whence) = 0;
 

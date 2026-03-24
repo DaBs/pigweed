@@ -95,7 +95,8 @@ TEST_F(HostComponentTest, InitializeFailsWhenCommandTimesOut) {
         }
       },
       [&]() { error_cb_called = true; },
-      /*legacy_pairing_enabled=*/false);
+      /*legacy_pairing_enabled=*/false,
+      /*override_vendor_capabilites_version=*/0);
   EXPECT_EQ(init_result, true);
 
   constexpr zx::duration kCommandTimeout = zx::sec(15);

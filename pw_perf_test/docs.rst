@@ -168,19 +168,7 @@ Run your test
 -------------
 API reference
 -------------
-
-Macros
-======
-
-.. doxygendefine:: PW_PERF_TEST
-
-.. doxygendefine:: PW_PERF_TEST_SIMPLE
-
-EventHandler
-============
-
-.. doxygenclass:: pw::perf_test::EventHandler
-   :members:
+Moved: :cc:`pw_perf_test`
 
 ------
 Design
@@ -256,6 +244,17 @@ This event handler only logs the test results to the console and nothing more.
 It was chosen as the default method due to its portability and to cut down on
 the time it would take to implement other printing log handlers. Make sure to
 set a ``pw_log`` backend.
+
+LogCsvEventHandler
+-------------------
+This event handler logs the results to the console in CSV format.
+
+.. code-block:: text
+
+   INF  test name,total iterations,min,max,mean,unit
+   INF  Detokenize_NoMessage,100,1474,1654,1542,ns
+   INF  Detokenize_NoArgs,100,3192,3528,3347,ns
+   INF  Detokenize_OneArg,100,6185,6999,6435,ns
 
 -------
 Roadmap

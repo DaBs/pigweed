@@ -28,6 +28,7 @@
 #include "pw_bluetooth_sapphire/internal/host/gap/adapter.h"
 #include "pw_bluetooth_sapphire/internal/host/gap/low_energy_advertising_manager.h"
 #include "pw_bluetooth_sapphire/internal/host/gap/low_energy_connection_manager.h"
+#include "pw_bluetooth_sapphire/lease.h"
 
 namespace bthost {
 
@@ -38,6 +39,7 @@ class LowEnergyPeripheralServer
   LowEnergyPeripheralServer(
       bt::gap::Adapter::WeakPtr adapter,
       bt::gatt::GATT::WeakPtr gatt,
+      pw::bluetooth_sapphire::LeaseProvider& wake_lease_provider,
       fidl::InterfaceRequest<fuchsia::bluetooth::le::Peripheral> request,
       bool privileged = false);
   ~LowEnergyPeripheralServer() override;
@@ -148,10 +150,21 @@ class LowEnergyPeripheralServer
       return instance_ ? instance_->id() : bt::gap::kInvalidAdvertisementId;
     }
 
+    bool pending() const { return pending_; }
+    void set_pending(bool value) { pending_ = value; }
+
    private:
+    // The value will be set when an advertisement is active and will not be set
+    // when an advertisement is pending or after it has been stopped (e.g., by a
+    // client dropping their end of the AdvertisingHandle).
     std::optional<bt::gap::AdvertisementInstance> instance_;
+
     fidl::InterfaceRequest<fuchsia::bluetooth::le::AdvertisingHandle> handle_;
     async::Wait handle_closed_wait_;
+
+    // Set when the client has requested the start of an advertisement and the
+    // request is still being processed (it has not yet started).
+    bool pending_ = false;
 
     BT_DISALLOW_COPY_AND_ASSIGN_ALLOW_MOVE(AdvertisementInstanceDeprecated);
   };
@@ -183,14 +196,23 @@ class LowEnergyPeripheralServer
     advertisements_.erase(id);
   }
 
+  pw::bluetooth_sapphire::LeaseProvider& wake_lease_provider_;
+
   // Represents the current advertising instance:
   // - Contains no value if advertising was never requested.
   // - Contains a value while advertising is being (re)enabled and during
   // advertising.
   // - May correspond to an invalidated advertising instance if advertising is
-  // stopped by closing
-  //   the AdvertisingHandle.
+  // stopped by closing the AdvertisingHandle.
   std::optional<AdvertisementInstanceDeprecated> advertisement_deprecated_;
+
+  // Stores a queued StartAdvertising() request while waiting for the current
+  // advertising request to complete.
+  std::optional<std::tuple<
+      fuchsia::bluetooth::le::AdvertisingParameters,
+      ::fidl::InterfaceRequest<fuchsia::bluetooth::le::AdvertisingHandle>,
+      StartAdvertisingCallback>>
+      queued_start_advertising_;
 
   // Map of all active advertisement instances associated with a call to
   // `Advertise`. bt::gap::AdvertisementId cannot be used as a map key because
@@ -230,6 +252,7 @@ class LowEnergyPrivilegedPeripheralServer
   LowEnergyPrivilegedPeripheralServer(
       const bt::gap::Adapter::WeakPtr& adapter,
       bt::gatt::GATT::WeakPtr gatt,
+      pw::bluetooth_sapphire::LeaseProvider& wake_lease_provider,
       fidl::InterfaceRequest<fuchsia::bluetooth::le::PrivilegedPeripheral>
           request);
 

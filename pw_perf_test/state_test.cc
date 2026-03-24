@@ -26,16 +26,19 @@ class EmptyEventHandler : public EventHandler {
   void RunAllTestsEnd() override {}
   void TestCaseStart(const TestCase&) override {}
   void TestCaseIteration(const TestIteration&) override {}
-  void TestCaseMeasure(const TestMeasurement&) override {}
-  void TestCaseEnd(const TestCase&) override {}
+  void TestCaseEnd(const TestCase&, const TestMeasurement&) override {}
 };
 
 EmptyEventHandler handler;
 
 void TestFunction() {
-  for (volatile int i = 0; i < 100000; i = i + 1) {
+  volatile int i = 0;
+  while (i < 10) {
+    i = i + 1;
   }
 }
+
+constexpr int kWarmUpIterations = 1;
 
 TEST(StateTest, KeepRunningTest) {
   constexpr int test_iterations = 10;
@@ -45,7 +48,7 @@ TEST(StateTest, KeepRunningTest) {
     ++total_iterations;
     TestFunction();
   }
-  EXPECT_EQ(total_iterations, test_iterations);
+  EXPECT_EQ(total_iterations, kWarmUpIterations + test_iterations);
 }
 
 TEST(StateTest, SingleTest) {
@@ -56,7 +59,7 @@ TEST(StateTest, SingleTest) {
     ++total_iterations;
     TestFunction();
   }
-  EXPECT_EQ(total_iterations, test_iterations);
+  EXPECT_EQ(total_iterations, kWarmUpIterations + test_iterations);
 }
 
 }  // namespace

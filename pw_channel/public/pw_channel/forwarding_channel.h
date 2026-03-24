@@ -21,7 +21,7 @@
 #include "pw_async2/poll.h"
 #include "pw_channel/channel.h"
 #include "pw_multibuf/allocator.h"
-#include "pw_multibuf/allocator_async.h"
+#include "pw_multibuf/v1/allocator_async.h"
 #include "pw_sync/lock_annotations.h"
 #include "pw_sync/mutex.h"
 
@@ -35,7 +35,9 @@ class ForwardingChannel;
 
 }  // namespace internal
 
-/// @defgroup pw_channel_forwarding
+/// @module{pw_channel}
+
+/// @defgroup pw_channel_forwarding Forwarding
 /// @{
 
 /// Forwards either datagrams or bytes between two channels. Writes to the first
@@ -115,12 +117,12 @@ class ForwardingChannel<DataType::kDatagram>
                               multibuf::MultiBufAllocator& write_alloc)
       : pair_(pair), sibling_(*sibling), write_alloc_future_(write_alloc) {}
 
-  async2::Poll<Result<multibuf::MultiBuf>> DoPendRead(
+  async2::PollResult<multibuf::MultiBuf> DoPendRead(
       async2::Context& cx) override;
 
   async2::Poll<Status> DoPendReadyToWrite(async2::Context& cx) override;
 
-  async2::Poll<std::optional<multibuf::MultiBuf>> DoPendAllocateWriteBuffer(
+  async2::PollOptional<multibuf::MultiBuf> DoPendAllocateWriteBuffer(
       async2::Context& cx, size_t min_bytes) override {
     write_alloc_future_.SetDesiredSize(min_bytes);
     return write_alloc_future_.Pend(cx);
@@ -142,7 +144,7 @@ class ForwardingChannel<DataType::kDatagram>
   // Could use a queue here.
   std::optional<multibuf::MultiBuf> read_queue_ PW_GUARDED_BY(pair_.mutex_);
   async2::Waker waker_ PW_GUARDED_BY(pair_.mutex_);
-  multibuf::MultiBufAllocationFuture write_alloc_future_;
+  multibuf::v1::MultiBufAllocationFuture write_alloc_future_;
 };
 
 template <>
@@ -163,14 +165,14 @@ class ForwardingChannel<DataType::kByte>
                               multibuf::MultiBufAllocator& write_alloc)
       : pair_(pair), sibling_(*sibling), write_alloc_future_(write_alloc) {}
 
-  async2::Poll<Result<multibuf::MultiBuf>> DoPendRead(
+  async2::PollResult<multibuf::MultiBuf> DoPendRead(
       async2::Context& cx) override;
 
   async2::Poll<Status> DoPendReadyToWrite(async2::Context&) override {
     return async2::Ready(OkStatus());
   }
 
-  async2::Poll<std::optional<multibuf::MultiBuf>> DoPendAllocateWriteBuffer(
+  async2::PollOptional<multibuf::MultiBuf> DoPendAllocateWriteBuffer(
       async2::Context& cx, size_t min_bytes) override {
     write_alloc_future_.SetDesiredSize(min_bytes);
     return write_alloc_future_.Pend(cx);
@@ -189,7 +191,7 @@ class ForwardingChannel<DataType::kByte>
 
   multibuf::MultiBuf read_queue_ PW_GUARDED_BY(pair_.mutex_);
   async2::Waker read_waker_ PW_GUARDED_BY(pair_.mutex_);
-  multibuf::MultiBufAllocationFuture write_alloc_future_;
+  multibuf::v1::MultiBufAllocationFuture write_alloc_future_;
 };
 
 }  // namespace internal

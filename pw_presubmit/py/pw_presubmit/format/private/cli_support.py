@@ -15,24 +15,29 @@
 
 import argparse
 import collections
+from concurrent.futures import ThreadPoolExecutor, Future
+import json
 import logging
 from pathlib import Path
+import re
 import sys
 import textwrap
 from typing import (
     Collection,
     Dict,
     Iterable,
+    Iterator,
     List,
     Mapping,
     Sequence,
     TextIO,
 )
 
-from pw_cli import color
+from pw_cli import argument_types, color
 from pw_cli.collect_files import add_file_collection_arguments
 from pw_cli.diff import colorize_diff
 from pw_cli.plural import plural
+from pw_config_loader import find_config
 from pw_presubmit.format.core import (
     FileFormatter,
     FormatFixStatus,
@@ -57,11 +62,35 @@ def findings_to_formatted_diffs(
     ]
 
 
+def filter_exclusions(file_paths: Iterable[Path]) -> Iterator[Path]:
+    """Filters paths if they match an exclusion pattern in a pigweed.json."""
+    # TODO: b/399204950 - Dedupe this with the FormatOptions class.
+    paths_by_config = find_config.paths_by_nearest_config(
+        "pigweed.json",
+        file_paths,
+    )
+    for config, paths in paths_by_config.items():
+        if config is None:
+            yield from paths
+            continue
+        config_obj = json.loads(config.read_text())
+        fmt = config_obj.get('pw', {}).get('pw_presubmit', {}).get('format', {})
+        exclude = tuple(re.compile(x) for x in fmt.get('exclude', ()))
+        relpaths = [(x.resolve().relative_to(config.parent), x) for x in paths]
+        for relative_path, original_path in relpaths:
+            # Yield the original path if none of the exclusion patterns match.
+            if not [
+                filt for filt in exclude if filt.search(str(relative_path))
+            ]:
+                yield original_path
+
+
 def summarize_findings(
     findings: Sequence[FormattedDiff],
     log_fix_command: bool,
     log_oneliner_summary: bool,
     file: TextIO = sys.stdout,
+    formatter_fix_command: str = 'pw format --fix',
 ) -> None:
     """Prints a summary of a format check's findings."""
     if not findings:
@@ -98,8 +127,6 @@ def summarize_findings(
         file.write(diff)
 
     if log_fix_command:
-        # TODO: https://pwbug.dev/326309165 - Add a Bazel-specific command.
-        format_command = "pw format --fix"
 
         def path_relative_to_cwd(path: Path):
             try:
@@ -108,19 +135,46 @@ def summarize_findings(
                 return Path(path).resolve()
 
         paths = " ".join([str(path_relative_to_cwd(p)) for p in paths_to_fix])
-        message = f'  {format_command} {paths}'
+        message = f'  {formatter_fix_command} {paths}'
         _LOG.warning('To fix formatting, run:\n\n%s\n', message)
 
 
-def add_arguments(parser: argparse.ArgumentParser) -> None:
+def add_arguments(
+    parser: argparse.ArgumentParser, *, default_to_fix: bool
+) -> None:
     """Adds formatting CLI arguments to an argument parser."""
     add_file_collection_arguments(parser)
-    parser.add_argument(
+    fix_mode = parser.add_mutually_exclusive_group()
+    fix_mode.add_argument(
         '--check',
         action='store_false',
         dest='apply_fixes',
-        help='Only display findings, do not apply formatting fixes.',
+        help='{}Only display findings, do not apply formatting fixes.'.format(
+            '(Default) ' if not default_to_fix else ''
+        ),
     )
+    fix_mode.add_argument(
+        '--fix',
+        action='store_true',
+        dest='apply_fixes',
+        help='{}Apply formatting fixes in place.'.format(
+            '(Default) ' if default_to_fix else ''
+        ),
+    )
+    parser.add_argument(
+        '-j',
+        '--jobs',
+        type=int,
+        help='Number of parallel jobs to use. Defaults to the number of CPUs.',
+    )
+    parser.add_argument(
+        '-C',
+        '--directory',
+        type=argument_types.directory,
+        default=None,
+        help=argparse.SUPPRESS,
+    )
+    parser.set_defaults(apply_fixes=default_to_fix)
 
 
 def relativize_paths(
@@ -135,15 +189,36 @@ def relativize_paths(
 
 
 def check(
-    files_by_formatter: Mapping[FileFormatter, Iterable[Path]]
+    files_by_formatter: Mapping[FileFormatter, Iterable[Path]],
+    jobs: int | None = None,
 ) -> Mapping[FileFormatter, Sequence[FormattedDiff]]:
     """Returns expected diffs for files with incorrect formatting."""
-    findings_by_formatter = {}
-    for code_formatter, files in files_by_formatter.items():
-        _LOG.debug('Checking %s', ', '.join(str(f) for f in files))
-        diffs = list(code_formatter.get_formatting_diffs(files))
-        if diffs:
-            findings_by_formatter[code_formatter] = diffs
+    findings_by_formatter: Dict[FileFormatter, List[FormattedDiff]] = {}
+
+    def check_file(
+        code_formatter: FileFormatter, file_path: Path
+    ) -> FormattedDiff | None:
+        return code_formatter.get_formatting_diff(file_path)
+
+    with ThreadPoolExecutor(max_workers=jobs) as exe:
+        futures: Dict[
+            Future[FormattedDiff | None],
+            FileFormatter,
+        ] = {}
+
+        for code_formatter, files in files_by_formatter.items():
+            _LOG.debug('Checking %s', ', '.join(str(f) for f in files))
+            for file_path in files:
+                future = exe.submit(check_file, code_formatter, file_path)
+                futures[future] = code_formatter
+
+        for future, code_formatter in futures.items():
+            diff = future.result()
+            if diff:
+                if code_formatter not in findings_by_formatter:
+                    findings_by_formatter[code_formatter] = []
+                findings_by_formatter[code_formatter].append(diff)
+
     return findings_by_formatter
 
 

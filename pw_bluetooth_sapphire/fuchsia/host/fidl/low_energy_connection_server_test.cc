@@ -16,6 +16,7 @@
 
 #include <pw_assert/check.h>
 
+#include "pw_bluetooth_sapphire/fake_lease_provider.h"
 #include "pw_bluetooth_sapphire/fuchsia/host/fidl/adapter_test_fixture.h"
 #include "pw_bluetooth_sapphire/internal/host/hci-spec/protocol.h"
 #include "pw_bluetooth_sapphire/internal/host/l2cap/l2cap_defs.h"
@@ -38,6 +39,15 @@ class LowEnergyConnectionServerTest
  public:
   LowEnergyConnectionServerTest() = default;
   ~LowEnergyConnectionServerTest() override = default;
+
+  void SetUp() override {
+    bt::testing::FakeController::Settings settings;
+    settings.ApplyDualModeDefaults();
+    settings.le_features |=
+        static_cast<uint64_t>(bt::hci_spec::LESupportedFeature::
+                                  kConnectedIsochronousStreamPeripheral);
+    bthost::testing::AdapterTestFixture::SetUp(settings);
+  }
 
   fble::Connection* client() { return client_.get(); }
 
@@ -96,6 +106,7 @@ class LowEnergyConnectionServerTest
     server_ = std::make_unique<LowEnergyConnectionServer>(
         adapter()->AsWeakPtr(),
         gatt()->GetWeakPtr(),
+        lease_provider_,
         std::move(connection),
         handle.NewRequest().TakeChannel(),
         /*closed_cb=*/[this] {
@@ -106,6 +117,7 @@ class LowEnergyConnectionServerTest
   }
 
  private:
+  pw::bluetooth_sapphire::testing::FakeLeaseProvider lease_provider_;
   std::unique_ptr<LowEnergyConnectionServer> server_;
   fble::ConnectionPtr client_;
   bool server_closed_cb_called_ = false;

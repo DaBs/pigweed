@@ -27,6 +27,8 @@
 
 #include <stdint.h>
 
+#include "pw_preprocessor/compiler.h"
+
 #define _PW_TOKENIZER_ENTRY_MAGIC 0xBAA98DEE
 
 // DOCSTAG: [pw_tokenizer-elf-entry]
@@ -51,7 +53,6 @@ typedef struct {
 #ifdef __cplusplus
 
 #include "pw_containers/to_array.h"
-#include "pw_preprocessor/compiler.h"
 
 namespace pw::tokenizer::internal {
 
@@ -60,7 +61,7 @@ static_assert(sizeof(_pw_tokenizer_EntryHeader) == 4 * sizeof(uint32_t));
 constexpr bool ValidDomainChar(char ch) {
   return ('A' <= ch && ch <= 'Z') || ('a' <= ch && ch <= 'z') ||
          ('0' <= ch && ch <= '9') || ch == '_' || ch == ':' || ch == ' ' ||
-         ch == '\t' || ch == '\n';
+         ('\t' <= ch && ch <= '\r');
 }
 
 template <size_t kSize>

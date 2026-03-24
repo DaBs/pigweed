@@ -36,7 +36,7 @@ using pw::bluetooth::emboss::MakeLEExtendedAdvertisingReportDataView;
 
 ExtendedLowEnergyScanner::ExtendedLowEnergyScanner(
     LocalAddressDelegate* local_addr_delegate,
-    const PacketFilterConfig& packet_filter_config,
+    const AdvertisingPacketFilter::Config& packet_filter_config,
     Transport::WeakPtr transport,
     pw::async::Dispatcher& pw_dispatcher)
     : LowEnergyScanner(local_addr_delegate,
@@ -67,12 +67,11 @@ bool ExtendedLowEnergyScanner::StartScan(const ScanOptions& options,
   PW_CHECK(options.interval <= hci_spec::kLEExtendedScanIntervalMax);
   PW_CHECK(options.window >= hci_spec::kLEExtendedScanIntervalMin);
   PW_CHECK(options.window <= hci_spec::kLEExtendedScanIntervalMax);
-
   return LowEnergyScanner::StartScan(options, std::move(callback));
 }
 
 CommandPacket ExtendedLowEnergyScanner::BuildSetScanParametersPacket(
-    const DeviceAddress& local_address, const ScanOptions& options) {
+    const DeviceAddress& local_address, const ScanOptions& options) const {
   // LESetExtendedScanParametersCommand contains a variable amount of data,
   // depending on how many bits are set within the scanning_phys parameter. As
   // such, we must first calculate the size of the variable data before
@@ -113,7 +112,7 @@ CommandPacket ExtendedLowEnergyScanner::BuildSetScanParametersPacket(
 }
 
 CommandPacket ExtendedLowEnergyScanner::BuildEnablePacket(
-    const ScanOptions& options, GenericEnableParam enable) {
+    const ScanOptions& options, GenericEnableParam enable) const {
   auto packet = CommandPacket::New<LESetExtendedScanEnableCommandWriter>(
       hci_spec::kLESetExtendedScanEnable);
   auto params = packet.view_t();
@@ -248,6 +247,8 @@ void ExtendedLowEnergyScanner::OnExtendedAdvertisingReportEvent(
     result.set_rssi(rssi);
     result.set_tx_power(report.tx_power().Read());
     result.set_advertising_sid(report.advertising_sid().Read());
+    result.set_periodic_advertising_interval(
+        report.periodic_advertising_interval().Read());
 
     // If the next set of data exceeds the maximum allowed in an extended
     // advertising data payload, take as much as we can and report it back.
@@ -267,7 +268,7 @@ void ExtendedLowEnergyScanner::OnExtendedAdvertisingReportEvent(
           BufferView(report.data().BackingStorage().begin(), bytes_allowed);
       result.AppendData(truncated_data);
 
-      delegate()->OnPeerFound(result);
+      NotifyPeerFound(result);
       continue;
     }
 
@@ -294,12 +295,12 @@ void ExtendedLowEnergyScanner::OnExtendedAdvertisingReportEvent(
     }
 
     if (is_directed) {
-      delegate()->OnDirectedAdvertisement(result);
+      NotifyDirectedAdvertisement(result);
       continue;
     }
 
     if (IsActiveScanning() && is_scan_response) {
-      delegate()->OnPeerFound(result);
+      NotifyPeerFound(result);
       continue;
     }
 
@@ -311,7 +312,7 @@ void ExtendedLowEnergyScanner::OnExtendedAdvertisingReportEvent(
       continue;
     }
 
-    delegate()->OnPeerFound(result);
+    NotifyPeerFound(result);
   }
 }
 

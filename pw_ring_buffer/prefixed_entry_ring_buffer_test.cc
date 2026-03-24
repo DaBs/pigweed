@@ -29,8 +29,10 @@ using std::byte;
 namespace pw {
 namespace ring_buffer {
 namespace {
-using Entry = PrefixedEntryRingBufferMulti::Entry;
+using Entry = PrefixedEntryRingBufferMulti::Entry<false>;
 using iterator = PrefixedEntryRingBufferMulti::iterator;
+using ConstEntry = PrefixedEntryRingBufferMulti::Entry<true>;
+using const_iterator = PrefixedEntryRingBufferMulti::const_iterator;
 
 TEST(PrefixedEntryRingBuffer, NoBuffer) {
   PrefixedEntryRingBuffer ring(false);
@@ -543,6 +545,135 @@ TEST(PrefixedEntryRingBuffer, Iterator) {
   EXPECT_EQ(validated_entries, entry_count);
 }
 
+TEST(PrefixedEntryRingBuffer, PopBack) {
+  PrefixedEntryRingBuffer ring;
+  byte test_buffer[kTestBufferSize];
+  EXPECT_EQ(ring.SetBuffer(test_buffer), OkStatus());
+
+  // Fill up the ring buffer with a constant value.
+  size_t entry_count = 0;
+  while (TryPushBack<size_t>(ring, entry_count).ok()) {
+    entry_count++;
+  }
+
+  EXPECT_EQ(ring.EntryCount(), entry_count);
+
+  // Delete 1/2 the entries
+  size_t delete_count = entry_count - (entry_count / 2);
+  auto status = ring.PopBack(delete_count);
+  EXPECT_TRUE(status.ok());
+
+  EXPECT_EQ(ring.EntryCount(), entry_count / 2);
+
+  // Iterate over all entries and confirm entry count.
+  size_t validated_entries = 0;
+  for (Result<const Entry> entry_info : ring) {
+    EXPECT_TRUE(entry_info.status().ok());
+    EXPECT_EQ(GetEntry<size_t>(entry_info.value().buffer), validated_entries);
+    validated_entries++;
+  }
+  EXPECT_EQ(validated_entries, entry_count / 2);
+
+  // Delete more entries than exist
+  status = ring.PopBack(entry_count);
+  EXPECT_EQ(status, pw::Status::OutOfRange());
+  EXPECT_EQ(validated_entries, entry_count / 2);
+}
+
+TEST(PrefixedEntryRingBuffer, IteratorTypes) {
+  PrefixedEntryRingBuffer ring;
+  byte test_buffer[kTestBufferSize];
+  EXPECT_EQ(ring.SetBuffer(test_buffer), OkStatus());
+
+  auto begin = ring.begin();
+  auto cbegin = ring.cbegin();
+  auto end = ring.end();
+  auto cend = ring.cend();
+  static_assert(std::is_same_v<decltype(begin->buffer), pw::span<std::byte>>,
+                "begin() should return a mutable Entry");
+  static_assert(
+      std::is_same_v<decltype(cbegin->buffer), pw::span<const std::byte>>,
+      "cbegin() should return a const Entry");
+  static_assert(std::is_same_v<decltype(end->buffer), pw::span<std::byte>>,
+                "end() should return a mutable Entry");
+  static_assert(
+      std::is_same_v<decltype(cend->buffer), pw::span<const std::byte>>,
+      "cend() should return a const Entry");
+}
+
+TEST(PrefixedEntryRingBuffer, IteratorConversion) {
+  static_assert(
+      std::is_constructible_v<iterator, const iterator&>,
+      "Should be able to convert mutable iterator to another mutable iterator");
+  static_assert(
+      !std::is_constructible_v<iterator, const const_iterator&>,
+      "Should not be able to convert const iterator to a mutable iterator");
+  static_assert(
+      std::is_constructible_v<const_iterator, const iterator&>,
+      "Should be able to convert mutable iterator to a const iterator");
+  static_assert(
+      std::is_constructible_v<const_iterator, const const_iterator&>,
+      "Should be able to convert const iterator to another const iterator");
+
+  PrefixedEntryRingBuffer ring;
+  byte test_buffer[kTestBufferSize];
+  EXPECT_EQ(ring.SetBuffer(test_buffer), OkStatus());
+  {
+    // Copy a mutable iterator
+    iterator it = ring.begin();
+    iterator copy(it);
+    const_iterator const_copy(it);
+
+    EXPECT_EQ(it, copy);
+    EXPECT_EQ(it, const_copy);
+  }
+  {
+    // Copy a const iterator
+    const_iterator it = ring.cbegin();
+    const_iterator const_copy(it);
+
+    EXPECT_EQ(it, const_copy);
+  }
+}
+
+TEST(PrefixedEntryRingBuffer, IteratorComparison) {
+  PrefixedEntryRingBuffer ring1;
+  PrefixedEntryRingBuffer ring2;
+  byte test_buffer1[kTestBufferSize];
+  byte test_buffer2[kTestBufferSize];
+  EXPECT_EQ(ring1.SetBuffer(test_buffer1), OkStatus());
+  EXPECT_EQ(ring2.SetBuffer(test_buffer2), OkStatus());
+
+  // Fill up the ring buffer with a constant value.
+  size_t entry_count1 = 0;
+  while (TryPushBack<size_t>(ring1, entry_count1).ok()) {
+    entry_count1++;
+  }
+
+  size_t entry_count2 = 0;
+  while (TryPushBack<size_t>(ring2, entry_count2).ok()) {
+    entry_count2++;
+  }
+
+  EXPECT_EQ(entry_count1, entry_count2);
+
+  // Iterators are considered the same regardless of constantness
+  EXPECT_EQ(ring1.begin(), ring1.begin());
+  EXPECT_EQ(ring1.begin(), ring1.cbegin());
+  EXPECT_EQ(ring1.cbegin(), ring1.begin());
+
+  // Iterators to different buffers are not the same, even if they're in the
+  // same position.
+  EXPECT_NE(ring1.begin(), ring2.begin());
+
+  // End iterators are always the same regardless of constantness or the buffer
+  // they come from.
+  EXPECT_EQ(ring1.end(), ring2.end());
+  EXPECT_EQ(ring1.end(), ring1.end());
+  EXPECT_EQ(ring1.end(), ring1.cend());
+  EXPECT_EQ(ring1.cend(), ring1.end());
+}
+
 TEST(PrefixedEntryRingBuffer, IteratorDecrement) {
   PrefixedEntryRingBuffer ring;
   byte test_buffer[kTestBufferSize];
@@ -683,6 +814,62 @@ TEST(PrefixedEntryRingBufferMulti, TryPushBack) {
   EXPECT_EQ(fast_reader.PopFront(), Status::OutOfRange());
   EXPECT_EQ(fast_reader.EntriesSize(), 0u);
   EXPECT_EQ(ring.TotalUsedBytes(), 0u);
+}
+
+TEST(PrefixedEntryRingBufferMulti, PopBackMultiReader) {
+  PrefixedEntryRingBufferMulti ring;
+  byte test_buffer[kTestBufferSize];
+  EXPECT_EQ(ring.SetBuffer(test_buffer), OkStatus());
+
+  PrefixedEntryRingBufferMulti::Reader fast_reader;
+  PrefixedEntryRingBufferMulti::Reader slow_reader;
+
+  EXPECT_EQ(ring.AttachReader(fast_reader), OkStatus());
+  EXPECT_EQ(ring.AttachReader(slow_reader), OkStatus());
+
+  // Fill up the ring buffer with an increasing count.
+  size_t total_items = 0;
+  while (true) {
+    Status status = TryPushBack<int>(ring, total_items);
+    if (status.ok()) {
+      total_items++;
+    } else {
+      EXPECT_EQ(status, Status::ResourceExhausted());
+      break;
+    }
+  }
+
+  EXPECT_EQ(fast_reader.EntriesSize(), ring.TotalUsedBytes());
+  EXPECT_EQ(slow_reader.EntriesSize(), ring.TotalUsedBytes());
+
+  // Run fast reader twice as fast as the slow reader.
+  // Fast reader should read 1/2 the entries, slow reader will read 1/4
+  size_t total_used_bytes = ring.TotalUsedBytes();
+  for (size_t i = 0; i < total_items / 2; ++i) {
+    EXPECT_EQ(PeekFront<int>(fast_reader), static_cast<int>(i));
+    EXPECT_EQ(fast_reader.PopFront(), OkStatus());
+    EXPECT_EQ(ring.TotalUsedBytes(), total_used_bytes);
+    if (i % 2 == 0) {
+      EXPECT_EQ(PeekFront<int>(slow_reader), static_cast<int>(i / 2));
+      EXPECT_EQ(slow_reader.PopFront(), OkStatus());
+      EXPECT_TRUE(ring.TotalUsedBytes() < total_used_bytes);
+    }
+    total_used_bytes = ring.TotalUsedBytes();
+  }
+  EXPECT_EQ(fast_reader.EntryCount(), total_items - (total_items / 2));
+  EXPECT_EQ(slow_reader.EntryCount(), total_items - (total_items / 4));
+  EXPECT_EQ(slow_reader.EntriesSize(), ring.TotalUsedBytes());
+  EXPECT_TRUE(ring.TotalUsedBytes() > 0u);
+
+  // Delete remaining entries in fast_reader
+  EXPECT_EQ(ring.PopBack(fast_reader.EntryCount()), pw::OkStatus());
+  EXPECT_EQ(fast_reader.EntryCount(), size_t(0));
+  EXPECT_EQ(slow_reader.EntryCount(), total_items / 4);
+
+  // Try to delete remaining entries in slow_reader
+  EXPECT_EQ(ring.PopBack(total_items / 4), pw::Status::OutOfRange());
+  EXPECT_EQ(fast_reader.EntryCount(), size_t(0));
+  EXPECT_EQ(slow_reader.EntryCount(), total_items / 4);
 }
 
 TEST(PrefixedEntryRingBufferMulti, PushBack) {

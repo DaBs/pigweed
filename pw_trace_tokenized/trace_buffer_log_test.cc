@@ -17,6 +17,7 @@
 #include "pw_trace_tokenized/trace_buffer_log.h"
 
 #include "pw_trace/trace.h"
+#include "pw_trace_tokenized/trace_tokenized.h"
 #include "pw_unit_test/framework.h"
 
 namespace pw::trace {

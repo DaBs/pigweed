@@ -27,8 +27,9 @@ config("public_include_path") {
 pw_source_set("fit") {
   public_configs = [ ":public_include_path" ]
   public_deps = [
-    "$dir_pw_third_party/fuchsia:stdcompat",
+    "$pw_external_fuchsia:stdcompat",
     dir_pw_assert,
+    dir_pw_preprocessor,
   ]
   public = [
     "include/lib/fit/function.h",

@@ -7,16 +7,15 @@ pw_stream_uart_linux
    :name: pw_stream_uart_linux
 
 ``pw_stream_uart_linux`` implements the
-:cpp:class:`pw::stream::NonSeekableReaderWriter` interface for reading from and
+:cc:`pw::stream::NonSeekableReaderWriter` interface for reading from and
 writing to a UART using Linux TTY interfaces.
 
 .. note::
   This module will likely be superseded by a future ``pw_uart`` interface.
 
-C++
-===
-.. doxygenclass:: pw::stream::UartStreamLinux
-   :members:
+C++ API
+=======
+Moved: :cc:`pw_stream_uart_linux`
 
 Examples
 ========
@@ -26,8 +25,8 @@ A simple example illustrating only changing baud-rate and writing to a UART:
 
    constexpr const char* kUartPath = "/dev/ttyS0";
    constexpr pw::stream::UartStreamLinux::Config kConfig = {
-     .baud_rate = 115200,
-    // Flow control is unmodified on tty.
+       .baud_rate = 115200,
+       // Flow control is unmodified on tty.
    };
    pw::stream::UartStreamLinux stream;
    PW_TRY(stream.Open(kUartPath, kConfig));
@@ -35,15 +34,14 @@ A simple example illustrating only changing baud-rate and writing to a UART:
    std::array<std::byte, 10> to_write = {};
    PW_TRY(stream.Write(to_write));
 
-
 A simple example illustrating enabling flow control and writing to a UART:
 
 .. code-block:: cpp
 
    constexpr const char* kUartPath = "/dev/ttyS0";
    constexpr pw::stream::UartStreamLinux::Config kConfig = {
-     .baud_rate = 115200,
-     .flow_control = true, // Enable hardware flow control.
+       .baud_rate = 115200,
+       .flow_control = true,  // Enable hardware flow control.
    };
    pw::stream::UartStreamLinux stream;
    PW_TRY(stream.Open(kUartPath, kConfig));

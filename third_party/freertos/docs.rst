@@ -3,9 +3,8 @@
 ========
 FreeRTOS
 ========
-
-The ``$dir_pw_third_party/freertos/`` module contains various helpers to use
-FreeRTOS, including Pigweed backend modules which depend on FreeRTOS.
+The ``//third_party/freertos`` directory in Pigweed contains build system
+integration helpers for FreeRTOS.
 
 -------------
 Build Support
@@ -16,7 +15,7 @@ This is required when compiling backends modules for FreeRTOS.
 GN
 ==
 In order to use this you are expected to configure the following variables from
-``$dir_pw_third_party/freertos:freertos.gni``:
+``$pw_external_freertos:freertos.gni``:
 
 #. Set the GN ``dir_pw_third_party_freertos`` to the path of the FreeRTOS
    installation.
@@ -26,12 +25,17 @@ In order to use this you are expected to configure the following variables from
    the FreeRTOS port specific includes and sources.
 
 After this is done a ``pw_source_set`` for the FreeRTOS library is created at
-``$dir_pw_third_party/freertos``.
+``$pw_external_freertos``.
 
 CMake
 =====
-In order to use this you are expected to set the following variables from
-``third_party/freertos/CMakeLists.txt``:
+In CMake, projects can choose between Pigweed's FreeRTOS CMake library or an
+externally defined library.
+
+Using Pigweed's CMake library
+-----------------------------
+In order to use Pigweed's CMake library for FreeRTOS, set the following
+variables from ``third_party/freertos/backend.cmake``:
 
 #. Set ``dir_pw_third_party_freertos`` to the path of the FreeRTOS installation.
 #. Set ``pw_third_party_freertos_CONFIG`` to a library target which provides
@@ -39,22 +43,33 @@ In order to use this you are expected to set the following variables from
 #. Set ``pw_third_party_freertos_PORT`` to a library target which provides
    the FreeRTOS port specific includes and sources.
 
+Using an external FreeRTOS CMake library
+----------------------------------------
+If your project already has a CMake library for FreeRTOS, set
+``pw_third_party.freertos_BACKEND`` to that target. This can be done with
+``pw_set_backend``:
+
+.. code-block:: cmake
+
+   pw_set_backend(pw_third_party.freertos <target>)
+
 Bazel
 =====
-Pigweed provides its own BUILD.bazel file for FreeRTOS, at
-``third_party/freertos/freertos.BUILD.bazel``. You can use it directly in
-your ``WORKSPACE``, like so:
+Rather than providing FreeRTOS build files in-tree, the source of truth for
+FreeRTOS in the Bazel ecosystem is `the BCR
+<https://github.com/bazelbuild/bazel-central-registry/tree/main/modules/freertos>`__
 
-.. code-block:: python
+This means that making changes to the BUILD files requires introductions of new
+parallel releases. For example, ``10.5.1.bcr.3`` introduces the third iteration
+of ``BUILD.bazel`` changes to the ``10.5.1`` release of FreeRTOS. Usually,
+getting these changes through is relatively easy so long as they retain
+backwards compatibility.
 
-   http_archive(
-      name = "freertos",
-      build_file = "@pigweed//third_party/freertos:freertos.BUILD.bazel",
-      sha256 = "89af32b7568c504624f712c21fe97f7311c55fccb7ae6163cda7adde1cde7f62",
-      strip_prefix = "FreeRTOS-Kernel-10.5.1",
-      urls = ["https://github.com/FreeRTOS/FreeRTOS-Kernel/archive/refs/tags/V10.5.1.tar.gz"],
-   )
+`b/390721639 <https://pwbug.dev/390721639>`_ tracks improving this to be more
+scalable.
 
+Configuration
+-------------
 The FreeRTOS build is configured through `constraint_settings
 <https://bazel.build/reference/be/platforms-and-toolchains#constraint_setting>`_.
 The `platform <https://bazel.build/extending/platforms>`_ you are building for
@@ -62,7 +77,7 @@ must specify values for the following settings:
 
 *   ``@freertos//:port``, to set which FreeRTOS port to use. You can
     select a value from those defined in
-    ``third_party/freertos/freertos.BUILD.bazel`` (for example,
+    ``@freertos//:BUILD.bazel`` (for example,
     ``@freertos//:port_ARM_CM4F``).
 *   ``@freertos//:malloc``, to set which FreeRTOS malloc implementation to use.
     You can select a value from those defined in
@@ -75,7 +90,7 @@ must specify values for the following settings:
     and ``@freertos//:no_disable_task_statics``.
 
 In addition, you need to set the ``@freertos//:freertos_config`` label flag to
-point to the library target providing the FreeRTOS config header.  See
+point to the library target providing the FreeRTOS config header. See
 :ref:`docs-build_system-bazel_configuration` for a discussion of how to work
 with our label flags.
 
@@ -96,7 +111,7 @@ To facilitate this, Pigweed offers an opt-in option which can be enabled,
 *  in Bazel through ``@freertos//:disable_task_statics``.
 
 This redefines ``static`` to nothing for the ``Source/tasks.c`` FreeRTOS source
-file when building through ``$dir_pw_third_party/freertos`` in GN and through
+file when building through ``$pw_external_freertos`` in GN and through
 ``pw_third_party.freertos`` in CMake.
 
 .. attention:: If you use this, make sure that your FreeRTOSConfig.h and port
@@ -157,4 +172,22 @@ is provided under ``pw_third_party/freertos/config_assert.h`` which defines
 ---------------------------------------------
 FreeRTOS application function implementations
 ---------------------------------------------
-.. doxygengroup:: FreeRTOS_application_functions
+FreeRTOS requires the application to implement certain functions, depending on
+its configuration.
+
+If static allocation (``configSUPPORT_STATIC_ALLOCATION``) is enabled and
+``configKERNEL_PROVIDED_STATIC_MEMORY`` is disabled, FreeRTOS requires
+applications to implement functions that provide static memory for the idle task
+and timer task. See `Customization`_ for details.
+
+Link against ``//third_party/freertos:support`` to include these function
+implementations. The :ref:`pw_thread backend for FreeRTOS
+<module-pw_thread_freertos>` may include this library so downstream users do not
+have to.
+
+-------------
+API reference
+-------------
+Moved: :cc:`FreeRTOS application functions <third_party_freertos>`
+
+.. _Customization: https://www.freertos.org/a00110.html

@@ -45,9 +45,9 @@ class FakeFileChecker(FileChecker):
             error = f'I do not know how to "{file_contents.decode()}".'
         return FormattedFileContents(
             ok=not error,
-            formatted_file_contents=formatted.encode()
-            if formatted is not None
-            else b'',
+            formatted_file_contents=(
+                formatted.encode() if formatted is not None else b''
+            ),
             error_message=error,
         )
 

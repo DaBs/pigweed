@@ -1,0 +1,78 @@
+# Copyright 2025 The Pigweed Authors
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may not
+# use this file except in compliance with the License. You may obtain a copy of
+# the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations under
+# the License.
+
+load("@bazel_skylib//rules:common_settings.bzl", "bool_flag")
+load("@pigweed//pw_build:compatibility.bzl", "incompatible_with_mcu")
+load("@rules_rust//rust:defs.bzl", "rust_doc_test", "rust_library")
+load("//pw_kernel:flags.bzl", "KERNEL_TEST_DEPS", "KERNEL_TEST_RUSTC_FLAGS")
+
+package(default_visibility = ["//visibility:public"])
+
+# When debug_assertions is False, all debug_* macros will be compiled out.
+#
+# The pw_assert crate has it's own feature rather than re-using the rustc
+# debug-assertions feature, as it allows for pw_assert debug_* macros to be
+# enabled without incurring the additional runtime overhead of rusts
+# debug-assertions feature.
+bool_flag(
+    name = "debug_assertions",
+    build_setting_default = False,
+)
+
+config_setting(
+    name = "debug_assertions_enabled",
+    flag_values = {
+        ":debug_assertions": "true",
+    },
+)
+
+bool_flag(
+    name = "default_handler",
+    build_setting_default = False,
+)
+
+config_setting(
+    name = "default_handler_enabled",
+    flag_values = {
+        ":default_handler": "true",
+    },
+)
+
+rust_library(
+    name = "pw_assert",
+    srcs = [
+        "pw_assert.rs",
+    ],
+    crate_features = ["color"] + select({
+        ":debug_assertions_enabled": ["debug_assertions"],
+        "//conditions:default": [],
+    }) + select({
+        ":default_handler_enabled": ["default_handler"],
+        "//conditions:default": [],
+    }),
+    edition = "2024",
+    rustc_flags = KERNEL_TEST_RUSTC_FLAGS,
+    tags = ["kernel"],
+    deps = ["//pw_log/rust:pw_log"] + KERNEL_TEST_DEPS,
+)
+
+rust_doc_test(
+    name = "pw_assert_doc_test",
+    crate = ":pw_assert",
+    tags = [
+        "kernel",
+        "kernel_doc_test",
+    ],
+    target_compatible_with = incompatible_with_mcu(),
+)

@@ -31,11 +31,12 @@
 #include "pw_channel/channel.h"
 #include "pw_containers/vector.h"
 #include "pw_hdlc/decoder.h"
-#include "pw_multibuf/allocator.h"
 #include "pw_multibuf/multibuf.h"
 #include "pw_status/status.h"
 
 namespace pw::hdlc {
+
+/// @module{pw_hdlc}
 
 /// A router that multiplexes multiple datagram-oriented ``Channel`` s
 /// over a single byte-oriented ``Channel`` using HDLC framing.
@@ -82,18 +83,12 @@ class Router final {
   /// @param[in] send_address    Data read from ``channel`` will be written
   ///  to ``io_channel`` with the HDLC address ``send_address``.
   ///
-  /// @returns @rst
-  ///
-  /// .. pw-status-codes::
-  ///
-  ///    OK: ``Channel`` was successfully registered.
-  ///
-  ///    ALREADY_EXISTS: A registration already exists for either
-  ///    ``channel``, ``receive_address``, or ``send_address``. Channels may
-  ///    not be registered with multiple addresses, nor may addresses be
-  ///    used with multiple channels.
-  ///
-  /// @endrst
+  /// @returns
+  /// * @OK: `Channel` was successfully registered.
+  /// * @ALREADY_EXISTS: A registration already exists for either `channel`,
+  ///   `receive_address`, or `send_address`. Channels may not be registered
+  ///   with multiple addresses, nor may addresses be used with multiple
+  ///   channels.
   Status AddChannel(pw::channel::DatagramReaderWriter& channel,
                     uint64_t receive_address,
                     uint64_t send_address);
@@ -101,16 +96,10 @@ class Router final {
   /// Removes a previously registered ``Channel`` tied to the provided
   /// addresses.
   ///
-  /// @returns @rst
-  ///
-  /// .. pw-status-codes::
-  ///
-  ///    OK: The channel was successfully deregistered.
-  ///
-  ///    NOT_FOUND: A registration of the channel for the provided
-  ///    addresses was not found.
-  ///
-  /// @endrst
+  /// @returns
+  /// * @OK: The channel was successfully deregistered.
+  /// * @NOT_FOUND: A registration of the channel for the provided addresses was
+  ///   not found.
   Status RemoveChannel(pw::channel::DatagramReaderWriter& channel,
                        uint64_t receive_address,
                        uint64_t send_address);

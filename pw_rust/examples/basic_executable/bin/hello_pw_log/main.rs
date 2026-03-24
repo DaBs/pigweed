@@ -19,7 +19,7 @@
 #[path = "../../other.rs"]
 mod other;
 
-extern "C" {
+unsafe extern "C" {
     // This external function links to the pw_log C backend specified by the
     // target. It will be replaced by pw_log rust crate once we have third party
     // support for GN.
@@ -52,7 +52,7 @@ macro_rules! pw_log_info {
   );
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn main() -> isize {
     pw_log_info!("Hello, Pigweed!\0".as_ptr() as *const i8);
 
@@ -67,8 +67,8 @@ pub extern "C" fn main() -> isize {
     pw_log_info!("%d\0".as_ptr() as *const i8, c::value());
 
     pw_log_info!(
-      "%d\0".as_ptr() as *const i8,
-      proc_macro::fn_like_proc_macro!(123)
+        "%d\0".as_ptr() as *const i8,
+        proc_macro::fn_like_proc_macro!(123)
     );
     return 0;
 }

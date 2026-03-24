@@ -36,20 +36,25 @@ Connection::Connection(std::unique_ptr<Client> client,
   remote_service_manager_->set_service_watcher(std::move(svc_watcher));
 }
 
-void Connection::Initialize(std::vector<UUID> service_uuids,
-                            fit::callback<void(uint16_t)> mtu_cb) {
+void Connection::Initialize(
+    std::vector<UUID> service_uuids,
+    fit::callback<void(uint16_t)> mtu_cb,
+    fit::callback<void(const bt::att::Error&)> on_error) {
   PW_CHECK(remote_service_manager_);
 
   auto uuids_count = service_uuids.size();
   // status_cb must not capture att_ in order to prevent reference cycle.
   auto status_cb = [self = weak_self_.GetWeakPtr(),
-                    uuids_count](att::Result<> status) {
+                    uuids_count,
+                    on_error_cb =
+                        std::move(on_error)](att::Result<> status) mutable {
     if (!self.is_alive()) {
       return;
     }
 
     if (bt_is_error(status, ERROR, "gatt", "client setup failed")) {
       // Signal a link error.
+      on_error_cb(status.error_value());
       self->ShutDown();
     } else if (uuids_count > 0) {
       bt_log(DEBUG,

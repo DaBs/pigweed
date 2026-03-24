@@ -18,6 +18,7 @@
 
 #include "pw_bluetooth/hci_data.emb.h"
 #include "pw_bluetooth_sapphire/internal/host/hci-spec/util.h"
+#include "pw_bluetooth_sapphire/internal/host/hci/connection.h"
 #include "pw_bluetooth_sapphire/internal/host/hci/sequential_command_runner.h"
 #include "pw_bluetooth_sapphire/internal/host/iso/iso_inbound_packet_assembler.h"
 #include "pw_bytes/span.h"
@@ -87,10 +88,11 @@ class IsoStreamImpl final : public IsoStream {
   IsoStreamImpl(uint8_t cig_id,
                 uint8_t cis_id,
                 hci_spec::ConnectionHandle cis_handle,
+                hci::Transport::WeakPtr hci,
                 CisEstablishedCallback on_established_cb,
-                hci::CommandChannel::WeakPtr cmd,
                 pw::Callback<void()> on_closed_cb,
-                hci::IsoDataChannel* data_channel);
+                pw::bluetooth_sapphire::LeaseProvider& wake_lease_provider,
+                pw::chrono::VirtualSystemClock& clock);
 
   // IsoStream overrides
   bool OnCisEstablished(const hci::EventPacket& event) override;
@@ -105,12 +107,13 @@ class IsoStreamImpl final : public IsoStream {
     return cis_hci_handle_;
   }
   void Close() override;
-  std::unique_ptr<IsoDataPacket> ReadNextQueuedIncomingPacket() override;
+  std::optional<IsoDataPacket> ReadNextQueuedIncomingPacket() override;
   void Send(pw::ConstByteSpan data) override;
   IsoStream::WeakPtr GetWeakPtr() override { return weak_self_.GetWeakPtr(); }
 
   // IsoDataChannel::ConnectionInterface override
   void ReceiveInboundPacket(pw::span<const std::byte> packet) override;
+  std::optional<DynamicByteBuffer> GetNextOutboundPdu() override;
 
  private:
   struct SduHeaderInfo {
@@ -124,6 +127,8 @@ class IsoStreamImpl final : public IsoStream {
       pw::bluetooth::emboss::IsoDataPbFlag pb_flag,
       std::optional<SduHeaderInfo> sdu_header = std::nullopt,
       std::optional<uint32_t> time_stamp = std::nullopt);
+
+  void UpdateWakeLease();
 
   enum class IsoStreamState {
     kNotEstablished,
@@ -150,7 +155,8 @@ class IsoStreamImpl final : public IsoStream {
   // arrives. Otherwise, we will just queue it up.
   bool inbound_client_is_waiting_ = false;
 
-  std::queue<std::unique_ptr<std::vector<std::byte>>> incoming_data_queue_;
+  std::queue<IsoDataPacket> incoming_data_queue_;
+  std::queue<DynamicByteBuffer> outbound_pdu_queue_;
 
   // Called when stream is closed
   pw::Callback<void()> on_closed_cb_;
@@ -164,25 +170,33 @@ class IsoStreamImpl final : public IsoStream {
   DataPathState input_data_path_state_ = DataPathState::kNotSetUp;
   DataPathState output_data_path_state_ = DataPathState::kNotSetUp;
 
-  hci::CommandChannel::WeakPtr cmd_;
-
   hci::CommandChannel::EventHandlerId cis_established_handler_;
 
-  // The IsoDataChannel that this stream is registered to.
-  hci::IsoDataChannel* data_channel_;
+  pw::chrono::SystemClock::time_point reference_time_;
+  uint16_t next_sdu_sequence_number_ = 0;
+  uint32_t iso_interval_usec_ = 0;
+  // Created on HCI_LE_CIS_Established event with success status.
+  std::optional<hci::Connection> link_;
+  hci::Transport::WeakPtr hci_;
+
+  std::optional<pw::bluetooth_sapphire::Lease> wake_lease_;
+  pw::bluetooth_sapphire::LeaseProvider& wake_lease_provider_;
+
+  pw::chrono::VirtualSystemClock& clock_;
 
   WeakSelf<IsoStreamImpl> weak_self_;
-
   BT_DISALLOW_COPY_AND_ASSIGN_ALLOW_MOVE(IsoStreamImpl);
 };
 
-IsoStreamImpl::IsoStreamImpl(uint8_t cig_id,
-                             uint8_t cis_id,
-                             hci_spec::ConnectionHandle cis_handle,
-                             CisEstablishedCallback on_established_cb,
-                             hci::CommandChannel::WeakPtr cmd,
-                             pw::Callback<void()> on_closed_cb,
-                             hci::IsoDataChannel* data_channel)
+IsoStreamImpl::IsoStreamImpl(
+    uint8_t cig_id,
+    uint8_t cis_id,
+    hci_spec::ConnectionHandle cis_handle,
+    hci::Transport::WeakPtr hci,
+    CisEstablishedCallback on_established_cb,
+    pw::Callback<void()> on_closed_cb,
+    pw::bluetooth_sapphire::LeaseProvider& wake_lease_provider,
+    pw::chrono::VirtualSystemClock& clock)
     : IsoStream(),
       state_(IsoStreamState::kNotEstablished),
       cig_id_(cig_id),
@@ -192,21 +206,21 @@ IsoStreamImpl::IsoStreamImpl(uint8_t cig_id,
       inbound_assembler_(
           fit::bind_member<&IsoStreamImpl::HandleCompletePacket>(this)),
       on_closed_cb_(std::move(on_closed_cb)),
-      cmd_(std::move(cmd)),
-      data_channel_(data_channel),
+      hci_(std::move(hci)),
+      wake_lease_provider_(wake_lease_provider),
+      clock_(clock),
       weak_self_(this) {
-  PW_CHECK(cmd_.is_alive());
-  PW_CHECK(data_channel_);
+  PW_CHECK(hci_.is_alive());
 
   auto weak_self = weak_self_.GetWeakPtr();
-  cis_established_handler_ = cmd_->AddLEMetaEventHandler(
+  cis_established_handler_ = hci_->command_channel()->AddLEMetaEventHandler(
       hci_spec::kLECISEstablishedSubeventCode,
       [self = std::move(weak_self)](const hci::EventPacket& event) {
         if (!self.is_alive()) {
           return hci::CommandChannel::EventCallbackResult::kRemove;
         }
         if (self->OnCisEstablished(event)) {
-          self->cis_established_handler_ = 0u;
+          // On failure, this object will have been destroyed.
           return hci::CommandChannel::EventCallbackResult::kRemove;
         }
         return hci::CommandChannel::EventCallbackResult::kContinue;
@@ -244,11 +258,25 @@ bool IsoStreamImpl::OnCisEstablished(const hci::EventPacket& event) {
 
   if (status != pw::bluetooth::emboss::StatusCode::SUCCESS) {
     cis_established_cb_(status, std::nullopt, std::nullopt);
+    // Destroys this object.
     Close();
     return true;
   }
 
   state_ = IsoStreamState::kEstablished;
+
+  auto on_disconnection_complete = [hci = hci_,
+                                    cis_handle = cis_hci_handle_]() {
+    hci->iso_data_channel()->ClearControllerPacketCount(cis_handle);
+  };
+  link_.emplace(cis_hci_handle_, hci_, std::move(on_disconnection_complete));
+  link_->set_peer_disconnect_callback(
+      [this](const hci::Connection&, pw::bluetooth::emboss::StatusCode) {
+        bt_log(INFO, "iso", "CIS Disconnected at handle %#x", cis_hci_handle_);
+        if (on_closed_cb_) {
+          on_closed_cb_();
+        }
+      });
 
   // General stream attributes
   cis_params_.cig_sync_delay = view.cig_sync_delay().Read();
@@ -274,6 +302,11 @@ bool IsoStreamImpl::OnCisEstablished(const hci::EventPacket& event) {
   params->max_pdu_size = view.max_pdu_p_to_c().Read();
 
   cis_established_cb_(status, GetWeakPtr(), cis_params_);
+
+  reference_time_ = clock_.now();
+
+  iso_interval_usec_ = cis_params_.iso_interval *
+                       CisEstablishedParameters::kIsoIntervalToMicroseconds;
 
   // Event handled
   return true;
@@ -350,66 +383,72 @@ void IsoStreamImpl::SetupDataPath(
   WeakSelf<IsoStreamImpl>::WeakPtr self = weak_self_.GetWeakPtr();
 
   bt_log(INFO, "iso", "sending LE_Setup_ISO_Data_Path command");
-  cmd_->SendCommand(
-      std::move(cmd_packet),
-      [on_complete_callback = std::move(on_complete_cb),
-       self,
-       cis_handle = cis_hci_handle_,
-       target_data_path_state,
-       direction,
-       on_incoming_data_available_callback =
-           std::move(on_incoming_data_available_cb)](
-          auto, const hci::EventPacket& cmd_complete) mutable {
-        if (!self.is_alive()) {
-          on_complete_callback(kStreamClosed);
-          return;
-        }
+  hci_->command_channel()
+      ->SendCommand(
+          std::move(cmd_packet),
+          [on_complete_callback = std::move(on_complete_cb),
+           self,
+           cis_handle = cis_hci_handle_,
+           target_data_path_state,
+           direction,
+           on_incoming_data_available_callback =
+               std::move(on_incoming_data_available_cb)](
+              auto, const hci::EventPacket& cmd_complete) mutable {
+            if (!self.is_alive()) {
+              on_complete_callback(kStreamClosed);
+              return;
+            }
 
-        auto return_params =
-            cmd_complete.view<pw::bluetooth::emboss::
-                                  LESetupISODataPathCommandCompleteEventView>();
-        pw::bluetooth::emboss::StatusCode status =
-            return_params.status().Read();
-        hci_spec::ConnectionHandle connection_handle =
-            return_params.connection_handle().Read();
+            auto return_params =
+                cmd_complete
+                    .view<pw::bluetooth::emboss::
+                              LESetupISODataPathCommandCompleteEventView>();
+            pw::bluetooth::emboss::StatusCode status =
+                return_params.status().Read();
+            hci_spec::ConnectionHandle connection_handle =
+                return_params.connection_handle().Read();
 
-        if (status != pw::bluetooth::emboss::StatusCode::SUCCESS) {
-          bt_log(ERROR,
-                 "iso",
-                 "failed to setup ISO data path for handle 0x%x (status: 0x%x)",
-                 connection_handle,
-                 static_cast<uint8_t>(status));
-          *target_data_path_state = DataPathState::kNotSetUp;
-          on_complete_callback(kStreamRejectedByController);
-          return;
-        }
+            if (status != pw::bluetooth::emboss::StatusCode::SUCCESS) {
+              bt_log(ERROR,
+                     "iso",
+                     "failed to setup ISO data path for handle 0x%x (status: "
+                     "0x%x)",
+                     connection_handle,
+                     static_cast<uint8_t>(status));
+              *target_data_path_state = DataPathState::kNotSetUp;
+              on_complete_callback(kStreamRejectedByController);
+              return;
+            }
 
-        // It's hard to know what is the right thing to do here. The controller
-        // accepted our request, but we don't agree on the connection handle ID.
-        // Something is amiss, so we will refuse to consider the data path
-        // setup even though the controller may think otherwise.
-        if (connection_handle != cis_handle) {
-          bt_log(ERROR,
-                 "iso",
-                 "handle mismatch in ISO data path setup completion (expected: "
-                 "0x%x, actual: %x)",
-                 cis_handle,
-                 connection_handle);
-          *target_data_path_state = DataPathState::kNotSetUp;
-          on_complete_callback(kStreamRejectedByController);
-          return;
-        }
+            // It's hard to know what is the right thing to do here. The
+            // controller accepted our request, but we don't agree on the
+            // connection handle ID. Something is amiss, so we will refuse to
+            // consider the data path setup even though the controller may think
+            // otherwise.
+            if (connection_handle != cis_handle) {
+              bt_log(ERROR,
+                     "iso",
+                     "handle mismatch in ISO data path setup completion "
+                     "(expected: "
+                     "0x%x, actual: %x)",
+                     cis_handle,
+                     connection_handle);
+              *target_data_path_state = DataPathState::kNotSetUp;
+              on_complete_callback(kStreamRejectedByController);
+              return;
+            }
 
-        // Note that |direction| is a spec-defined value of dataflow direction
-        // relative to the controller, so this may look backwards.
-        if (direction == pw::bluetooth::emboss::DataPathDirection::OUTPUT) {
-          self->on_incoming_data_available_cb_ =
-              std::move(on_incoming_data_available_callback);
-        }
-        *target_data_path_state = DataPathState::kSetUp;
-        bt_log(INFO, "iso", "successfully set up data path");
-        on_complete_callback(kSuccess);
-      });
+            // Note that |direction| is a spec-defined value of dataflow
+            // direction relative to the controller, so this may look backwards.
+            if (direction == pw::bluetooth::emboss::DataPathDirection::OUTPUT) {
+              self->on_incoming_data_available_cb_ =
+                  std::move(on_incoming_data_available_callback);
+            }
+            *target_data_path_state = DataPathState::kSetUp;
+            bt_log(INFO, "iso", "successfully set up data path");
+            on_complete_callback(kSuccess);
+          })
+      .IgnoreError();
 }
 
 void IsoStreamImpl::ReceiveInboundPacket(pw::span<const std::byte> packet) {
@@ -440,6 +479,16 @@ void IsoStreamImpl::ReceiveInboundPacket(pw::span<const std::byte> packet) {
   inbound_assembler_.ProcessNext(packet);
 }
 
+std::optional<DynamicByteBuffer> IsoStreamImpl::GetNextOutboundPdu() {
+  if (outbound_pdu_queue_.empty()) {
+    return std::nullopt;
+  }
+  DynamicByteBuffer pdu = std::move(outbound_pdu_queue_.front());
+  outbound_pdu_queue_.pop();
+  UpdateWakeLease();
+  return pdu;
+}
+
 void IsoStreamImpl::HandleCompletePacket(
     const pw::span<const std::byte>& packet) {
   if (!on_incoming_data_available_cb_) {
@@ -465,8 +514,8 @@ void IsoStreamImpl::HandleCompletePacket(
   }
 
   // Client not ready to handle packet, queue it up until they ask for it
-  incoming_data_queue_.push(
-      std::make_unique<IsoDataPacket>(packet.begin(), packet.end()));
+  incoming_data_queue_.emplace(packet.begin(), packet.end());
+  UpdateWakeLease();
 }
 
 DynamicByteBuffer IsoStreamImpl::BuildPacketForSending(
@@ -513,37 +562,58 @@ DynamicByteBuffer IsoStreamImpl::BuildPacketForSending(
   return packet;
 }
 
-std::unique_ptr<IsoDataPacket> IsoStreamImpl::ReadNextQueuedIncomingPacket() {
+std::optional<IsoDataPacket> IsoStreamImpl::ReadNextQueuedIncomingPacket() {
   if (incoming_data_queue_.empty()) {
     inbound_client_is_waiting_ = true;
-    return nullptr;
+    return std::nullopt;
   }
 
-  std::unique_ptr<IsoDataPacket> packet =
-      std::move(incoming_data_queue_.front());
+  IsoDataPacket packet = std::move(incoming_data_queue_.front());
   incoming_data_queue_.pop();
+  UpdateWakeLease();
   return packet;
 }
 
 void IsoStreamImpl::Send(pw::ConstByteSpan data) {
-  PW_CHECK(data_channel_, "Send called while not registered to a data stream.");
   PW_CHECK(data.size() <= std::numeric_limits<uint16_t>::max());
+  const size_t max_length =
+      hci_->iso_data_channel()->buffer_info().max_data_length();
 
-  const size_t max_length = data_channel_->buffer_info().max_data_length();
+  // Calculate the current interval sequence number
+  auto now = clock_.now();
+  auto elapsed_time = now - reference_time_;
+  uint64_t elapsed_usec =
+      std::chrono::duration_cast<std::chrono::microseconds>(elapsed_time)
+          .count();
+  uint16_t interval_sequence_num =
+      static_cast<uint16_t>(elapsed_usec / iso_interval_usec_);
+
+  uint16_t current_sequence_num = next_sdu_sequence_number_;
+
+  // Handle missed interval
+  if (current_sequence_num < interval_sequence_num) {
+    bt_log(INFO,
+           "iso",
+           "Skipped interval: advancing sequence number from %u to current "
+           "interval %u",
+           current_sequence_num,
+           interval_sequence_num);
+    current_sequence_num = interval_sequence_num;
+  }
+
   std::optional<SduHeaderInfo> sdu_header = SduHeaderInfo{
-      // TODO: https://pwbug.dev/393366531 - Implement sequence number.
-      .packet_sequence_number = 0,
+      .packet_sequence_number = current_sequence_num,
       .iso_sdu_length = static_cast<uint16_t>(data.size()),
   };
 
   // Fragmentation loop.
   while (!data.empty()) {
-    size_t length_remaining =
-        TotalDataLength(/*has_timestamp=*/false,
-                        /*has_sdu_header=*/sdu_header.has_value(),
-                        /*data_size=*/data.size());
-    // This is the first fragment if we haven't sent the SDU header yet.
+    // Determine if this is the first fragment of the SDU
     const bool is_first = sdu_header.has_value();
+
+    size_t length_remaining = TotalDataLength(/*has_timestamp=*/false,
+                                              /*has_sdu_header=*/is_first,
+                                              /*data_size=*/data.size());
     // This is the last fragment if there is sufficient buffer space.
     const bool is_last = length_remaining <= max_length;
 
@@ -564,28 +634,45 @@ void IsoStreamImpl::Send(pw::ConstByteSpan data) {
     pw::ConstByteSpan fragment;
     size_t fragment_length = FragmentDataLength(false, is_first, max_length);
     std::tie(fragment, data) = SplitSpan(data, fragment_length);
-    data_channel_->SendData(BuildPacketForSending(fragment, flag, sdu_header));
+    outbound_pdu_queue_.emplace(
+        BuildPacketForSending(fragment, flag, sdu_header));
     sdu_header.reset();
   }
+  next_sdu_sequence_number_ = current_sequence_num + 1;
+
+  hci_->iso_data_channel()->TrySendPackets();
+
+  UpdateWakeLease();
 }
 
 void IsoStreamImpl::Close() { on_closed_cb_(); }
+
+void IsoStreamImpl::UpdateWakeLease() {
+  if (outbound_pdu_queue_.empty() && incoming_data_queue_.empty()) {
+    wake_lease_.reset();
+  } else if (!wake_lease_) {
+    wake_lease_ = PW_SAPPHIRE_ACQUIRE_LEASE(wake_lease_provider_, "IsoStream")
+                      .value_or(pw::bluetooth_sapphire::Lease());
+  }
+}
 
 std::unique_ptr<IsoStream> IsoStream::Create(
     uint8_t cig_id,
     uint8_t cis_id,
     hci_spec::ConnectionHandle cis_handle,
+    hci::Transport::WeakPtr hci,
     CisEstablishedCallback on_established_cb,
-    hci::CommandChannel::WeakPtr cmd,
     pw::Callback<void()> on_closed_cb,
-    hci::IsoDataChannel* data_channel) {
+    pw::bluetooth_sapphire::LeaseProvider& wake_lease_provider,
+    pw::chrono::VirtualSystemClock& clock) {
   return std::make_unique<IsoStreamImpl>(cig_id,
                                          cis_id,
                                          cis_handle,
+                                         std::move(hci),
                                          std::move(on_established_cb),
-                                         std::move(cmd),
                                          std::move(on_closed_cb),
-                                         data_channel);
+                                         wake_lease_provider,
+                                         clock);
 }
 
 }  // namespace bt::iso

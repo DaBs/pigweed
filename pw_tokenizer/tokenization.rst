@@ -18,8 +18,8 @@ Concepts
 See :ref:`module-pw_tokenizer-get-started-overview` for a high-level
 explanation of how ``pw_tokenizer`` works.
 
-Token generation: fixed length hashing at compile time
-======================================================
+Token generation: compile time hashing
+======================================
 String tokens are generated using a modified version of the x65599 hash used by
 the SDBM project. All hashing is done at compile time.
 
@@ -101,13 +101,13 @@ Tokenize string literals outside of expressions
 ``pw_tokenizer`` provides macros for tokenizing string literals with no
 arguments:
 
-* :c:macro:`PW_TOKENIZE_STRING`
-* :c:macro:`PW_TOKENIZE_STRING_DOMAIN`
-* :c:macro:`PW_TOKENIZE_STRING_MASK`
+* :cc:`PW_TOKENIZE_STRING`
+* :cc:`PW_TOKENIZE_STRING_DOMAIN`
+* :cc:`PW_TOKENIZE_STRING_MASK`
 
 The tokenization macros above cannot be used inside other expressions.
 
-.. admonition:: **Yes**: Assign :c:macro:`PW_TOKENIZE_STRING` to a ``constexpr`` variable.
+.. admonition:: **Yes**: Assign :cc:`PW_TOKENIZE_STRING` to a ``constexpr`` variable.
   :class: checkmark
 
   .. code-block:: cpp
@@ -118,16 +118,14 @@ The tokenization macros above cannot be used inside other expressions.
        constexpr uint32_t local_token = PW_TOKENIZE_STRING("Wowee Zowee?");
      }
 
-.. admonition:: **No**: Use :c:macro:`PW_TOKENIZE_STRING` in another expression.
+.. admonition:: **No**: Use :cc:`PW_TOKENIZE_STRING` in another expression.
   :class: error
 
   .. code-block:: cpp
 
-     void BadExample() {
-       ProcessToken(PW_TOKENIZE_STRING("This won't compile!"));
-     }
+     void BadExample() { ProcessToken(PW_TOKENIZE_STRING("This won't compile!")); }
 
-  Use :c:macro:`PW_TOKENIZE_STRING_EXPR` instead.
+  Use :cc:`PW_TOKENIZE_STRING_EXPR` instead.
 
 Tokenize inside expressions
 ===========================
@@ -136,16 +134,16 @@ use of lambda functions, so while they can be used inside expressions, they
 require C++ and cannot be assigned to constexpr variables or be used with
 special function variables like ``__func__``.
 
-* :c:macro:`PW_TOKENIZE_STRING_EXPR`
-* :c:macro:`PW_TOKENIZE_STRING_DOMAIN_EXPR`
-* :c:macro:`PW_TOKENIZE_STRING_MASK_EXPR`
+* :cc:`PW_TOKENIZE_STRING_EXPR`
+* :cc:`PW_TOKENIZE_STRING_DOMAIN_EXPR`
+* :cc:`PW_TOKENIZE_STRING_MASK_EXPR`
 
 .. admonition:: When to use these macros
 
-  Use :c:macro:`PW_TOKENIZE_STRING` and related macros to tokenize string
+  Use :cc:`PW_TOKENIZE_STRING` and related macros to tokenize string
   literals that do not need %-style arguments encoded.
 
-.. admonition:: **Yes**: Use :c:macro:`PW_TOKENIZE_STRING_EXPR` within other expressions.
+.. admonition:: **Yes**: Use :cc:`PW_TOKENIZE_STRING_EXPR` within other expressions.
   :class: checkmark
 
   .. code-block:: cpp
@@ -154,16 +152,16 @@ special function variables like ``__func__``.
        ProcessToken(PW_TOKENIZE_STRING_EXPR("This will compile!"));
      }
 
-.. admonition:: **No**: Assign :c:macro:`PW_TOKENIZE_STRING_EXPR` to a ``constexpr`` variable.
+.. admonition:: **No**: Assign :cc:`PW_TOKENIZE_STRING_EXPR` to a ``constexpr`` variable.
   :class: error
 
   .. code-block:: cpp
 
      constexpr uint32_t wont_work = PW_TOKENIZE_STRING_EXPR("This won't compile!"));
 
-  Instead, use :c:macro:`PW_TOKENIZE_STRING` to assign to a ``constexpr`` variable.
+  Instead, use :cc:`PW_TOKENIZE_STRING` to assign to a ``constexpr`` variable.
 
-.. admonition:: **No**: Tokenize ``__func__`` in :c:macro:`PW_TOKENIZE_STRING_EXPR`.
+.. admonition:: **No**: Tokenize ``__func__`` in :cc:`PW_TOKENIZE_STRING_EXPR`.
   :class: error
 
   .. code-block:: cpp
@@ -174,13 +172,13 @@ special function variables like ``__func__``.
        constexpr uint32_t wont_work = PW_TOKENIZE_STRING_EXPR(__func__);
      }
 
-  Instead, use :c:macro:`PW_TOKENIZE_STRING` to tokenize ``__func__`` or similar macros.
+  Instead, use :cc:`PW_TOKENIZE_STRING` to tokenize ``__func__`` or similar macros.
 
 Tokenize a message with arguments to a buffer
 =============================================
-* :c:macro:`PW_TOKENIZE_TO_BUFFER`
-* :c:macro:`PW_TOKENIZE_TO_BUFFER_DOMAIN`
-* :c:macro:`PW_TOKENIZE_TO_BUFFER_MASK`
+* :cc:`PW_TOKENIZE_TO_BUFFER`
+* :cc:`PW_TOKENIZE_TO_BUFFER_DOMAIN`
+* :cc:`PW_TOKENIZE_TO_BUFFER_MASK`
 
 .. admonition:: Why use this macro
 
@@ -199,14 +197,14 @@ Encoding ``%s`` string arguments is inefficient, since ``%s`` strings are
 encoded 1:1, with no tokenization. Tokens can therefore be used to replace
 string arguments to tokenized format strings.
 
-* :c:macro:`PW_TOKEN_FMT`
+* :cc:`PW_TOKEN_FMT`
 
 .. admonition:: Logging nested tokens
 
   Users will typically interact with nested token arguments during logging.
   In this case there is a slightly different interface described by
   :ref:`module-pw_log-tokenized-args` that does not generally invoke
-  ``PW_TOKEN_FMT`` directly.
+  :cc:`PW_TOKEN_FMT` directly.
 
 The format specifier for a token is given by PRI-style macro ``PW_TOKEN_FMT()``,
 which is concatenated to the rest of the format string by the C preprocessor.
@@ -283,26 +281,26 @@ Logging enums is one common special case where tokenization is particularly
 appropriate: enum values are conceptually already tokens mapping to their
 names, assuming no duplicate values.
 
-:c:macro:`PW_TOKENIZE_ENUM` will take in a fully qualified enum name along with all
+:cc:`PW_TOKENIZE_ENUM` will take in a fully qualified enum name along with all
 of the associated enum values. This macro will create database entries that
 include the domain name (fully qualified enum name), enum value, and a tokenized
 form of the enum value.
 
 The macro also supports returing the string version of the enum value in the
 case that there is a non-tokenizing backend, using
-:cpp:func:`pw::tokenizer::EnumToString`.
+:cc:`EnumToString <pw::tokenizer::EnumToString>`.
 
 All enum values in the enum declaration must be present in the macro, and the
 macro must be in the same namespace as the enum to be able to use the
-:cpp:func:`pw::tokenizer::EnumToString` function and avoid compiler errors.
+:cc:`EnumToString <pw::tokenizer::EnumToString>` function and avoid compiler errors.
 
 .. literalinclude: enum_test.cc
    :language: cpp
    :start-after: [pw_tokenizer-examples-enum]
    :end-before: [pw_tokenizer-examples-enum]
 
-:c:macro:`PW_TOKENIZE_ENUM_CUSTOM` is an alternative version of
-:c:macro:`PW_TOKENIZE_ENUM` to tokenized a custom strings instead of a
+:cc:`PW_TOKENIZE_ENUM_CUSTOM` is an alternative version of
+:cc:`PW_TOKENIZE_ENUM` to tokenized a custom strings instead of a
 stringified form of the enum value name. It will take in a fully qualified enum
 name along with all the associated enum values and custom string for these
 values. This macro will create database entries that include the domain name
@@ -322,15 +320,15 @@ data to a global handler function. A project's custom tokenization macro can
 handle tokenized data in a function of their choosing. The function may accept
 any arguments, but its final arguments must be:
 
-* The 32-bit token (:cpp:type:`pw_tokenizer_Token`)
-* The argument types (:cpp:type:`pw_tokenizer_ArgTypes`)
+* The 32-bit token (:cc:`pw_tokenizer_Token`)
+* The argument types (``pw_tokenizer_ArgTypes``)
 * Variadic arguments, if any
 
 ``pw_tokenizer`` provides two low-level macros to help projects create custom
 tokenization macros:
 
-* :c:macro:`PW_TOKENIZE_FORMAT_STRING`
-* :c:macro:`PW_TOKENIZER_REPLACE_FORMAT_STRING`
+* :cc:`PW_TOKENIZE_FORMAT_STRING`
+* :cc:`PW_TOKENIZER_REPLACE_FORMAT_STRING`
 
 .. caution::
 
@@ -341,13 +339,9 @@ Use these macros to invoke an encoding function with the token, argument types,
 and variadic arguments. The function can then encode the tokenized message to a
 buffer using helpers in ``pw_tokenizer/encode_args.h``:
 
-.. Note: pw_tokenizer_EncodeArgs is a C function so you would expect to
-.. reference it as :c:func:`pw_tokenizer_EncodeArgs`. That doesn't work because
-.. it's defined in a header file that mixes C and C++.
-
-* :cpp:func:`pw::tokenizer::EncodeArgs`
-* :cpp:class:`pw::tokenizer::EncodedMessage`
-* :cpp:func:`pw_tokenizer_EncodeArgs`
+* :cc:`EncodeArgs <pw::tokenizer::EncodeArgs>`
+* :cc:`EncodedMessage <pw::tokenizer::EncodedMessage>`
+* :cc:`pw_tokenizer_EncodeArgs`
 
 Example
 -------
@@ -371,17 +365,17 @@ The following example implements a custom tokenization macro similar to
    }  // extern "C"
    #endif
 
-   #define PW_LOG_TOKENIZED_ENCODE_MESSAGE(metadata, format, ...)          \
-     do {                                                                  \
-       PW_TOKENIZE_FORMAT_STRING("logs", UINT32_MAX, format, __VA_ARGS__); \
-       EncodeTokenizedMessage(                                             \
-           metadata, PW_TOKENIZER_REPLACE_FORMAT_STRING(__VA_ARGS__));     \
+   #define PW_LOG_TOKENIZED_ENCODE_MESSAGE(metadata, format, ...)               \
+     do {                                                                       \
+       PW_TOKENIZE_FORMAT_STRING("logs", UINT32_MAX, format, __VA_ARGS__);      \
+       EncodeTokenizedMessage(metadata,                                         \
+                              PW_TOKENIZER_REPLACE_FORMAT_STRING(__VA_ARGS__)); \
      } while (0)
 
 In this example, the ``EncodeTokenizedMessage`` function would handle encoding
 and processing the message. Encoding is done by the
-:cpp:class:`pw::tokenizer::EncodedMessage` class or
-:cpp:func:`pw::tokenizer::EncodeArgs` function from
+:cc:`EncodedMessage <pw::tokenizer::EncodedMessage>` class or
+:cc:`EncodeArgs <pw::tokenizer::EncodeArgs>` function from
 ``pw_tokenizer/encode_args.h``. The encoded message can then be transmitted or
 stored as needed.
 
@@ -399,7 +393,8 @@ stored as needed.
                                           ...) {
      va_list args;
      va_start(args, types);
-     pw::tokenizer::EncodedMessage<kLogBufferSize> encoded_message(token, types, args);
+     pw::tokenizer::EncodedMessage<kLogBufferSize> encoded_message(
+         token, types, args);
      va_end(args);
 
      HandleTokenizedMessage(metadata, encoded_message);
@@ -411,6 +406,22 @@ stored as needed.
      in the smallest possible call site.
    - Pass additional arguments, such as metadata, with the tokenized message.
    - Integrate ``pw_tokenizer`` with other systems.
+
+Length-delimited strings
+========================
+The ``%.*s`` ``printf`` format specifier is used for length-delimited strings.
+The string is passed as two arguments: an ``int`` length followed by a ``const
+char*`` string. Unlike ``%s``, the string does not have to be null terminated.
+
+``pw_tokenizer`` does not yet support the ``%.*s`` specifier (see `b/408040194
+<http://pwbug.dev/408040194>`_). To tokenize a length-delimited string, make a
+local null-terminated copy first. This can be done with a temporary
+:cc:`pw::InlineString` sized to fit the string.
+
+.. literalinclude:: tokenize_test.cc
+   :language: c++
+   :start-after: pw_tokenizer-length-delimited
+   :end-before: pw_tokenizer-length-delimited
 
 Tokenizing function names
 =========================
@@ -434,7 +445,7 @@ concatentated with string literals. For example, ``printf(__func__ ": %d",
 
 Calculate minimum required buffer size
 ======================================
-See :cpp:func:`pw::tokenizer::MinEncodingBufferSizeBytes`.
+See :cc:`MinEncodingBufferSizeBytes <pw::tokenizer::MinEncodingBufferSizeBytes>`.
 
 .. _module-pw_tokenizer-base64-format:
 
@@ -492,16 +503,17 @@ This makes it trivial to decode tokens that use fewer than 32 bits.
 
 Masking functionality is provided through the ``*_MASK`` versions of the macros:
 
-* :c:macro:`PW_TOKENIZE_STRING_MASK`
-* :c:macro:`PW_TOKENIZE_STRING_MASK_EXPR`
-* :c:macro:`PW_TOKENIZE_TO_BUFFER_MASK`
+* :cc:`PW_TOKENIZE_STRING_MASK`
+* :cc:`PW_TOKENIZE_STRING_MASK_EXPR`
+* :cc:`PW_TOKENIZE_TO_BUFFER_MASK`
 
 For example, the following generates 16-bit tokens and packs them into an
 existing value.
 
 .. code-block:: cpp
 
-   constexpr uint32_t token = PW_TOKENIZE_STRING_MASK("domain", 0xFFFF, "Pigweed!");
+   constexpr uint32_t token =
+       PW_TOKENIZE_STRING_MASK("domain", 0xFFFF, "Pigweed!");
    uint32_t packed_word = (other_bits << 16) | token;
 
 Tokens are hashes, so tokens of any size have a collision risk. The fewer bits
@@ -601,14 +613,57 @@ by checking the ELF file, if necessary.
 
 Tokenization in headers
 -----------------------
-Tokenizing code in header files (inline functions or templates) may trigger
-warnings such as ``-Wlto-type-mismatch`` under certain conditions. That
-is because tokenization requires declaring a character array for each tokenized
-string. If the tokenized string includes macros that change value, the size of
-this character array changes, which means the same static variable is defined
-with different sizes. It should be safe to suppress these warnings, but, when
-possible, code that tokenizes strings with macros that can change value should
-be moved to source files rather than headers.
+The ``pw_tokenizer`` macros may be used in either source or header files.
+However, care must be used when tokenizing in header files (inline functions or
+templates). The value of the tokenized string must not change across translation
+units, otherwise the program violates the One Definition Rule. Compilers may
+emit warnings such as ``-Wlto-type-mismatch``.
+
+Tokenization requires declaring a character array for each tokenized string. If
+a tokenized string includes macros that change value in different translation
+units, the variable's value changes, which is an ODR violation. The tokenized
+string is never read by the program, but this should still be avoided. Ensure
+tokenized strings in headers do not change value, or move them to a source file
+if they might.
+
+For example, the following hypothetical log statement uses a macro whose value
+is set differently per translation unit.
+
+.. literalinclude:: tokenize_test.cc
+   :language: c++
+   :start-after: pw_tokenizer-header-example-1
+   :end-before: pw_tokenizer-header-example-1
+
+To avoid potential ODR violations, the log statemenent can be moved to a .cc
+file.
+
+.. literalinclude:: tokenize_test.cc
+   :language: c++
+   :start-after: pw_tokenizer-header-example-2
+   :end-before: pw_tokenizer-header-example-2
+
+.. literalinclude:: tokenize_test.cc
+   :language: c++
+   :start-after: pw_tokenizer-header-example-3
+   :end-before: pw_tokenizer-header-example-3
+
+.. warning::
+
+   :ref:`module-pw_log_tokenized` includes the ``PW_LOG_MODULE_NAME`` in its
+   tokenized strings, which may be different in each translation unit. To safely
+   log in headers, the log module name must be set for the duration of the
+   header. This can be done with `push/pop macro pragmas
+   <https://gcc.gnu.org/onlinedocs/gcc/Push_002fPop-Macro-Pragmas.html>`_.
+
+   .. code-block:: c++
+
+      #pragma push_macro("PW_LOG_MODULE_NAME")
+      #undef PW_LOG_MODULE_NAME
+      #define PW_LOG_MODULE_NAME "MY_MODULE_NAME"
+
+      // header contents
+
+      #pragma pop_macro("PW_LOG_MODULE_NAME")
 
 ----------------------
 Tokenization in Python

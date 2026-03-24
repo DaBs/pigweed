@@ -32,6 +32,7 @@ VirtualController::VirtualController(
       devfs_connector_(fit::bind_member<&VirtualController::Connect>(this)) {}
 
 zx::result<> VirtualController::Start() {
+  pw::log_fuchsia::InitializeLogging(dispatcher());
   zx::result connector = devfs_connector_.Bind(dispatcher());
   if (connector.is_error()) {
     FDF_LOG(ERROR,

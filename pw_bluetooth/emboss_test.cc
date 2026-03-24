@@ -20,6 +20,7 @@
 // clang-format off
 // All emboss headers are listed (even if they don't have explicit tests) to
 // ensure they are compiled.
+#include "pw_bluetooth/emboss_util.h"
 #include "pw_bluetooth/att.emb.h"  // IWYU pragma: keep
 #include "pw_bluetooth/hci_commands.emb.h"  // IWYU pragma: keep
 #include "pw_bluetooth/hci_common.emb.h"
@@ -461,8 +462,8 @@ TEST(EmbossTest, WriteRfcomm) {
 
   emboss::RfcommFrameWriter rfcomm = emboss::MakeRfcommFrameView(&buffer);
   rfcomm.extended_address().Write(true);
-  rfcomm.command_response_direction().Write(
-      emboss::RfcommCommandResponseAndDirection::COMMAND_FROM_RESPONDER);
+  rfcomm.command_response().Write(false);
+  rfcomm.direction().Write(false);
   rfcomm.channel().Write(3);
   rfcomm.control().Write(
       emboss::RfcommFrameType::
@@ -505,8 +506,8 @@ TEST(EmbossTest, WriteRfcommExtended) {
 
   emboss::RfcommFrameWriter rfcomm = emboss::MakeRfcommFrameView(&buffer);
   rfcomm.extended_address().Write(true);
-  rfcomm.command_response_direction().Write(
-      emboss::RfcommCommandResponseAndDirection::COMMAND_FROM_RESPONDER);
+  rfcomm.command_response().Write(false);
+  rfcomm.direction().Write(false);
   rfcomm.channel().Write(3);
   rfcomm.control().Write(
       emboss::RfcommFrameType::
@@ -546,6 +547,5 @@ TEST(EmbossTest, WriteRfcommExtended) {
 
   EXPECT_EQ(buffer, expected);
 }
-
 }  // namespace
 }  // namespace pw::bluetooth

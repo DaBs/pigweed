@@ -24,6 +24,8 @@
 
 namespace pw::allocator {
 
+/// @submodule{pw_allocator,concrete_block}
+
 /// Alias for a default block type that is compatible with `DlAllocator`.
 template <typename OffsetType>
 using DlBlock = DetailedBlock<OffsetType, GenericFastSortedItem>;
@@ -38,9 +40,9 @@ using DlBlock = DetailedBlock<OffsetType, GenericFastSortedItem>;
 /// not currently supported.
 ///
 /// Note that Doug Lea's "bins" are provided by pw_allocator's buckets. Both the
-/// the "fast" and "small" bins hold a single size, and can therefore be
-/// implemented using `UnorderedBucket`. The "large" bins hold a range of sizes
-/// a use `FastSortedBucket` to quickly return best-fit blocks as requested.
+/// "fast" and "small" bins hold a single size, and can therefore be implemented
+/// using `UnorderedBucket`. The "large" bins hold a range of sizes a use
+/// `FastSortedBucket` to quickly return best-fit blocks as requested.
 template <typename BlockType = DlBlock<uintptr_t>>
 class DlAllocator : public BlockAllocator<BlockType> {
  private:
@@ -81,6 +83,9 @@ class DlAllocator : public BlockAllocator<BlockType> {
   ~DlAllocator() override { Flush(); }
 
  private:
+  /// @copydoc BlockAllocator::GetMaxAllocatable
+  size_t DoGetMaxAllocatable() override;
+
   /// @copydoc BlockAllocator::ChooseBlock
   BlockResult<BlockType> ChooseBlock(Layout layout) override;
 
@@ -129,6 +134,8 @@ class DlAllocator : public BlockAllocator<BlockType> {
   std::array<uintptr_t, kNumBitmaps> bitmaps_;
 };
 
+/// @}
+
 // Template method implementations.
 
 template <typename BlockType>
@@ -154,6 +161,27 @@ constexpr DlAllocator<BlockType>::DlAllocator() {
     bins_in_round /= 2;
   }
   bitmaps_.fill(0);
+}
+
+template <typename BlockType>
+size_t DlAllocator<BlockType>::DoGetMaxAllocatable() {
+  ReleaseFastBins();
+  size_t bitmap_index = bitmaps_.size() - 1;
+  uintptr_t bitmap = bitmaps_[bitmap_index];
+  while (bitmap_index != 0 && bitmap == 0) {
+    --bitmap_index;
+    bitmap = bitmaps_[bitmap_index];
+  }
+  if (bitmap == 0) {
+    // No free blocks.
+    return 0;
+  }
+  size_t bitmap_offset = kBitmapBits - internal::CountLZero(bitmap) - 1;
+  size_t index = bitmap_index * kBitmapBits + bitmap_offset;
+  const BlockType* largest =
+      index < kNumSmallBins ? small_bins_[index].FindLargest()
+                            : large_bins_[index - kNumSmallBins].FindLargest();
+  return largest == nullptr ? 0 : largest->InnerSize();
 }
 
 template <typename BlockType>
@@ -264,7 +292,9 @@ void DlAllocator<BlockType>::ReleaseFastBins() {
   for (auto& fast_bin : fast_bins_) {
     while (!fast_bin.empty()) {
       BlockType* block = fast_bin.RemoveAny();
-      PW_ASSERT(block != nullptr);
+      if constexpr (Hardening::kIncludesDebugChecks) {
+        PW_ASSERT(block != nullptr);
+      }
       Base::DeallocateBlock(std::move(block));
     }
   }
@@ -282,7 +312,8 @@ bool DlAllocator<BlockType>::FindNextAvailable(size_t& index) {
     }
     bitmap = bitmaps_[bitmap_index];
   }
-  index = (bitmap_index * kBitmapBits) + cpp20::countr_zero(bitmap);
+  auto bitmap_log2 = internal::CountRZero(bitmap);
+  index = (bitmap_index * kBitmapBits) + bitmap_log2;
   return true;
 }
 

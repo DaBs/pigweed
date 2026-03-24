@@ -27,6 +27,7 @@ import math
 import re
 import struct
 from typing import (
+    Any,
     Iterable,
     NamedTuple,
     Match,
@@ -162,8 +163,8 @@ class FormatSpec:
         - Precision specifies the number of significant digits, not just digits
           after the decimal place.
         - If the precision is specified as `0`, it is interpreted to mean `1`.
-        - `e` formatting is used if the the exponent would be less than `-4` or
-          is greater than or equal to the precision.
+        - `e` formatting is used if the exponent would be less than `-4` or is
+          greater than or equal to the precision.
         - Trailing zeros are removed unless the `#` flag is set.
         - A decimal point only appears if it is followed by a digit.
         - `NaN` or infinities always follow `f` formatting.
@@ -172,8 +173,8 @@ class FormatSpec:
         - Precision specifies the number of significant digits, not just digits
           after the decimal place.
         - If the precision is specified as `0`, it is interpreted to mean `1`.
-        - `E` formatting is used if the the exponent would be less than `-4` or
-          is greater than or equal to the precision.
+        - `E` formatting is used if the exponent would be less than `-4` or is
+          greater than or equal to the precision.
         - Trailing zeros are removed unless the `#` flag is set.
         - A decimal point only appears if it is followed by a digit.
         - `NaN` or infinities always follow `F` formatting.
@@ -514,7 +515,7 @@ class FormatSpec:
         )
 
     def _decode_string(self, encoded: bytes) -> DecodedArg:
-        """Reads a unicode string from the encoded data."""
+        """Reads a byte string from the encoded data."""
         if not encoded:
             return DecodedArg.missing(self)
 
@@ -587,11 +588,11 @@ class DecodedArg:
     def __init__(
         self,
         specifier: FormatSpec,
-        value,
+        value: Any,
         raw_data: bytes,
         status: int = OK,
         error=None,
-    ):
+    ) -> None:
         self.specifier = specifier  # FormatSpec (e.g. to represent "%0.2f")
         self.value = value  # the decoded value, or None if decoding failed
         self.raw_data = bytes(
@@ -756,11 +757,14 @@ class FormattedString(NamedTuple):
         To format a list of FormattedStrings from most to least successful,
         use sort(key=FormattedString.score, reverse=True).
         """
+        # Count arguments excluding %% since they are not decoded.
+        args_decoded = sum(1 for a in self.args if a.specifier.type != '%')
+
         return (
             self.ok(),  # decocoded all data and all expected args were found
             not self.remaining,  # decoded all data
             -sum(not arg.ok() for arg in self.args),  # fewest errors
-            len(self.args),  # decoded the most arguments
+            args_decoded,  # decoded the most arguments
             date_removed or datetime.max,
         )  # most recently present
 
@@ -809,6 +813,7 @@ class FormatString:
         """
         decoded_args = []
 
+        last_good_index: int | None = None
         fatal_error = False
         index = 0
 
@@ -822,11 +827,12 @@ class FormatString:
                 arg.status |= DecodedArg.SKIPPED
             elif not arg.ok():
                 fatal_error = True
+                last_good_index = index
 
             decoded_args.append(arg)
             index += len(arg.raw_data)
 
-        return tuple(decoded_args), encoded[index:]
+        return tuple(decoded_args), encoded[last_good_index or index :]
 
     def format(
         self, encoded_args: bytes, show_errors: bool = False

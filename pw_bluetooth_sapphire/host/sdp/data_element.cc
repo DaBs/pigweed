@@ -27,6 +27,9 @@
 
 // Returns true if |url| is a valid URI.
 bool IsValidUrl(const std::string& url) {
+  if (url.empty()) {
+    return false;
+  }
   // Pulled from [RFC 3986](https://www.rfc-editor.org/rfc/rfc3986).
   // See Section 2.2 for the set of reserved characters.
   // See Section 2.3 for the set of unreserved characters.

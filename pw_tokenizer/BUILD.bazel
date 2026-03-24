@@ -1,4 +1,4 @@
-# Copyright 2023 The Pigweed Authors
+# Copyright 2025 The Pigweed Authors
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may not
 # use this file except in compliance with the License. You may obtain a copy of
@@ -12,9 +12,10 @@
 # License for the specific language governing permissions and limitations under
 # the License.
 
+load("@bazel_skylib//rules:run_binary.bzl", "run_binary")
 load("@com_google_protobuf//bazel:proto_library.bzl", "proto_library")
+load("@com_google_protobuf//bazel:py_proto_library.bzl", "py_proto_library")
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
-load("@rules_python//python:proto.bzl", "py_proto_library")
 load("@rules_python//sphinxdocs:sphinx_docs_library.bzl", "sphinx_docs_library")
 load("//pw_build:compatibility.bzl", "incompatible_with_mcu")
 load("//pw_build:copy_to_bin.bzl", "copy_to_bin")
@@ -22,6 +23,7 @@ load("//pw_build:pw_cc_binary.bzl", "pw_cc_binary")
 load("//pw_build:pw_cc_blob_library.bzl", "pw_cc_blob_info", "pw_cc_blob_library")
 load("//pw_build:pw_linker_script.bzl", "pw_linker_script")
 load("//pw_fuzzer:fuzzer.bzl", "pw_cc_fuzz_test")
+load("//pw_perf_test:pw_cc_perf_test.bzl", "pw_cc_perf_test")
 load("//pw_unit_test:pw_cc_test.bzl", "pw_cc_test")
 
 package(
@@ -72,6 +74,12 @@ label_flag(
     build_setting_default = "//pw_build:default_module_config",
 )
 
+cc_library(
+    name = "pw_tokenizer_linker_sections_ld",
+    hdrs = ["pw_tokenizer_linker_sections.ld"],
+    strip_include_prefix = ".",
+)
+
 pw_linker_script(
     name = "linker_script",
     linker_script = "pw_tokenizer_linker_sections.ld",
@@ -113,6 +121,7 @@ cc_library(
         "public/pw_tokenizer/token_database.h",
     ],
     implementation_deps = [
+        "//pw_base64",
         "//pw_elf:reader",
     ],
     strip_include_prefix = "public",
@@ -129,6 +138,24 @@ cc_library(
         "//pw_status",
         "//pw_stream",
         "//pw_varint",
+    ],
+)
+
+pw_linker_script(
+    name = "detokenize_from_this_program_linker_script",
+    linker_script = "add_detokenize_from_this_program_sections.ld",
+    visibility = ["//visibility:private"],
+)
+
+cc_library(
+    name = "detokenize_from_this_program",
+    srcs = ["detokenize_from_this_program.cc"],
+    hdrs = ["public/pw_tokenizer/detokenize_from_this_program.h"],
+    strip_include_prefix = "public",
+    deps = [
+        ":decoder",
+        ":detokenize_from_this_program_linker_script",
+        "//pw_result",
     ],
 )
 
@@ -244,15 +271,59 @@ pw_cc_blob_library(
     out_header = "pw_tokenizer/example_binary_with_tokenized_strings.h",
 )
 
+run_binary(
+    name = "generate_data_driven_detokenize_test",
+    outs = ["data_driven_detokenize_test.cc"],
+    args = [
+        "--generate-cc-test",
+        "$(execpath :data_driven_detokenize_test.cc)",
+    ],
+    tool = "//pw_tokenizer/py:generate_data_driven_detokenize_test",
+    visibility = ["//visibility:private"],
+)
+
 pw_cc_test(
     name = "detokenize_test",
     srcs = [
         "detokenize_test.cc",
+        ":generate_data_driven_detokenize_test",
     ],
     deps = [
+        ":base64",
         ":decoder",
         ":detokenizer_elf_test_blob",
+        "//pw_bytes",
+        "//pw_span",
         "//pw_stream",
+    ],
+)
+
+pw_cc_test(
+    name = "detokenize_from_this_program_test",
+    srcs = [
+        "detokenize_from_this_program_test.cc",
+    ],
+    # The linker script used by this test does not work on macOS.
+    target_compatible_with = select({
+        "@platforms//os:macos": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
+    deps = [
+        ":detokenize_from_this_program",
+        ":pw_tokenizer",
+        "//pw_bytes",
+    ],
+)
+
+pw_cc_perf_test(
+    name = "detokenize_perf_test",
+    srcs = ["detokenize_perf_test.cc"],
+    deps = [
+        ":decoder",
+        "//pw_assert:check",
+        "//pw_bytes",
+        "//pw_perf_test",
+        "//pw_span",
     ],
 )
 
@@ -308,11 +379,13 @@ pw_cc_test(
         "tokenize_test.cc",
         "tokenize_test_c.c",
     ],
+    has_nc_test = True,
     # TODO: b/344050496 - get working on rp2040 and stm32f429i
     target_compatible_with = incompatible_with_mcu(),
     deps = [
         ":pw_tokenizer",
         "//pw_preprocessor",
+        "//pw_string:string",
         "//pw_varint",
     ],
 )
@@ -328,8 +401,8 @@ pw_cc_test(
     srcs = [
         "enum_test.cc",
     ],
+    has_nc_test = True,
     deps = [
-        "//pw_compilation_testing:negative_compilation_testing",
         "//pw_tokenizer",
     ],
 )
@@ -351,21 +424,13 @@ cc_library(
     ],
 )
 
-# Create a shared library for the tokenizer JNI wrapper. The include paths for
-# the JNI headers must be available in the system or provided with the
-# pw_java_native_interface_include_dirs variable.
-filegroup(
-    name = "detokenizer_jni",
-    srcs = [
-        "java/dev/pigweed/tokenizer/detokenizer.cc",
-    ],
-)
-
 filegroup(
     name = "doxygen",
     srcs = [
+        "public/pw_tokenizer/base64.h",
         "public/pw_tokenizer/config.h",
         "public/pw_tokenizer/detokenize.h",
+        "public/pw_tokenizer/detokenize_from_this_program.h",
         "public/pw_tokenizer/encode_args.h",
         "public/pw_tokenizer/enum.h",
         "public/pw_tokenizer/nested_tokenization.h",
@@ -386,6 +451,7 @@ sphinx_docs_library(
         "public/pw_tokenizer/internal/tokenize_string.h",
         "token_databases.rst",
         "tokenization.rst",
+        "tokenize_test.cc",
     ],
     prefix = "pw_tokenizer/",
     target_compatible_with = incompatible_with_mcu(),

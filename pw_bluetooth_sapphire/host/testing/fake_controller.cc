@@ -19,10 +19,12 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <vector>
 
 #include "pw_bluetooth/hci_android.emb.h"
 #include "pw_bluetooth/hci_data.emb.h"
 #include "pw_bluetooth/hci_events.emb.h"
+#include "pw_bluetooth_sapphire/internal/host/common/byte_buffer.h"
 #include "pw_bluetooth_sapphire/internal/host/common/log.h"
 #include "pw_bluetooth_sapphire/internal/host/common/packet_view.h"
 #include "pw_bluetooth_sapphire/internal/host/hci-spec/constants.h"
@@ -30,6 +32,7 @@
 #include "pw_bluetooth_sapphire/internal/host/hci-spec/protocol.h"
 #include "pw_bluetooth_sapphire/internal/host/hci-spec/util.h"
 #include "pw_bluetooth_sapphire/internal/host/hci-spec/vendor_protocol.h"
+#include "pw_bluetooth_sapphire/internal/host/hci/advertising_packet_filter.h"
 
 namespace bt::testing {
 namespace {
@@ -189,6 +192,7 @@ void FakeController::Settings::ApplyAndroidVendorExtensionDefaults() {
   view.max_advt_instances().Write(3);
   view.version_supported().major_number().Write(0);
   view.version_supported().minor_number().Write(55);
+  view.total_scan_results_storage().Write(1);
 }
 
 bool FakeController::Settings::is_event_unmasked(
@@ -213,6 +217,19 @@ void FakeController::SetDefaultResponseStatus(hci_spec::OpCode opcode,
 
 void FakeController::ClearDefaultResponseStatus(hci_spec::OpCode opcode) {
   default_status_map_.erase(opcode);
+}
+
+void FakeController::SetDefaultAndroidResponseStatus(
+    hci_spec::OpCode opcode,
+    uint8_t subopcode,
+    pw::bluetooth::emboss::StatusCode status) {
+  PW_DCHECK(status != pwemb::StatusCode::SUCCESS);
+  default_android_status_map_.emplace(std::make_pair(opcode, subopcode),
+                                      status);
+}
+void FakeController::ClearDefaultAndroidResponseStatus(hci_spec::OpCode opcode,
+                                                       uint8_t subopcode) {
+  default_android_status_map_.erase(std::make_pair(opcode, subopcode));
 }
 
 bool FakeController::AddPeer(std::unique_ptr<FakePeer> peer) {
@@ -597,6 +614,23 @@ bool FakeController::MaybeRespondWithDefaultStatus(hci_spec::OpCode opcode) {
   return true;
 }
 
+bool FakeController::MaybeRespondWithDefaultAndroidStatus(
+    hci_spec::OpCode opcode, uint8_t subopcode) {
+  auto iter =
+      default_android_status_map_.find(std::make_pair(opcode, subopcode));
+  if (iter == default_android_status_map_.end()) {
+    return false;
+  }
+
+  bt_log(INFO,
+         "fake-hci",
+         "responding with error (command: %#.4x, status: %#.2hhx)",
+         opcode,
+         static_cast<unsigned char>(iter->second));
+  RespondWithCommandComplete(static_cast<pwemb::OpCode>(opcode), iter->second);
+  return true;
+}
+
 void FakeController::SendInquiryResponses() {
   // TODO(jamuraa): combine some of these into a single response event
   for (const auto& [addr, peer] : peers_) {
@@ -636,25 +670,290 @@ void FakeController::SendAdvertisingReports() {
   }
 }
 
+void FakeController::SendPeriodicAdvertisingReports() {
+  // Send Periodic Advertising report for each sync
+  for (auto& [sync_handle, sync] : periodic_advertising_syncs_) {
+    auto peer_iter = peers_.find(sync.peer_address);
+    if (peer_iter == peers_.end()) {
+      continue;
+    }
+    FakePeer* peer = peer_iter->second.get();
+
+    if (!peer->HasPeriodicAdvertisement(sync.advertising_sid)) {
+      continue;
+    }
+
+    SendPeriodicAdvertisingReport(*peer, sync_handle, sync.advertising_sid);
+  }
+}
+
+void FakeController::SendPeriodicAdvertisingReport(
+    FakePeer& peer, hci_spec::SyncHandle sync_handle, uint8_t advertising_sid) {
+  PW_CHECK(peer.HasPeriodicAdvertisement(advertising_sid));
+  DynamicByteBuffer report_event =
+      peer.BuildPeriodicAdvertisingReportEvent(sync_handle, advertising_sid);
+  SendCommandChannelPacket(report_event);
+  std::optional<DynamicByteBuffer> big_info_event =
+      peer.BuildBigInfoAdvertisingReportEvent(sync_handle, advertising_sid);
+  if (big_info_event) {
+    SendCommandChannelPacket(*big_info_event);
+  }
+}
+
+void FakeController::MaybeSendPeriodicAdvertisingSyncEstablishedEvent() {
+  if (!le_scan_state_.enabled || !pending_periodic_advertising_create_sync_) {
+    return;
+  }
+  for (auto& entry : periodic_advertiser_list_) {
+    auto peer_iter = peers_.find(entry.address);
+    if (peer_iter == peers_.end()) {
+      continue;
+    }
+
+    if (!peer_iter->second->HasPeriodicAdvertisement(entry.advertising_sid)) {
+      continue;
+    }
+
+    bool already_synced = false;
+    for (auto& [_, sync] : periodic_advertising_syncs_) {
+      if (sync.peer_address == entry.address &&
+          sync.advertising_sid == entry.advertising_sid) {
+        already_synced = true;
+        break;
+      }
+    }
+    if (already_synced) {
+      continue;
+    }
+
+    uint16_t sync_handle = next_periodic_advertising_sync_handle_++;
+
+    periodic_advertising_syncs_.try_emplace(
+        sync_handle,
+        PeriodicAdvertisingSync{
+            .peer_address = entry.address,
+            .advertising_sid = entry.advertising_sid,
+            .duplicate_filtering = pending_periodic_advertising_create_sync_
+                                       ->duplicate_filtering});
+    auto packet = hci::EventPacket::New<
+        pwemb::LEPeriodicAdvertisingSyncEstablishedSubeventV2Writer>(
+        hci_spec::kLEMetaEventCode);
+    auto params = packet.view_t();
+    params.le_meta_event().subevent_code_enum().Write(
+        pw::bluetooth::emboss::LeSubEventCode::
+            PERIODIC_ADVERTISING_SYNC_ESTABLISHED_V2);
+    params.status().Write(pwemb::StatusCode::SUCCESS);
+    params.sync_handle().Write(sync_handle);
+    params.advertising_sid().Write(entry.advertising_sid);
+    params.advertiser_address_type().Write(
+        DeviceAddress::DeviceAddrToLeAddr(entry.address.type()));
+    params.advertiser_address().CopyFrom(entry.address.value().view());
+    params.advertiser_phy().Write(pw::bluetooth::emboss::LEPhy::LE_1M);
+    params.periodic_advertising_interval().Write(0x0006);  // 7.5ms, the minimum
+    params.advertiser_clock_accuracy().Write(pwemb::LEClockAccuracy::PPM_500);
+    params.num_subevents().Write(0);
+    params.subevent_interval().Write(0);      // No subevents
+    params.response_slot_delay().Write(0);    // No response slots
+    params.response_slot_spacing().Write(0);  // No response slots
+    SendCommandChannelPacket(packet.data());
+    pending_periodic_advertising_create_sync_.reset();
+
+    SendPeriodicAdvertisingReport(
+        *peer_iter->second, sync_handle, entry.advertising_sid);
+    break;
+  }
+}
+
+bool FakeController::DataMatchesWithMask(const std::vector<uint8_t>& a,
+                                         const std::vector<uint8_t>& b,
+                                         const std::vector<uint8_t>& mask) {
+  if (a.size() != b.size()) {
+    return false;
+  }
+
+  if (a.size() != mask.size()) {
+    return false;
+  }
+
+  for (size_t i = 0; i < a.size(); ++i) {
+    uint8_t byte_a = a[i] & mask[i];
+    uint8_t byte_b = b[i] & mask[i];
+
+    if (byte_a != byte_b) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+bool FakeController::FilterMatchesPeer(const FakePeer& p,
+                                       const PacketFilter& f) {
+  bool filter_broadcast_address = (f.features_selected.broadcast_address ==
+                                   android_emb::ApcfFeatureFilterLogic::AND);
+  bool filter_service_uuid = (f.features_selected.service_uuid ==
+                              android_emb::ApcfFeatureFilterLogic::AND);
+  bool filter_solicitation_uuid = (f.features_selected.solicitation_uuid ==
+                                   android_emb::ApcfFeatureFilterLogic::AND);
+  bool filter_local_name = (f.features_selected.local_name ==
+                            android_emb::ApcfFeatureFilterLogic::AND);
+  bool filter_service_data = (f.features_selected.service_data ==
+                              android_emb::ApcfFeatureFilterLogic::AND);
+  bool filter_manufacturer_data = (f.features_selected.manufacturer_data ==
+                                   android_emb::ApcfFeatureFilterLogic::AND);
+
+  if (filter_broadcast_address) {
+    if (p.address().value() != f.broadcast_address.value()) {
+      return false;
+    }
+  }
+
+  // if there is no advertising data, check if we even needed to filter on
+  // advertising data before returning true or false
+  auto result = AdvertisingData::FromBytes(p.advertising_data());
+  if (result.is_error()) {
+    if (filter_service_uuid || filter_solicitation_uuid || filter_local_name ||
+        filter_service_data || filter_manufacturer_data) {
+      return false;
+    }
+
+    return true;
+  }
+
+  AdvertisingData ad = std::move(result.value());
+
+  if (filter_service_uuid) {
+    bool matches = false;
+
+    for (const UUID& uuid : ad.service_uuids()) {
+      if (f.service_uuid == uuid) {
+        matches = true;
+        break;
+      }
+    }
+
+    if (!matches) {
+      return false;
+    }
+  }
+
+  if (filter_solicitation_uuid) {
+    bool matches = false;
+
+    for (const UUID& uuid : ad.solicitation_uuids()) {
+      if (f.solicitation_uuid == uuid) {
+        matches = true;
+        break;
+      }
+    }
+
+    if (!matches) {
+      return false;
+    }
+  }
+
+  if (filter_local_name) {
+    if (!ad.local_name().has_value()) {
+      return false;
+    }
+
+    if (ad.local_name().value().name.find(f.local_name.value()) ==
+        std::string::npos) {
+      return false;
+    }
+  }
+
+  if (filter_service_data) {
+    bool matches = false;
+
+    for (const UUID& uuid : ad.service_data_uuids()) {
+      BufferView view = ad.service_data(uuid);
+      std::vector<uint8_t> ad_service_data(view.data(),
+                                           view.data() + view.size());
+      if (DataMatchesWithMask(ad_service_data,
+                              f.service_data.value(),
+                              f.service_data_mask.value())) {
+        matches = true;
+        break;
+      }
+    }
+
+    if (!matches) {
+      return false;
+    }
+  }
+
+  if (filter_manufacturer_data) {
+    bool matches = false;
+
+    for (uint16_t manufacturer_data_id : ad.manufacturer_data_ids()) {
+      BufferView view = ad.manufacturer_data(manufacturer_data_id);
+      std::vector<uint8_t> ad_manufacturer_data(view.data(),
+                                                view.data() + view.size());
+      if (DataMatchesWithMask(ad_manufacturer_data,
+                              f.manufacturer_data.value(),
+                              f.manufacturer_data_mask.value())) {
+        matches = true;
+        break;
+      }
+    }
+
+    if (!matches) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
 void FakeController::SendAdvertisingReport(const FakePeer& peer) {
-  if (!le_scan_state_.enabled || !peer.supports_le() ||
-      !peer.advertising_enabled()) {
+  if (!le_scan_state_.enabled) {
+    return;
+  }
+
+  if (!peer.supports_le()) {
+    return;
+  }
+
+  if (!peer.advertising_enabled()) {
     return;
   }
 
   DynamicByteBuffer buffer;
-  if (advertising_procedure() == AdvertisingProcedure::kExtended) {
+  if (scan_procedure() == ExtendedOperationType::kExtended) {
     buffer = peer.BuildExtendedAdvertisingReportEvent();
   } else {
     buffer = peer.BuildLegacyAdvertisingReportEvent();
   }
 
-  SendCommandChannelPacket(buffer);
+  if (!packet_filter_state_.enabled) {
+    SendCommandChannelPacket(buffer);
+    return;
+  }
+
+  if (packet_filter_state_.filters.empty()) {
+    SendCommandChannelPacket(buffer);
+    return;
+  }
+
+  for (const auto& [filter_index, filter] : packet_filter_state_.filters) {
+    if (FilterMatchesPeer(peer, filter)) {
+      SendCommandChannelPacket(buffer);
+      return;
+    }
+  }
 }
 
 void FakeController::SendScanResponseReport(const FakePeer& peer) {
-  if (!le_scan_state_.enabled || !peer.supports_le() ||
-      !peer.advertising_enabled()) {
+  if (!le_scan_state_.enabled) {
+    return;
+  }
+
+  if (!peer.supports_le()) {
+    return;
+  }
+
+  if (!peer.advertising_enabled()) {
     return;
   }
 
@@ -668,13 +967,51 @@ void FakeController::SendScanResponseReport(const FakePeer& peer) {
   }
 
   DynamicByteBuffer buffer;
-  if (advertising_procedure() == AdvertisingProcedure::kExtended) {
+  if (scan_procedure() == ExtendedOperationType::kExtended) {
     buffer = peer.BuildExtendedScanResponseEvent();
   } else {
     buffer = peer.BuildLegacyScanResponseReportEvent();
   }
 
-  SendCommandChannelPacket(buffer);
+  if (!packet_filter_state_.enabled) {
+    SendCommandChannelPacket(buffer);
+    return;
+  }
+
+  if (packet_filter_state_.filters.empty()) {
+    SendCommandChannelPacket(buffer);
+    return;
+  }
+
+  for (const auto& [filter_index, filter] : packet_filter_state_.filters) {
+    if (FilterMatchesPeer(peer, filter)) {
+      SendCommandChannelPacket(buffer);
+      return;
+    }
+  }
+}
+
+void FakeController::LosePeriodicSync(DeviceAddress address,
+                                      uint8_t advertising_sid) {
+  auto iter =
+      std::find_if(periodic_advertising_syncs_.begin(),
+                   periodic_advertising_syncs_.end(),
+                   [&](auto& sync) {
+                     return sync.second.peer_address == address &&
+                            sync.second.advertising_sid == advertising_sid;
+                   });
+  PW_CHECK(iter != periodic_advertising_syncs_.end());
+
+  auto sync_lost =
+      hci::EventPacket::New<pwemb::LEPeriodicAdvertisingSyncLostSubeventWriter>(
+          hci_spec::kLEMetaEventCode);
+  auto view = sync_lost.view_t();
+  view.le_meta_event().subevent_code_enum().Write(
+      pwemb::LeSubEventCode::PERIODIC_ADVERTISING_SYNC_LOST);
+  view.sync_handle().Write(iter->first);
+  SendCommandChannelPacket(sync_lost.data());
+
+  periodic_advertising_syncs_.erase(iter);
 }
 
 void FakeController::NotifyControllerParametersChanged() {
@@ -906,7 +1243,7 @@ void FakeController::OnLECreateConnectionCommandReceived(
     const pwemb::LECreateConnectionCommandView& params) {
   le_create_connection_command_count_++;
 
-  if (advertising_procedure() == AdvertisingProcedure::kExtended) {
+  if (advertising_procedure() == ExtendedOperationType::kExtended) {
     RespondWithCommandStatus(pwemb::OpCode::LE_CREATE_CONNECTION,
                              pwemb::StatusCode::COMMAND_DISALLOWED);
     return;
@@ -1014,7 +1351,7 @@ void FakeController::OnLEExtendedCreateConnectionCommandReceived(
   if (!EnableExtendedAdvertising()) {
     bt_log(INFO,
            "fake-hci",
-           "extended create connection command rejected, legacy advertising is "
+           "extended create connection command rejected, another type already "
            "in use");
     RespondWithCommandStatus(pwemb::OpCode::LE_EXTENDED_CREATE_CONNECTION_V1,
                              pwemb::StatusCode::COMMAND_DISALLOWED);
@@ -1225,6 +1562,138 @@ void FakeController::SendConnectionCompleteEvent(
   le_connect_rsp_task_.PostAfter(settings_.le_connection_delay);
 }
 
+void FakeController::OnLEPeriodicAdvertisingCreateSyncCommandReceived(
+    const pw::bluetooth::emboss::LEPeriodicAdvertisingCreateSyncCommandView&
+        params) {
+  if (pending_periodic_advertising_create_sync_) {
+    RespondWithCommandStatus(pwemb::OpCode::LE_PERIODIC_ADVERTISING_CREATE_SYNC,
+                             pwemb::StatusCode::COMMAND_DISALLOWED);
+    return;
+  }
+  RespondWithCommandStatus(pwemb::OpCode::LE_PERIODIC_ADVERTISING_CREATE_SYNC,
+                           pwemb::StatusCode::SUCCESS);
+
+  PeriodicAdvertisingCreateSync create_sync{
+      .duplicate_filtering =
+          params.options().enable_duplicate_filtering().Read()};
+  pending_periodic_advertising_create_sync_.emplace(create_sync);
+
+  MaybeSendPeriodicAdvertisingSyncEstablishedEvent();
+}
+
+void FakeController::OnLEPeriodicAdvertisingSyncTransferCommandReceived(
+    const pw::bluetooth::emboss::LEPeriodicAdvertisingSyncTransferCommandView&
+        params) {
+  auto sync_iter =
+      periodic_advertising_syncs_.find(params.sync_handle().Read());
+  if (sync_iter == periodic_advertising_syncs_.end()) {
+    RespondWithCommandComplete(
+        pwemb::OpCode::LE_PERIODIC_ADVERTISING_SYNC_TRANSFER,
+        pwemb::StatusCode::UNKNOWN_ADVERTISING_IDENTIFIER);
+    return;
+  }
+
+  FakePeer* fake_peer = nullptr;
+  for (auto& [_, peer] : peers_) {
+    if (peer->HasLink(params.connection_handle().Read())) {
+      fake_peer = peer.get();
+      break;
+    }
+  }
+  if (!fake_peer) {
+    RespondWithCommandComplete(
+        pwemb::OpCode::LE_PERIODIC_ADVERTISING_SYNC_TRANSFER,
+        pwemb::StatusCode::UNKNOWN_CONNECTION_ID);
+    return;
+  }
+
+  fake_peer->AddPeriodicAdvertisingSyncTransfer(
+      FakePeer::PeriodicAdvertisingSyncTransfer{
+          sync_iter->second.peer_address,
+          sync_iter->second.advertising_sid,
+          params.service_data().Read()});
+
+  RespondWithCommandComplete(
+      pwemb::OpCode::LE_PERIODIC_ADVERTISING_SYNC_TRANSFER,
+      pwemb::StatusCode::SUCCESS);
+}
+
+void FakeController::OnLEPeriodicAdvertisingTerminateSyncCommandReceived(
+    const pw::bluetooth::emboss::LEPeriodicAdvertisingTerminateSyncCommandView&
+        params) {
+  hci_spec::SyncHandle sync_handle = params.sync_handle().Read();
+  size_t count = periodic_advertising_syncs_.erase(sync_handle);
+  if (count == 0) {
+    RespondWithCommandComplete(
+        pwemb::OpCode::LE_PERIODIC_ADVERTISING_TERMINATE_SYNC,
+        pwemb::StatusCode::UNKNOWN_ADVERTISING_IDENTIFIER);
+    return;
+  }
+  RespondWithCommandComplete(
+      pwemb::OpCode::LE_PERIODIC_ADVERTISING_TERMINATE_SYNC,
+      pwemb::StatusCode::SUCCESS);
+}
+
+void FakeController::OnLEAddDeviceToPeriodicAdvertiserListCommandReceived(
+    const pw::bluetooth::emboss::LEAddDeviceToPeriodicAdvertiserListCommandView&
+        params) {
+  if (pending_periodic_advertising_create_sync_) {
+    RespondWithCommandComplete(
+        pwemb::OpCode::LE_ADD_DEVICE_TO_PERIODIC_ADVERTISER_LIST,
+        pwemb::StatusCode::COMMAND_DISALLOWED);
+    return;
+  }
+
+  DeviceAddress::Type addr_type = DeviceAddress::LeAddrToDeviceAddr(
+      params.advertiser_address_type().Read());
+  const DeviceAddress address(addr_type,
+                              DeviceAddressBytes(params.advertiser_address()));
+  PeriodicAdvertiserListEntry entry;
+  entry.address = address;
+  entry.advertising_sid = params.advertising_sid().Read();
+  if (periodic_advertiser_list_.count(entry)) {
+    RespondWithCommandComplete(
+        pwemb::OpCode::LE_ADD_DEVICE_TO_PERIODIC_ADVERTISER_LIST,
+        pwemb::StatusCode::INVALID_HCI_COMMAND_PARAMETERS);
+    return;
+  }
+
+  periodic_advertiser_list_.emplace(entry);
+  RespondWithCommandComplete(
+      pwemb::OpCode::LE_ADD_DEVICE_TO_PERIODIC_ADVERTISER_LIST,
+      pwemb::StatusCode::SUCCESS);
+}
+
+void FakeController::OnLERemoveDeviceFromPeriodicAdvertiserListCommandReceived(
+    const pw::bluetooth::emboss::
+        LERemoveDeviceFromPeriodicAdvertiserListCommandView& params) {
+  if (pending_periodic_advertising_create_sync_) {
+    RespondWithCommandComplete(
+        pwemb::OpCode::LE_REMOVE_DEVICE_FROM_PERIODIC_ADVERTISER_LIST,
+        pwemb::StatusCode::COMMAND_DISALLOWED);
+    return;
+  }
+
+  DeviceAddress::Type addr_type = DeviceAddress::LeAddrToDeviceAddr(
+      params.advertiser_address_type().Read());
+  const DeviceAddress address(addr_type,
+                              DeviceAddressBytes(params.advertiser_address()));
+  PeriodicAdvertiserListEntry entry;
+  entry.address = address;
+  entry.advertising_sid = params.advertising_sid().Read();
+  auto node = periodic_advertiser_list_.extract(entry);
+  if (node.empty()) {
+    RespondWithCommandComplete(
+        pwemb::OpCode::LE_REMOVE_DEVICE_FROM_PERIODIC_ADVERTISER_LIST,
+        pwemb::StatusCode::UNKNOWN_ADVERTISING_IDENTIFIER);
+    return;
+  }
+
+  RespondWithCommandComplete(
+      pwemb::OpCode::LE_REMOVE_DEVICE_FROM_PERIODIC_ADVERTISER_LIST,
+      pwemb::StatusCode::SUCCESS);
+}
+
 void FakeController::OnLEConnectionUpdateCommandReceived(
     const pwemb::LEConnectionUpdateCommandView& params) {
   hci_spec::ConnectionHandle handle = params.connection_handle().Read();
@@ -1400,11 +1869,10 @@ void FakeController::OnInquiry(const pwemb::InquiryCommandView& params) {
 
 void FakeController::OnLESetScanEnable(
     const pwemb::LESetScanEnableCommandView& params) {
-  if (!EnableLegacyAdvertising()) {
-    bt_log(
-        INFO,
-        "fake-hci",
-        "legacy advertising command rejected, extended advertising is in use");
+  if (!EnableLegacyScanning()) {
+    bt_log(INFO,
+           "fake-hci",
+           "legacy advertising command rejected, another type already in use");
     RespondWithCommandStatus(pwemb::OpCode::LE_SET_SCAN_ENABLE,
                              pwemb::StatusCode::COMMAND_DISALLOWED);
     return;
@@ -1437,11 +1905,11 @@ void FakeController::OnLESetScanEnable(
 
 void FakeController::OnLESetExtendedScanEnable(
     const pwemb::LESetExtendedScanEnableCommandView& params) {
-  if (!EnableExtendedAdvertising()) {
+  if (!EnableExtendedScanning()) {
     bt_log(
         INFO,
         "fake-hci",
-        "extended advertising command rejected, legacy advertising is in use");
+        "extended advertising command rejected, another type already in use");
     RespondWithCommandStatus(pwemb::OpCode::LE_SET_EXTENDED_SCAN_ENABLE,
                              pwemb::StatusCode::COMMAND_DISALLOWED);
     return;
@@ -1473,16 +1941,16 @@ void FakeController::OnLESetExtendedScanEnable(
 
   if (le_scan_state_.enabled) {
     SendAdvertisingReports();
+    MaybeSendPeriodicAdvertisingSyncEstablishedEvent();
   }
 }
 
 void FakeController::OnLESetScanParameters(
     const pwemb::LESetScanParametersCommandView& params) {
-  if (!EnableLegacyAdvertising()) {
-    bt_log(
-        INFO,
-        "fake-hci",
-        "legacy advertising command rejected, extended advertising is in use");
+  if (!EnableLegacyScanning()) {
+    bt_log(INFO,
+           "fake-hci",
+           "legacy advertising command rejected, another type already in use");
     RespondWithCommandStatus(pwemb::OpCode::LE_SET_SCAN_PARAMETERS,
                              pwemb::StatusCode::COMMAND_DISALLOWED);
     return;
@@ -1506,11 +1974,11 @@ void FakeController::OnLESetScanParameters(
 
 void FakeController::OnLESetExtendedScanParameters(
     const pwemb::LESetExtendedScanParametersCommandView& params) {
-  if (!EnableExtendedAdvertising()) {
+  if (!EnableExtendedScanning()) {
     bt_log(
         INFO,
         "fake-hci",
-        "extended advertising command rejected, legacy advertising is in use");
+        "extended advertising command rejected, another type already in use");
     RespondWithCommandStatus(pwemb::OpCode::LE_SET_SCAN_PARAMETERS,
                              pwemb::StatusCode::COMMAND_DISALLOWED);
     return;
@@ -1935,11 +2403,24 @@ void FakeController::OnReadBRADDR() {
 
 void FakeController::OnLESetAdvertisingEnable(
     const pwemb::LESetAdvertisingEnableCommandView& params) {
+  bool enable =
+      params.advertising_enable().Read() == pwemb::GenericEnableParam::ENABLE;
+  legacy_advertising_state_.enable_history.push_back(enable);
+
   if (!EnableLegacyAdvertising()) {
-    bt_log(
-        INFO,
-        "fake-hci",
-        "legacy advertising command rejected, extended advertising is in use");
+    bt_log(INFO,
+           "fake-hci",
+           "legacy advertising command rejected, another type already in use");
+    RespondWithCommandStatus(pwemb::OpCode::LE_SET_ADVERTISING_ENABLE,
+                             pwemb::StatusCode::COMMAND_DISALLOWED);
+    return;
+  }
+
+  if (legacy_advertising_state_.enabled == enable) {
+    bt_log(INFO,
+           "fake-hci",
+           "legacy advertising enable rejected; already in desired state: %d",
+           enable);
     RespondWithCommandStatus(pwemb::OpCode::LE_SET_ADVERTISING_ENABLE,
                              pwemb::StatusCode::COMMAND_DISALLOWED);
     return;
@@ -1957,8 +2438,7 @@ void FakeController::OnLESetAdvertisingEnable(
     return;
   }
 
-  legacy_advertising_state_.enabled =
-      params.advertising_enable().Read() == pwemb::GenericEnableParam::ENABLE;
+  legacy_advertising_state_.enabled = enable;
   RespondWithCommandComplete(pwemb::OpCode::LE_SET_ADVERTISING_ENABLE,
                              pwemb::StatusCode::SUCCESS);
   NotifyAdvertisingState();
@@ -1966,11 +2446,10 @@ void FakeController::OnLESetAdvertisingEnable(
 
 void FakeController::OnLESetScanResponseData(
     const pwemb::LESetScanResponseDataCommandView& params) {
-  if (!EnableLegacyAdvertising()) {
-    bt_log(
-        INFO,
-        "fake-hci",
-        "legacy advertising command rejected, extended advertising is in use");
+  if (!EnableLegacyScanning()) {
+    bt_log(INFO,
+           "fake-hci",
+           "legacy advertising command rejected, another type already in use");
     RespondWithCommandStatus(pwemb::OpCode::LE_SET_SCAN_RESPONSE_DATA,
                              pwemb::StatusCode::COMMAND_DISALLOWED);
     return;
@@ -1997,10 +2476,9 @@ void FakeController::OnLESetScanResponseData(
 void FakeController::OnLESetAdvertisingData(
     const pwemb::LESetAdvertisingDataCommandView& params) {
   if (!EnableLegacyAdvertising()) {
-    bt_log(
-        INFO,
-        "fake-hci",
-        "legacy advertising command rejected, extended advertising is in use");
+    bt_log(INFO,
+           "fake-hci",
+           "legacy advertising command rejected, another type already in use");
     RespondWithCommandStatus(pwemb::OpCode::LE_SET_ADVERTISING_DATA,
                              pwemb::StatusCode::COMMAND_DISALLOWED);
     return;
@@ -2027,10 +2505,9 @@ void FakeController::OnLESetAdvertisingData(
 void FakeController::OnLESetAdvertisingParameters(
     const pwemb::LESetAdvertisingParametersCommandView& params) {
   if (!EnableLegacyAdvertising()) {
-    bt_log(
-        INFO,
-        "fake-hci",
-        "legacy advertising command rejected, extended advertising is in use");
+    bt_log(INFO,
+           "fake-hci",
+           "legacy advertising command rejected, another type already in use");
     RespondWithCommandStatus(pwemb::OpCode::LE_SET_ADVERTISING_PARAMETERS,
                              pwemb::StatusCode::COMMAND_DISALLOWED);
     return;
@@ -2130,10 +2607,9 @@ void FakeController::OnLESetAdvertisingParameters(
 void FakeController::OnLESetRandomAddress(
     const pwemb::LESetRandomAddressCommandView& params) {
   if (!EnableLegacyAdvertising()) {
-    bt_log(
-        INFO,
-        "fake-hci",
-        "legacy advertising command rejected, extended advertising is in use");
+    bt_log(INFO,
+           "fake-hci",
+           "legacy advertising command rejected, another type already in use");
     RespondWithCommandStatus(pwemb::OpCode::LE_SET_RANDOM_ADDRESS,
                              pwemb::StatusCode::COMMAND_DISALLOWED);
     return;
@@ -2661,7 +3137,7 @@ void FakeController::OnLESetExtendedAdvertisingParameters(
     bt_log(
         INFO,
         "fake-hci",
-        "extended advertising command rejected, legacy advertising is in use");
+        "extended advertising command rejected, another type already in use");
     RespondWithCommandStatus(
         pwemb::OpCode::LE_SET_EXTENDED_ADVERTISING_PARAMETERS_V1,
         pwemb::StatusCode::COMMAND_DISALLOWED);
@@ -2911,7 +3387,7 @@ void FakeController::OnLESetExtendedAdvertisingData(
     bt_log(
         INFO,
         "fake-hci",
-        "extended advertising command rejected, legacy advertising is in use");
+        "extended advertising command rejected, another type already in use");
     RespondWithCommandStatus(pwemb::OpCode::LE_SET_EXTENDED_ADVERTISING_DATA,
                              pwemb::StatusCode::COMMAND_DISALLOWED);
     return;
@@ -3033,11 +3509,11 @@ void FakeController::OnLESetExtendedAdvertisingData(
 
 void FakeController::OnLESetExtendedScanResponseData(
     const pwemb::LESetExtendedScanResponseDataCommandView& params) {
-  if (!EnableExtendedAdvertising()) {
+  if (!EnableExtendedScanning()) {
     bt_log(
         INFO,
         "fake-hci",
-        "extended advertising command rejected, legacy advertising is in use");
+        "extended advertising command rejected, another type already in use");
     RespondWithCommandStatus(pwemb::OpCode::LE_SET_EXTENDED_SCAN_RESPONSE_DATA,
                              pwemb::StatusCode::COMMAND_DISALLOWED);
     return;
@@ -3166,7 +3642,7 @@ void FakeController::OnLESetExtendedAdvertisingEnable(
     bt_log(
         INFO,
         "fake-hci",
-        "extended advertising command rejected, legacy advertising is in use");
+        "extended advertising command rejected, another type already in use");
     RespondWithCommandStatus(pwemb::OpCode::LE_SET_EXTENDED_ADVERTISING_ENABLE,
                              pwemb::StatusCode::COMMAND_DISALLOWED);
     return;
@@ -3285,9 +3761,27 @@ void FakeController::OnLESetExtendedAdvertisingEnable(
       return;
     }
 
-    // TODO(fxbug.dev/42161900): if own address type is random, check that a
-    // random address is set.
+    // Core Spec v6.0, Volume 4, Part E, Section 7.8.56:
+    // If the advertising set's Own_Address_Type parameter is set to 0x01 and
+    // the random address for the advertising set has not been initialized using
+    // the HCI_LE_Set_Advertising_Set_Random_Address command, the Controller
+    // shall return the error code Invalid HCI Command Parameters (0x12).
+    if (state.own_address_type == pwemb::LEOwnAddressType::RANDOM &&
+        !state.random_address.has_value()) {
+      bt_log(INFO,
+             "fake-hci",
+             "cannot enable, requires random address but hasn't been set");
+      RespondWithCommandComplete(
+          pwemb::OpCode::LE_SET_EXTENDED_ADVERTISING_ENABLE,
+          pwemb::StatusCode::INVALID_HCI_COMMAND_PARAMETERS);
+      return;
+    }
+  }
 
+  for (uint8_t i = 0; i < num_sets; i++) {
+    hci_spec::AdvertisingHandle handle =
+        params.data()[i].advertising_handle().Read();
+    LEAdvertisingState& state = extended_advertising_states_[handle];
     state.enabled = true;
   }
 
@@ -3451,6 +3945,20 @@ void FakeController::OnReadLocalSupportedControllerDelay(
 
   RespondWithCommandComplete(
       pwemb::OpCode::READ_LOCAL_SUPPORTED_CONTROLLER_DELAY, &packet);
+}
+
+void FakeController::OnLERejectCisRequestCommand(
+    const pw::bluetooth::emboss::LERejectCISRequestCommandView& params) {
+  if (le_cis_reject_cb_) {
+    le_cis_reject_cb_(params.connection_handle().Read());
+  }
+  auto packet = hci::EventPacket::New<
+      pwemb::LERejectCisRequestCommandCompleteEventWriter>(
+      hci_spec::kCommandCompleteEventCode);
+  auto response_view = packet.view_t();
+  response_view.status().Write(pwemb::StatusCode::SUCCESS);
+  response_view.connection_handle().Write(params.connection_handle().Read());
+  RespondWithCommandComplete(pwemb::OpCode::LE_REJECT_CIS_REQUEST, &packet);
 }
 
 void FakeController::OnCommandPacketReceived(
@@ -3661,6 +4169,15 @@ void FakeController::OnAndroidLEMultiAdvtSetAdvtParam(
   view.sub_opcode().Write(
       android_emb::LEMultiAdvtSubOpcode::SET_ADVERTISING_PARAMETERS);
 
+  if (!EnableVendorAdvertising()) {
+    bt_log(INFO,
+           "fake-hci",
+           "vendor advertising command rejected, another advertising in use");
+    view.status().Write(pwemb::StatusCode::COMMAND_DISALLOWED);
+    RespondWithCommandComplete(pwemb::OpCode::ANDROID_LE_MULTI_ADVT, &packet);
+    return;
+  }
+
   hci_spec::AdvertisingHandle handle = params.adv_handle().Read();
   if (!IsValidAdvertisingHandle(handle)) {
     bt_log(ERROR, "fake-hci", "advertising handle outside range: %d", handle);
@@ -3768,6 +4285,15 @@ void FakeController::OnAndroidLEMultiAdvtSetAdvtData(
   view.sub_opcode().Write(
       android_emb::LEMultiAdvtSubOpcode::SET_ADVERTISING_DATA);
 
+  if (!EnableVendorAdvertising()) {
+    bt_log(INFO,
+           "fake-hci",
+           "vendor advertising command rejected, another advertising in use");
+    view.status().Write(pwemb::StatusCode::COMMAND_DISALLOWED);
+    RespondWithCommandComplete(pwemb::OpCode::ANDROID_LE_MULTI_ADVT, &packet);
+    return;
+  }
+
   hci_spec::AdvertisingHandle handle = params.adv_handle().Read();
   if (!IsValidAdvertisingHandle(handle)) {
     bt_log(ERROR, "fake-hci", "advertising handle outside range: %d", handle);
@@ -3841,6 +4367,15 @@ void FakeController::OnAndroidLEMultiAdvtSetScanResp(
   auto view = packet.view_t();
   view.sub_opcode().Write(
       android_emb::LEMultiAdvtSubOpcode::SET_SCAN_RESPONSE_DATA);
+
+  if (!EnableVendorAdvertising()) {
+    bt_log(INFO,
+           "fake-hci",
+           "vendor advertising command rejected, another advertising in use");
+    view.status().Write(pwemb::StatusCode::COMMAND_DISALLOWED);
+    RespondWithCommandComplete(pwemb::OpCode::ANDROID_LE_MULTI_ADVT, &packet);
+    return;
+  }
 
   hci_spec::AdvertisingHandle handle = params.adv_handle().Read();
   if (!IsValidAdvertisingHandle(handle)) {
@@ -3919,6 +4454,15 @@ void FakeController::OnAndroidLEMultiAdvtSetRandomAddr(
   view.sub_opcode().Write(
       android_emb::LEMultiAdvtSubOpcode::SET_RANDOM_ADDRESS);
 
+  if (!EnableVendorAdvertising()) {
+    bt_log(INFO,
+           "fake-hci",
+           "vendor advertising command rejected, another advertising in use");
+    view.status().Write(pwemb::StatusCode::COMMAND_DISALLOWED);
+    RespondWithCommandComplete(pwemb::OpCode::ANDROID_LE_MULTI_ADVT, &packet);
+    return;
+  }
+
   hci_spec::AdvertisingHandle handle = params.adv_handle().Read();
   if (!IsValidAdvertisingHandle(handle)) {
     bt_log(ERROR, "fake-hci", "advertising handle outside range: %d", handle);
@@ -3967,6 +4511,15 @@ void FakeController::OnAndroidLEMultiAdvtEnable(
   auto view = packet.view_t();
   view.sub_opcode().Write(android_emb::LEMultiAdvtSubOpcode::ENABLE);
 
+  if (!EnableVendorAdvertising()) {
+    bt_log(INFO,
+           "fake-hci",
+           "vendor advertising command rejected, another advertising in use");
+    view.status().Write(pwemb::StatusCode::COMMAND_DISALLOWED);
+    RespondWithCommandComplete(pwemb::OpCode::ANDROID_LE_MULTI_ADVT, &packet);
+    return;
+  }
+
   hci_spec::AdvertisingHandle handle = params.advertising_handle().Read();
 
   if (!IsValidAdvertisingHandle(handle)) {
@@ -3992,8 +4545,13 @@ void FakeController::OnAndroidLEMultiAdvtEnable(
 void FakeController::OnAndroidLEMultiAdvt(
     const PacketView<hci_spec::CommandHeader>& command_packet) {
   const auto& payload = command_packet.payload_data();
-
   uint8_t subopcode = payload.To<uint8_t>();
+
+  if (MaybeRespondWithDefaultAndroidStatus(command_packet.header().opcode,
+                                           subopcode)) {
+    return;
+  }
+
   switch (subopcode) {
     case android_hci::kLEMultiAdvtSetAdvtParamSubopcode: {
       auto params = android_emb::MakeLEMultiAdvtSetAdvtParamCommandView(
@@ -4037,6 +4595,1739 @@ void FakeController::OnAndroidLEMultiAdvt(
   }
 }
 
+void FakeController::OnAndroidLEApcfEnableCommand(
+    const android_emb::LEApcfEnableCommandView& params) {
+  if (params.enabled().Read() == pwemb::GenericEnableParam::ENABLE) {
+    packet_filter_state_.enabled = true;
+  } else {
+    packet_filter_state_.enabled = false;
+  }
+
+  auto packet = hci::EventPacket::New<
+      android_emb::LEApcfEnableCommandCompleteEventWriter>(
+      hci_spec::kCommandCompleteEventCode);
+  auto view = packet.view_t();
+  view.sub_opcode().Write(android_emb::ApcfSubOpcode::ENABLE);
+  view.enabled().Write(params.enabled().Read());
+  RespondWithCommandComplete(pwemb::OpCode::ANDROID_APCF, &packet);
+}
+
+void FakeController::OnAndroidLEApcfSetFilteringParametersCommandAdd(
+    const android_emb::LEApcfSetFilteringParametersCommandView& params) {
+  uint8_t filter_index = params.filter_index().Read();
+
+  PacketFilter filter;
+  filter.filter_index = params.filter_index().Read();
+
+  if (params.feature_selection().broadcast_address().Read()) {
+    filter.features_selected.broadcast_address =
+        android_emb::ApcfFeatureFilterLogic::AND;
+  }
+
+  if (params.feature_selection().service_uuid().Read()) {
+    filter.features_selected.service_uuid =
+        android_emb::ApcfFeatureFilterLogic::AND;
+  }
+
+  if (params.feature_selection().service_solicitation_uuid().Read()) {
+    filter.features_selected.solicitation_uuid =
+        android_emb::ApcfFeatureFilterLogic::AND;
+  }
+
+  if (params.feature_selection().local_name().Read()) {
+    filter.features_selected.local_name =
+        android_emb::ApcfFeatureFilterLogic::AND;
+  }
+
+  if (params.feature_selection().manufacturer_data().Read()) {
+    filter.features_selected.manufacturer_data =
+        android_emb::ApcfFeatureFilterLogic::AND;
+  }
+
+  if (params.feature_selection().service_data().Read()) {
+    filter.features_selected.service_data =
+        android_emb::ApcfFeatureFilterLogic::AND;
+  }
+
+  if (params.feature_selection().ad_type().Read()) {
+    filter.features_selected.ad_type = android_emb::ApcfFeatureFilterLogic::AND;
+  }
+
+  // Sapphire only supports the OR operation across individual packet filter
+  // lists. No need to implement the extra feature when we don't use
+  // it. However, make sure that we don't accidentally try to use it in our
+  // code.
+  PW_CHECK(!params.list_logic_type().broadcast_address().Read());
+  PW_CHECK(!params.list_logic_type().service_uuid().Read());
+  PW_CHECK(!params.list_logic_type().service_solicitation_uuid().Read());
+  PW_CHECK(!params.list_logic_type().local_name().Read());
+  PW_CHECK(!params.list_logic_type().manufacturer_data().Read());
+  PW_CHECK(!params.list_logic_type().service_data().Read());
+  PW_CHECK(!params.list_logic_type().ad_type().Read());
+
+  filter.filter_logic_type = params.filter_logic_type().Read();
+  filter.rssi_high_threshold = params.rssi_high_threshold().Read();
+  filter.rssi_low_threshold = params.rssi_low_threshold().Read();
+
+  switch (params.delivery_mode().Read()) {
+    case android_emb::ApcfDeliveryMode::IMMEDIATE:
+      filter.delivery_mode =
+          hci::AdvertisingPacketFilter::Config::DeliveryMode::kImmediate;
+      break;
+    case android_emb::ApcfDeliveryMode::BATCHED:
+      filter.delivery_mode =
+          hci::AdvertisingPacketFilter::Config::DeliveryMode::kBatched;
+      break;
+    case android_emb::ApcfDeliveryMode::ON_FOUND:
+      PW_CRASH("fake controller doesn't support the on_found delivery mode");
+      break;
+  }
+
+  // We ignore devliery modes other than immediate delivery for testing
+  // purposes: fields related to a delivery mode of ON_FOUND aren't read
+  // here. The testing focus is on the logic and functionality in the
+  // implementation. The delivery mode parameter simply delays the delivery of
+  // matching advertising packets.
+
+  packet_filter_state_.filters[filter_index] = filter;
+
+  uint8_t available_filters =
+      packet_filter_state_.max_filters - packet_filter_state_.filters.size();
+  auto packet =
+      hci::EventPacket::New<android_emb::LEApcfCommandCompleteEventWriter>(
+          hci_spec::kCommandCompleteEventCode);
+  auto view = packet.view_t();
+  view.sub_opcode().Write(android_emb::ApcfSubOpcode::SET_FILTERING_PARAMETERS);
+  view.action().Write(params.action().Read());
+  view.available_spaces().Write(available_filters);
+  RespondWithCommandComplete(pwemb::OpCode::ANDROID_APCF, &packet);
+}
+
+void FakeController::OnAndroidLEApcfSetFilteringParametersCommandDelete(
+    const android_emb::LEApcfSetFilteringParametersCommandView& params) {
+  uint8_t filter_index = params.filter_index().Read();
+  if (packet_filter_state_.filters.count(filter_index) == 0) {
+    bt_log(WARN,
+           "fake-hci",
+           "packet filter index (%d) doesn't exist",
+           filter_index);
+    RespondWithCommandComplete(
+        pwemb::OpCode::ANDROID_APCF,
+        pwemb::StatusCode::INVALID_HCI_COMMAND_PARAMETERS);
+    return;
+  }
+
+  packet_filter_state_.filters_broadcast_address.erase(filter_index);
+  packet_filter_state_.filters_service_uuid.erase(filter_index);
+  packet_filter_state_.filters_solicitation_uuid.erase(filter_index);
+  packet_filter_state_.filters_manufacturer_data.erase(filter_index);
+  packet_filter_state_.filters_service_data.erase(filter_index);
+  packet_filter_state_.filters_advertising_data.erase(filter_index);
+  packet_filter_state_.filters.erase(filter_index);
+
+  uint8_t available_filters =
+      packet_filter_state_.max_filters - packet_filter_state_.filters.size();
+  auto packet =
+      hci::EventPacket::New<android_emb::LEApcfCommandCompleteEventWriter>(
+          hci_spec::kCommandCompleteEventCode);
+  auto view = packet.view_t();
+  view.sub_opcode().Write(android_emb::ApcfSubOpcode::SET_FILTERING_PARAMETERS);
+  view.action().Write(params.action().Read());
+  view.available_spaces().Write(available_filters);
+  RespondWithCommandComplete(pwemb::OpCode::ANDROID_APCF, &packet);
+}
+
+void FakeController::OnAndroidLEApcfSetFilteringParametersCommandClear(
+    const android_emb::LEApcfSetFilteringParametersCommandView& params) {
+  packet_filter_state_.filters_broadcast_address.clear();
+  packet_filter_state_.filters_service_uuid.clear();
+  packet_filter_state_.filters_solicitation_uuid.clear();
+  packet_filter_state_.filters_manufacturer_data.clear();
+  packet_filter_state_.filters_service_data.clear();
+  packet_filter_state_.filters_advertising_data.clear();
+  packet_filter_state_.filters.clear();
+
+  uint8_t available_filters =
+      packet_filter_state_.max_filters - packet_filter_state_.filters.size();
+  auto packet =
+      hci::EventPacket::New<android_emb::LEApcfCommandCompleteEventWriter>(
+          hci_spec::kCommandCompleteEventCode);
+  auto view = packet.view_t();
+  view.sub_opcode().Write(android_emb::ApcfSubOpcode::SET_FILTERING_PARAMETERS);
+  view.action().Write(params.action().Read());
+  view.available_spaces().Write(available_filters);
+  RespondWithCommandComplete(pwemb::OpCode::ANDROID_APCF, &packet);
+}
+
+void FakeController::OnAndroidLEApcfSetFilteringParametersCommand(
+    const android_emb::LEApcfSetFilteringParametersCommandView& params) {
+  android_emb::ApcfAction action = params.action().Read();
+
+  switch (action) {
+    case android_emb::ApcfAction::ADD:
+      OnAndroidLEApcfSetFilteringParametersCommandAdd(params);
+      break;
+    case android_emb::ApcfAction::DELETE:
+      OnAndroidLEApcfSetFilteringParametersCommandDelete(params);
+      break;
+    case android_emb::ApcfAction::CLEAR:
+      OnAndroidLEApcfSetFilteringParametersCommandClear(params);
+      break;
+  }
+}
+
+void FakeController::OnAndroidLEApcfBroadcastAddressCommandAdd(
+    const android_emb::LEApcfBroadcastAddressCommandView& params) {
+  uint8_t filter_index = params.filter_index().Read();
+  if (packet_filter_state_.filters.count(filter_index) == 0) {
+    bt_log(WARN,
+           "fake-hci",
+           "packet filter index (%d) doesn't exist",
+           filter_index);
+    RespondWithCommandComplete(
+        pwemb::OpCode::ANDROID_APCF,
+        pwemb::StatusCode::INVALID_HCI_COMMAND_PARAMETERS);
+    return;
+  }
+
+  PacketFilter* filter = &packet_filter_state_.filters[filter_index];
+  filter->broadcast_address = DeviceAddressBytes(params.broadcaster_address());
+  packet_filter_state_.filters_broadcast_address[filter_index] = filter;
+
+  uint8_t available_filters =
+      packet_filter_state_.max_filters - packet_filter_state_.filters.size();
+  auto packet =
+      hci::EventPacket::New<android_emb::LEApcfCommandCompleteEventWriter>(
+          hci_spec::kCommandCompleteEventCode);
+  auto view = packet.view_t();
+  view.sub_opcode().Write(android_emb::ApcfSubOpcode::BROADCAST_ADDRESS);
+  view.action().Write(params.action().Read());
+  view.available_spaces().Write(available_filters);
+  RespondWithCommandComplete(pwemb::OpCode::ANDROID_APCF, &packet);
+}
+
+void FakeController::OnAndroidLEApcfBroadcastAddressCommandDelete(
+    const android_emb::LEApcfBroadcastAddressCommandView& params) {
+  uint8_t filter_index = params.filter_index().Read();
+  if (packet_filter_state_.filters.count(filter_index) == 0) {
+    bt_log(WARN,
+           "fake-hci",
+           "packet filter index (%d) doesn't exist",
+           filter_index);
+    RespondWithCommandComplete(
+        pwemb::OpCode::ANDROID_APCF,
+        pwemb::StatusCode::INVALID_HCI_COMMAND_PARAMETERS);
+    return;
+  }
+
+  packet_filter_state_.filters[filter_index].broadcast_address.reset();
+  packet_filter_state_.filters_broadcast_address.erase(filter_index);
+
+  uint8_t available_filters =
+      packet_filter_state_.max_filters - packet_filter_state_.filters.size();
+  auto packet =
+      hci::EventPacket::New<android_emb::LEApcfCommandCompleteEventWriter>(
+          hci_spec::kCommandCompleteEventCode);
+  auto view = packet.view_t();
+  view.sub_opcode().Write(android_emb::ApcfSubOpcode::BROADCAST_ADDRESS);
+  view.action().Write(params.action().Read());
+  view.available_spaces().Write(available_filters);
+  RespondWithCommandComplete(pwemb::OpCode::ANDROID_APCF, &packet);
+}
+
+void FakeController::OnAndroidLEApcfBroadcastAddressCommandClear(
+    const android_emb::LEApcfBroadcastAddressCommandView& params) {
+  for (auto [_, filter] : packet_filter_state_.filters_broadcast_address) {
+    filter->broadcast_address.reset();
+  }
+  packet_filter_state_.filters_broadcast_address.clear();
+
+  uint8_t available_filters =
+      packet_filter_state_.max_filters -
+      packet_filter_state_.filters_broadcast_address.size();
+  auto packet =
+      hci::EventPacket::New<android_emb::LEApcfCommandCompleteEventWriter>(
+          hci_spec::kCommandCompleteEventCode);
+  auto view = packet.view_t();
+  view.sub_opcode().Write(android_emb::ApcfSubOpcode::BROADCAST_ADDRESS);
+  view.action().Write(params.action().Read());
+  view.available_spaces().Write(available_filters);
+  RespondWithCommandComplete(pwemb::OpCode::ANDROID_APCF, &packet);
+}
+
+void FakeController::OnAndroidLEApcfBroadcastAddressCommand(
+    const android_emb::LEApcfBroadcastAddressCommandView& params) {
+  android_emb::ApcfAction action = params.action().Read();
+
+  switch (action) {
+    case android_emb::ApcfAction::ADD:
+      OnAndroidLEApcfBroadcastAddressCommandAdd(params);
+      break;
+    case android_emb::ApcfAction::DELETE:
+      OnAndroidLEApcfBroadcastAddressCommandDelete(params);
+      break;
+    case android_emb::ApcfAction::CLEAR:
+      OnAndroidLEApcfBroadcastAddressCommandClear(params);
+      break;
+  }
+}
+
+void FakeController::OnAndroidLEApcfServiceUUID16CommandAdd(
+    const android_emb::LEApcfServiceUUID16CommandView& params) {
+  uint8_t filter_index = params.filter_index().Read();
+  if (packet_filter_state_.filters.count(filter_index) == 0) {
+    bt_log(WARN,
+           "fake-hci",
+           "packet filter index (%d) doesn't exist",
+           filter_index);
+    RespondWithCommandComplete(
+        pwemb::OpCode::ANDROID_APCF,
+        pwemb::StatusCode::INVALID_HCI_COMMAND_PARAMETERS);
+    return;
+  }
+
+  BufferView uuid(params.uuid().BackingStorage().data(),
+                  params.uuid().SizeInBytes());
+
+  PacketFilter* filter = &packet_filter_state_.filters[filter_index];
+  filter->service_uuid = UUID(uuid);
+  packet_filter_state_.filters_service_uuid[filter_index] = filter;
+
+  uint8_t available_filters = packet_filter_state_.max_filters -
+                              packet_filter_state_.filters_service_uuid.size();
+  auto packet =
+      hci::EventPacket::New<android_emb::LEApcfCommandCompleteEventWriter>(
+          hci_spec::kCommandCompleteEventCode);
+  auto view = packet.view_t();
+  view.sub_opcode().Write(android_emb::ApcfSubOpcode::SERVICE_UUID);
+  view.action().Write(params.action().Read());
+  view.available_spaces().Write(available_filters);
+  RespondWithCommandComplete(pwemb::OpCode::ANDROID_APCF, &packet);
+}
+
+void FakeController::OnAndroidLEApcfServiceUUID16CommandDelete(
+    const android_emb::LEApcfServiceUUID16CommandView& params) {
+  uint8_t filter_index = params.filter_index().Read();
+  if (packet_filter_state_.filters.count(filter_index) == 0) {
+    bt_log(WARN,
+           "fake-hci",
+           "packet filter index (%d) doesn't exist",
+           filter_index);
+    RespondWithCommandComplete(
+        pwemb::OpCode::ANDROID_APCF,
+        pwemb::StatusCode::INVALID_HCI_COMMAND_PARAMETERS);
+    return;
+  }
+
+  packet_filter_state_.filters[filter_index].service_uuid.reset();
+  packet_filter_state_.filters_service_uuid.erase(filter_index);
+
+  uint8_t available_filters = packet_filter_state_.max_filters -
+                              packet_filter_state_.filters_service_uuid.size();
+  auto packet =
+      hci::EventPacket::New<android_emb::LEApcfCommandCompleteEventWriter>(
+          hci_spec::kCommandCompleteEventCode);
+  auto view = packet.view_t();
+  view.sub_opcode().Write(android_emb::ApcfSubOpcode::SERVICE_UUID);
+  view.action().Write(params.action().Read());
+  view.available_spaces().Write(available_filters);
+  RespondWithCommandComplete(pwemb::OpCode::ANDROID_APCF, &packet);
+}
+
+void FakeController::OnAndroidLEApcfServiceUUID16CommandClear(
+    const android_emb::LEApcfServiceUUID16CommandView& params) {
+  for (auto [_, filter] : packet_filter_state_.filters_service_uuid) {
+    filter->service_uuid.reset();
+  }
+  packet_filter_state_.filters_service_uuid.clear();
+
+  uint8_t available_filters = packet_filter_state_.max_filters -
+                              packet_filter_state_.filters_service_uuid.size();
+  auto packet =
+      hci::EventPacket::New<android_emb::LEApcfCommandCompleteEventWriter>(
+          hci_spec::kCommandCompleteEventCode);
+  auto view = packet.view_t();
+  view.sub_opcode().Write(android_emb::ApcfSubOpcode::SERVICE_UUID);
+  view.action().Write(params.action().Read());
+  view.available_spaces().Write(available_filters);
+  RespondWithCommandComplete(pwemb::OpCode::ANDROID_APCF, &packet);
+}
+
+void FakeController::OnAndroidLEApcfServiceUUID16Command(
+    const android_emb::LEApcfServiceUUID16CommandView& params) {
+  android_emb::ApcfAction action = params.action().Read();
+
+  switch (action) {
+    case android_emb::ApcfAction::ADD:
+      OnAndroidLEApcfServiceUUID16CommandAdd(params);
+      break;
+    case android_emb::ApcfAction::DELETE:
+      OnAndroidLEApcfServiceUUID16CommandDelete(params);
+      break;
+    case android_emb::ApcfAction::CLEAR:
+      OnAndroidLEApcfServiceUUID16CommandClear(params);
+      break;
+  }
+}
+
+void FakeController::OnAndroidLEApcfServiceUUID32CommandAdd(
+    const android_emb::LEApcfServiceUUID32CommandView& params) {
+  uint8_t filter_index = params.filter_index().Read();
+  if (packet_filter_state_.filters.count(filter_index) == 0) {
+    bt_log(WARN,
+           "fake-hci",
+           "packet filter index (%d) doesn't exist",
+           filter_index);
+    RespondWithCommandComplete(
+        pwemb::OpCode::ANDROID_APCF,
+        pwemb::StatusCode::INVALID_HCI_COMMAND_PARAMETERS);
+    return;
+  }
+
+  BufferView uuid(params.uuid().BackingStorage().data(),
+                  params.uuid().SizeInBytes());
+
+  PacketFilter* filter = &packet_filter_state_.filters[filter_index];
+  filter->service_uuid = UUID(uuid);
+  packet_filter_state_.filters_service_uuid[filter_index] = filter;
+
+  uint8_t available_filters = packet_filter_state_.max_filters -
+                              packet_filter_state_.filters_service_uuid.size();
+  auto packet =
+      hci::EventPacket::New<android_emb::LEApcfCommandCompleteEventWriter>(
+          hci_spec::kCommandCompleteEventCode);
+  auto view = packet.view_t();
+  view.sub_opcode().Write(android_emb::ApcfSubOpcode::SERVICE_UUID);
+  view.action().Write(params.action().Read());
+  view.available_spaces().Write(available_filters);
+  RespondWithCommandComplete(pwemb::OpCode::ANDROID_APCF, &packet);
+}
+
+void FakeController::OnAndroidLEApcfServiceUUID32CommandDelete(
+    const android_emb::LEApcfServiceUUID32CommandView& params) {
+  uint8_t filter_index = params.filter_index().Read();
+  if (packet_filter_state_.filters.count(filter_index) == 0) {
+    bt_log(WARN,
+           "fake-hci",
+           "packet filter index (%d) doesn't exist",
+           filter_index);
+    RespondWithCommandComplete(
+        pwemb::OpCode::ANDROID_APCF,
+        pwemb::StatusCode::INVALID_HCI_COMMAND_PARAMETERS);
+    return;
+  }
+
+  packet_filter_state_.filters[filter_index].service_uuid.reset();
+  packet_filter_state_.filters_service_uuid.erase(filter_index);
+
+  uint8_t available_filters = packet_filter_state_.max_filters -
+                              packet_filter_state_.filters_service_uuid.size();
+  auto packet =
+      hci::EventPacket::New<android_emb::LEApcfCommandCompleteEventWriter>(
+          hci_spec::kCommandCompleteEventCode);
+  auto view = packet.view_t();
+  view.sub_opcode().Write(android_emb::ApcfSubOpcode::SERVICE_UUID);
+  view.action().Write(params.action().Read());
+  view.available_spaces().Write(available_filters);
+  RespondWithCommandComplete(pwemb::OpCode::ANDROID_APCF, &packet);
+}
+
+void FakeController::OnAndroidLEApcfServiceUUID32CommandClear(
+    const android_emb::LEApcfServiceUUID32CommandView& params) {
+  for (auto [_, filter] : packet_filter_state_.filters_service_uuid) {
+    filter->service_uuid.reset();
+  }
+  packet_filter_state_.filters_service_uuid.clear();
+
+  uint8_t available_filters = packet_filter_state_.max_filters -
+                              packet_filter_state_.filters_service_uuid.size();
+  auto packet =
+      hci::EventPacket::New<android_emb::LEApcfCommandCompleteEventWriter>(
+          hci_spec::kCommandCompleteEventCode);
+  auto view = packet.view_t();
+  view.sub_opcode().Write(android_emb::ApcfSubOpcode::SERVICE_UUID);
+  view.action().Write(params.action().Read());
+  view.available_spaces().Write(available_filters);
+  RespondWithCommandComplete(pwemb::OpCode::ANDROID_APCF, &packet);
+}
+
+void FakeController::OnAndroidLEApcfServiceUUID32Command(
+    const android_emb::LEApcfServiceUUID32CommandView& params) {
+  android_emb::ApcfAction action = params.action().Read();
+
+  switch (action) {
+    case android_emb::ApcfAction::ADD:
+      OnAndroidLEApcfServiceUUID32CommandAdd(params);
+      break;
+    case android_emb::ApcfAction::DELETE:
+      OnAndroidLEApcfServiceUUID32CommandDelete(params);
+      break;
+    case android_emb::ApcfAction::CLEAR:
+      OnAndroidLEApcfServiceUUID32CommandClear(params);
+      break;
+  }
+}
+
+void FakeController::OnAndroidLEApcfServiceUUID128CommandAdd(
+    const android_emb::LEApcfServiceUUID128CommandView& params) {
+  uint8_t filter_index = params.filter_index().Read();
+  if (packet_filter_state_.filters.count(filter_index) == 0) {
+    bt_log(WARN,
+           "fake-hci",
+           "packet filter index (%d) doesn't exist",
+           filter_index);
+    RespondWithCommandComplete(
+        pwemb::OpCode::ANDROID_APCF,
+        pwemb::StatusCode::INVALID_HCI_COMMAND_PARAMETERS);
+    return;
+  }
+
+  BufferView uuid(params.uuid().BackingStorage().data(),
+                  params.uuid().SizeInBytes());
+
+  PacketFilter* filter = &packet_filter_state_.filters[filter_index];
+  filter->service_uuid = UUID(uuid);
+  packet_filter_state_.filters_service_uuid[filter_index] = filter;
+
+  uint8_t available_filters = packet_filter_state_.max_filters -
+                              packet_filter_state_.filters_service_uuid.size();
+  auto packet =
+      hci::EventPacket::New<android_emb::LEApcfCommandCompleteEventWriter>(
+          hci_spec::kCommandCompleteEventCode);
+  auto view = packet.view_t();
+  view.sub_opcode().Write(android_emb::ApcfSubOpcode::SERVICE_UUID);
+  view.action().Write(params.action().Read());
+  view.available_spaces().Write(available_filters);
+  RespondWithCommandComplete(pwemb::OpCode::ANDROID_APCF, &packet);
+}
+
+void FakeController::OnAndroidLEApcfServiceUUID128CommandDelete(
+    const android_emb::LEApcfServiceUUID128CommandView& params) {
+  uint8_t filter_index = params.filter_index().Read();
+  if (packet_filter_state_.filters.count(filter_index) == 0) {
+    bt_log(WARN,
+           "fake-hci",
+           "packet filter index (%d) doesn't exist",
+           filter_index);
+    RespondWithCommandComplete(
+        pwemb::OpCode::ANDROID_APCF,
+        pwemb::StatusCode::INVALID_HCI_COMMAND_PARAMETERS);
+    return;
+  }
+
+  packet_filter_state_.filters[filter_index].service_uuid.reset();
+  packet_filter_state_.filters_service_uuid.erase(filter_index);
+
+  uint8_t available_filters = packet_filter_state_.max_filters -
+                              packet_filter_state_.filters_service_uuid.size();
+  auto packet =
+      hci::EventPacket::New<android_emb::LEApcfCommandCompleteEventWriter>(
+          hci_spec::kCommandCompleteEventCode);
+  auto view = packet.view_t();
+  view.sub_opcode().Write(android_emb::ApcfSubOpcode::SERVICE_UUID);
+  view.action().Write(params.action().Read());
+  view.available_spaces().Write(available_filters);
+  RespondWithCommandComplete(pwemb::OpCode::ANDROID_APCF, &packet);
+}
+
+void FakeController::OnAndroidLEApcfServiceUUID128CommandClear(
+    const android_emb::LEApcfServiceUUID128CommandView& params) {
+  for (auto [_, filter] : packet_filter_state_.filters_service_uuid) {
+    filter->service_uuid.reset();
+  }
+  packet_filter_state_.filters_service_uuid.clear();
+
+  uint8_t available_filters = packet_filter_state_.max_filters -
+                              packet_filter_state_.filters_service_uuid.size();
+  auto packet =
+      hci::EventPacket::New<android_emb::LEApcfCommandCompleteEventWriter>(
+          hci_spec::kCommandCompleteEventCode);
+  auto view = packet.view_t();
+  view.sub_opcode().Write(android_emb::ApcfSubOpcode::SERVICE_UUID);
+  view.action().Write(params.action().Read());
+  view.available_spaces().Write(available_filters);
+  RespondWithCommandComplete(pwemb::OpCode::ANDROID_APCF, &packet);
+}
+
+void FakeController::OnAndroidLEApcfServiceUUID128Command(
+    const android_emb::LEApcfServiceUUID128CommandView& params) {
+  android_emb::ApcfAction action = params.action().Read();
+
+  switch (action) {
+    case android_emb::ApcfAction::ADD:
+      OnAndroidLEApcfServiceUUID128CommandAdd(params);
+      break;
+    case android_emb::ApcfAction::DELETE:
+      OnAndroidLEApcfServiceUUID128CommandDelete(params);
+      break;
+    case android_emb::ApcfAction::CLEAR:
+      OnAndroidLEApcfServiceUUID128CommandClear(params);
+      break;
+  }
+}
+
+void FakeController::OnAndroidLEApcfSolicitationUUID16CommandAdd(
+    const android_emb::LEApcfSolicitationUUID16CommandView& params) {
+  uint8_t filter_index = params.filter_index().Read();
+  if (packet_filter_state_.filters.count(filter_index) == 0) {
+    bt_log(WARN,
+           "fake-hci",
+           "packet filter index (%d) doesn't exist",
+           filter_index);
+    RespondWithCommandComplete(
+        pwemb::OpCode::ANDROID_APCF,
+        pwemb::StatusCode::INVALID_HCI_COMMAND_PARAMETERS);
+    return;
+  }
+
+  BufferView uuid(params.uuid().BackingStorage().data(),
+                  params.uuid().SizeInBytes());
+
+  PacketFilter* filter = &packet_filter_state_.filters[filter_index];
+  filter->solicitation_uuid = UUID(uuid);
+  packet_filter_state_.filters_solicitation_uuid[filter_index] = filter;
+
+  uint8_t available_filters =
+      packet_filter_state_.max_filters -
+      packet_filter_state_.filters_solicitation_uuid.size();
+  auto packet =
+      hci::EventPacket::New<android_emb::LEApcfCommandCompleteEventWriter>(
+          hci_spec::kCommandCompleteEventCode);
+  auto view = packet.view_t();
+  view.sub_opcode().Write(android_emb::ApcfSubOpcode::SOLICITATION_UUID);
+  view.action().Write(params.action().Read());
+  view.available_spaces().Write(available_filters);
+  RespondWithCommandComplete(pwemb::OpCode::ANDROID_APCF, &packet);
+}
+
+void FakeController::OnAndroidLEApcfSolicitationUUID16CommandDelete(
+    const android_emb::LEApcfSolicitationUUID16CommandView& params) {
+  uint8_t filter_index = params.filter_index().Read();
+  if (packet_filter_state_.filters.count(filter_index) == 0) {
+    bt_log(WARN,
+           "fake-hci",
+           "packet filter index (%d) doesn't exist",
+           filter_index);
+    RespondWithCommandComplete(
+        pwemb::OpCode::ANDROID_APCF,
+        pwemb::StatusCode::INVALID_HCI_COMMAND_PARAMETERS);
+    return;
+  }
+
+  packet_filter_state_.filters[filter_index].solicitation_uuid.reset();
+  packet_filter_state_.filters_solicitation_uuid.erase(filter_index);
+
+  uint8_t available_filters =
+      packet_filter_state_.max_filters -
+      packet_filter_state_.filters_solicitation_uuid.size();
+  auto packet =
+      hci::EventPacket::New<android_emb::LEApcfCommandCompleteEventWriter>(
+          hci_spec::kCommandCompleteEventCode);
+  auto view = packet.view_t();
+  view.sub_opcode().Write(android_emb::ApcfSubOpcode::SOLICITATION_UUID);
+  view.action().Write(params.action().Read());
+  view.available_spaces().Write(available_filters);
+  RespondWithCommandComplete(pwemb::OpCode::ANDROID_APCF, &packet);
+}
+
+void FakeController::OnAndroidLEApcfSolicitationUUID16CommandClear(
+    const android_emb::LEApcfSolicitationUUID16CommandView& params) {
+  for (auto [_, filter] : packet_filter_state_.filters_solicitation_uuid) {
+    filter->solicitation_uuid.reset();
+  }
+  packet_filter_state_.filters_solicitation_uuid.clear();
+
+  uint8_t available_filters =
+      packet_filter_state_.max_filters -
+      packet_filter_state_.filters_solicitation_uuid.size();
+  auto packet =
+      hci::EventPacket::New<android_emb::LEApcfCommandCompleteEventWriter>(
+          hci_spec::kCommandCompleteEventCode);
+  auto view = packet.view_t();
+  view.sub_opcode().Write(android_emb::ApcfSubOpcode::SOLICITATION_UUID);
+  view.action().Write(params.action().Read());
+  view.available_spaces().Write(available_filters);
+  RespondWithCommandComplete(pwemb::OpCode::ANDROID_APCF, &packet);
+}
+
+void FakeController::OnAndroidLEApcfSolicitationUUID16Command(
+    const android_emb::LEApcfSolicitationUUID16CommandView& params) {
+  android_emb::ApcfAction action = params.action().Read();
+
+  switch (action) {
+    case android_emb::ApcfAction::ADD:
+      OnAndroidLEApcfSolicitationUUID16CommandAdd(params);
+      break;
+    case android_emb::ApcfAction::DELETE:
+      OnAndroidLEApcfSolicitationUUID16CommandDelete(params);
+      break;
+    case android_emb::ApcfAction::CLEAR:
+      OnAndroidLEApcfSolicitationUUID16CommandClear(params);
+      break;
+  }
+}
+
+void FakeController::OnAndroidLEApcfSolicitationUUID32CommandAdd(
+    const android_emb::LEApcfSolicitationUUID32CommandView& params) {
+  uint8_t filter_index = params.filter_index().Read();
+  if (packet_filter_state_.filters.count(filter_index) == 0) {
+    bt_log(WARN,
+           "fake-hci",
+           "packet filter index (%d) doesn't exist",
+           filter_index);
+    RespondWithCommandComplete(
+        pwemb::OpCode::ANDROID_APCF,
+        pwemb::StatusCode::INVALID_HCI_COMMAND_PARAMETERS);
+    return;
+  }
+
+  BufferView uuid(params.uuid().BackingStorage().data(),
+                  params.uuid().SizeInBytes());
+
+  PacketFilter* filter = &packet_filter_state_.filters[filter_index];
+  filter->solicitation_uuid = UUID(uuid);
+  packet_filter_state_.filters_solicitation_uuid[filter_index] = filter;
+
+  uint8_t available_filters =
+      packet_filter_state_.max_filters -
+      packet_filter_state_.filters_solicitation_uuid.size();
+  auto packet =
+      hci::EventPacket::New<android_emb::LEApcfCommandCompleteEventWriter>(
+          hci_spec::kCommandCompleteEventCode);
+  auto view = packet.view_t();
+  view.sub_opcode().Write(android_emb::ApcfSubOpcode::SOLICITATION_UUID);
+  view.action().Write(params.action().Read());
+  view.available_spaces().Write(available_filters);
+  RespondWithCommandComplete(pwemb::OpCode::ANDROID_APCF, &packet);
+}
+
+void FakeController::OnAndroidLEApcfSolicitationUUID32CommandDelete(
+    const android_emb::LEApcfSolicitationUUID32CommandView& params) {
+  uint8_t filter_index = params.filter_index().Read();
+  if (packet_filter_state_.filters.count(filter_index) == 0) {
+    bt_log(WARN,
+           "fake-hci",
+           "packet filter index (%d) doesn't exist",
+           filter_index);
+    RespondWithCommandComplete(
+        pwemb::OpCode::ANDROID_APCF,
+        pwemb::StatusCode::INVALID_HCI_COMMAND_PARAMETERS);
+    return;
+  }
+
+  packet_filter_state_.filters[filter_index].solicitation_uuid.reset();
+  packet_filter_state_.filters_solicitation_uuid.erase(filter_index);
+
+  uint8_t available_filters =
+      packet_filter_state_.max_filters -
+      packet_filter_state_.filters_solicitation_uuid.size();
+  auto packet =
+      hci::EventPacket::New<android_emb::LEApcfCommandCompleteEventWriter>(
+          hci_spec::kCommandCompleteEventCode);
+  auto view = packet.view_t();
+  view.sub_opcode().Write(android_emb::ApcfSubOpcode::SOLICITATION_UUID);
+  view.action().Write(params.action().Read());
+  view.available_spaces().Write(available_filters);
+  RespondWithCommandComplete(pwemb::OpCode::ANDROID_APCF, &packet);
+}
+
+void FakeController::OnAndroidLEApcfSolicitationUUID32CommandClear(
+    const android_emb::LEApcfSolicitationUUID32CommandView& params) {
+  for (auto [_, filter] : packet_filter_state_.filters_solicitation_uuid) {
+    filter->solicitation_uuid.reset();
+  }
+  packet_filter_state_.filters_solicitation_uuid.clear();
+
+  uint8_t available_filters =
+      packet_filter_state_.max_filters -
+      packet_filter_state_.filters_solicitation_uuid.size();
+  auto packet =
+      hci::EventPacket::New<android_emb::LEApcfCommandCompleteEventWriter>(
+          hci_spec::kCommandCompleteEventCode);
+  auto view = packet.view_t();
+  view.sub_opcode().Write(android_emb::ApcfSubOpcode::SOLICITATION_UUID);
+  view.action().Write(params.action().Read());
+  view.available_spaces().Write(available_filters);
+  RespondWithCommandComplete(pwemb::OpCode::ANDROID_APCF, &packet);
+}
+
+void FakeController::OnAndroidLEApcfSolicitationUUID32Command(
+    const android_emb::LEApcfSolicitationUUID32CommandView& params) {
+  android_emb::ApcfAction action = params.action().Read();
+
+  switch (action) {
+    case android_emb::ApcfAction::ADD:
+      OnAndroidLEApcfSolicitationUUID32CommandAdd(params);
+      break;
+    case android_emb::ApcfAction::DELETE:
+      OnAndroidLEApcfSolicitationUUID32CommandDelete(params);
+      break;
+    case android_emb::ApcfAction::CLEAR:
+      OnAndroidLEApcfSolicitationUUID32CommandClear(params);
+      break;
+  }
+}
+
+void FakeController::OnAndroidLEApcfSolicitationUUID128CommandAdd(
+    const android_emb::LEApcfSolicitationUUID128CommandView& params) {
+  uint8_t filter_index = params.filter_index().Read();
+  if (packet_filter_state_.filters.count(filter_index) == 0) {
+    bt_log(WARN,
+           "fake-hci",
+           "packet filter index (%d) doesn't exist",
+           filter_index);
+    RespondWithCommandComplete(
+        pwemb::OpCode::ANDROID_APCF,
+        pwemb::StatusCode::INVALID_HCI_COMMAND_PARAMETERS);
+    return;
+  }
+
+  BufferView uuid(params.uuid().BackingStorage().data(),
+                  params.uuid().SizeInBytes());
+
+  PacketFilter* filter = &packet_filter_state_.filters[filter_index];
+  filter->solicitation_uuid = UUID(uuid);
+  packet_filter_state_.filters_solicitation_uuid[filter_index] = filter;
+
+  uint8_t available_filters =
+      packet_filter_state_.max_filters -
+      packet_filter_state_.filters_solicitation_uuid.size();
+  auto packet =
+      hci::EventPacket::New<android_emb::LEApcfCommandCompleteEventWriter>(
+          hci_spec::kCommandCompleteEventCode);
+  auto view = packet.view_t();
+  view.sub_opcode().Write(android_emb::ApcfSubOpcode::SOLICITATION_UUID);
+  view.action().Write(params.action().Read());
+  view.available_spaces().Write(available_filters);
+  RespondWithCommandComplete(pwemb::OpCode::ANDROID_APCF, &packet);
+}
+
+void FakeController::OnAndroidLEApcfSolicitationUUID128CommandDelete(
+    const android_emb::LEApcfSolicitationUUID128CommandView& params) {
+  uint8_t filter_index = params.filter_index().Read();
+  if (packet_filter_state_.filters.count(filter_index) == 0) {
+    bt_log(WARN,
+           "fake-hci",
+           "packet filter index (%d) doesn't exist",
+           filter_index);
+    RespondWithCommandComplete(
+        pwemb::OpCode::ANDROID_APCF,
+        pwemb::StatusCode::INVALID_HCI_COMMAND_PARAMETERS);
+    return;
+  }
+
+  packet_filter_state_.filters[filter_index].solicitation_uuid.reset();
+  packet_filter_state_.filters_solicitation_uuid.erase(filter_index);
+
+  uint8_t available_filters =
+      packet_filter_state_.max_filters -
+      packet_filter_state_.filters_solicitation_uuid.size();
+  auto packet =
+      hci::EventPacket::New<android_emb::LEApcfCommandCompleteEventWriter>(
+          hci_spec::kCommandCompleteEventCode);
+  auto view = packet.view_t();
+  view.sub_opcode().Write(android_emb::ApcfSubOpcode::SOLICITATION_UUID);
+  view.action().Write(params.action().Read());
+  view.available_spaces().Write(available_filters);
+  RespondWithCommandComplete(pwemb::OpCode::ANDROID_APCF, &packet);
+}
+
+void FakeController::OnAndroidLEApcfSolicitationUUID128CommandClear(
+    const android_emb::LEApcfSolicitationUUID128CommandView& params) {
+  for (auto [_, filter] : packet_filter_state_.filters_solicitation_uuid) {
+    filter->solicitation_uuid.reset();
+  }
+  packet_filter_state_.filters_solicitation_uuid.clear();
+
+  uint8_t available_filters =
+      packet_filter_state_.max_filters -
+      packet_filter_state_.filters_solicitation_uuid.size();
+  auto packet =
+      hci::EventPacket::New<android_emb::LEApcfCommandCompleteEventWriter>(
+          hci_spec::kCommandCompleteEventCode);
+  auto view = packet.view_t();
+  view.sub_opcode().Write(android_emb::ApcfSubOpcode::SOLICITATION_UUID);
+  view.action().Write(params.action().Read());
+  view.available_spaces().Write(available_filters);
+  RespondWithCommandComplete(pwemb::OpCode::ANDROID_APCF, &packet);
+}
+
+void FakeController::OnAndroidLEApcfSolicitationUUID128Command(
+    const android_emb::LEApcfSolicitationUUID128CommandView& params) {
+  android_emb::ApcfAction action = params.action().Read();
+
+  switch (action) {
+    case android_emb::ApcfAction::ADD:
+      OnAndroidLEApcfSolicitationUUID128CommandAdd(params);
+      break;
+    case android_emb::ApcfAction::DELETE:
+      OnAndroidLEApcfSolicitationUUID128CommandDelete(params);
+      break;
+    case android_emb::ApcfAction::CLEAR:
+      OnAndroidLEApcfSolicitationUUID128CommandClear(params);
+      break;
+  }
+}
+
+void FakeController::OnAndroidLEApcfLocalNameCommandAdd(
+    const android_emb::LEApcfLocalNameCommandView& params) {
+  uint8_t filter_index = params.filter_index().Read();
+  if (packet_filter_state_.filters.count(filter_index) == 0) {
+    bt_log(WARN,
+           "fake-hci",
+           "packet filter index (%d) doesn't exist",
+           filter_index);
+    RespondWithCommandComplete(
+        pwemb::OpCode::ANDROID_APCF,
+        pwemb::StatusCode::INVALID_HCI_COMMAND_PARAMETERS);
+    return;
+  }
+
+  PacketFilter* filter = &packet_filter_state_.filters[filter_index];
+  BufferView local_name(params.local_name().BackingStorage().data(),
+                        params.local_name().SizeInBytes());
+  filter->local_name = local_name.AsString();
+  packet_filter_state_.filters_local_name[filter_index] = filter;
+
+  uint8_t available_filters = packet_filter_state_.max_filters -
+                              packet_filter_state_.filters_local_name.size();
+  auto packet =
+      hci::EventPacket::New<android_emb::LEApcfCommandCompleteEventWriter>(
+          hci_spec::kCommandCompleteEventCode);
+  auto view = packet.view_t();
+  view.sub_opcode().Write(android_emb::ApcfSubOpcode::LOCAL_NAME);
+  view.action().Write(params.action().Read());
+  view.available_spaces().Write(available_filters);
+  RespondWithCommandComplete(pwemb::OpCode::ANDROID_APCF, &packet);
+}
+
+void FakeController::OnAndroidLEApcfLocalNameCommandDelete(
+    const android_emb::LEApcfLocalNameCommandView& params) {
+  uint8_t filter_index = params.filter_index().Read();
+  if (packet_filter_state_.filters.count(filter_index) == 0) {
+    bt_log(WARN,
+           "fake-hci",
+           "packet filter index (%d) doesn't exist",
+           filter_index);
+    RespondWithCommandComplete(
+        pwemb::OpCode::ANDROID_APCF,
+        pwemb::StatusCode::INVALID_HCI_COMMAND_PARAMETERS);
+    return;
+  }
+
+  packet_filter_state_.filters[filter_index].local_name.reset();
+  packet_filter_state_.filters_local_name.erase(filter_index);
+
+  uint8_t available_filters = packet_filter_state_.max_filters -
+                              packet_filter_state_.filters_local_name.size();
+  auto packet =
+      hci::EventPacket::New<android_emb::LEApcfCommandCompleteEventWriter>(
+          hci_spec::kCommandCompleteEventCode);
+  auto view = packet.view_t();
+  view.sub_opcode().Write(android_emb::ApcfSubOpcode::LOCAL_NAME);
+  view.action().Write(params.action().Read());
+  view.available_spaces().Write(available_filters);
+  RespondWithCommandComplete(pwemb::OpCode::ANDROID_APCF, &packet);
+}
+
+void FakeController::OnAndroidLEApcfLocalNameCommandClear(
+    const android_emb::LEApcfLocalNameCommandView& params) {
+  for (auto [_, filter] : packet_filter_state_.filters_local_name) {
+    filter->local_name.reset();
+  }
+  packet_filter_state_.filters_local_name.clear();
+
+  uint8_t available_filters = packet_filter_state_.max_filters -
+                              packet_filter_state_.filters_local_name.size();
+  auto packet =
+      hci::EventPacket::New<android_emb::LEApcfCommandCompleteEventWriter>(
+          hci_spec::kCommandCompleteEventCode);
+  auto view = packet.view_t();
+  view.sub_opcode().Write(android_emb::ApcfSubOpcode::LOCAL_NAME);
+  view.action().Write(params.action().Read());
+  view.available_spaces().Write(available_filters);
+  RespondWithCommandComplete(pwemb::OpCode::ANDROID_APCF, &packet);
+}
+
+void FakeController::OnAndroidLEApcfLocalNameCommand(
+    const android_emb::LEApcfLocalNameCommandView& params) {
+  android_emb::ApcfAction action = params.action().Read();
+
+  switch (action) {
+    case android_emb::ApcfAction::ADD:
+      OnAndroidLEApcfLocalNameCommandAdd(params);
+      break;
+    case android_emb::ApcfAction::DELETE:
+      OnAndroidLEApcfLocalNameCommandDelete(params);
+      break;
+    case android_emb::ApcfAction::CLEAR:
+      OnAndroidLEApcfLocalNameCommandClear(params);
+      break;
+  }
+}
+
+void FakeController::OnAndroidLEApcfManufacturerDataCommandAdd(
+    const android_emb::LEApcfManufacturerDataCommandView& params) {
+  uint8_t filter_index = params.filter_index().Read();
+  if (packet_filter_state_.filters.count(filter_index) == 0) {
+    bt_log(WARN,
+           "fake-hci",
+           "packet filter index (%d) doesn't exist",
+           filter_index);
+    RespondWithCommandComplete(
+        pwemb::OpCode::ANDROID_APCF,
+        pwemb::StatusCode::INVALID_HCI_COMMAND_PARAMETERS);
+    return;
+  }
+
+  PacketFilter* filter = &packet_filter_state_.filters[filter_index];
+
+  filter->manufacturer_data = std::vector<uint8_t>();
+  filter->manufacturer_data->resize(params.manufacturer_data().SizeInBytes());
+  std::memcpy(filter->manufacturer_data->data(),
+              params.manufacturer_data().BackingStorage().data(),
+              filter->manufacturer_data->size());
+
+  filter->manufacturer_data_mask = std::vector<uint8_t>();
+  filter->manufacturer_data_mask->reserve(
+      params.manufacturer_data_mask().SizeInBytes());
+  std::memcpy(filter->manufacturer_data_mask->data(),
+              params.manufacturer_data_mask().BackingStorage().data(),
+              filter->manufacturer_data_mask->size());
+
+  uint8_t available_filters =
+      packet_filter_state_.max_filters -
+      packet_filter_state_.filters_manufacturer_data.size();
+  auto packet =
+      hci::EventPacket::New<android_emb::LEApcfCommandCompleteEventWriter>(
+          hci_spec::kCommandCompleteEventCode);
+  auto view = packet.view_t();
+  view.sub_opcode().Write(android_emb::ApcfSubOpcode::MANUFACTURER_DATA);
+  view.action().Write(params.action().Read());
+  view.available_spaces().Write(available_filters);
+  RespondWithCommandComplete(pwemb::OpCode::ANDROID_APCF, &packet);
+}
+
+void FakeController::OnAndroidLEApcfManufacturerDataCommandDelete(
+    const android_emb::LEApcfManufacturerDataCommandView& params) {
+  uint8_t filter_index = params.filter_index().Read();
+  if (packet_filter_state_.filters.count(filter_index) == 0) {
+    bt_log(WARN,
+           "fake-hci",
+           "packet filter index (%d) doesn't exist",
+           filter_index);
+    RespondWithCommandComplete(
+        pwemb::OpCode::ANDROID_APCF,
+        pwemb::StatusCode::INVALID_HCI_COMMAND_PARAMETERS);
+    return;
+  }
+
+  PacketFilter& filter = packet_filter_state_.filters[filter_index];
+  filter.manufacturer_data.reset();
+  filter.manufacturer_data_mask.reset();
+  packet_filter_state_.filters_manufacturer_data.erase(filter_index);
+
+  uint8_t available_filters =
+      packet_filter_state_.max_filters -
+      packet_filter_state_.filters_manufacturer_data.size();
+  auto packet =
+      hci::EventPacket::New<android_emb::LEApcfCommandCompleteEventWriter>(
+          hci_spec::kCommandCompleteEventCode);
+  auto view = packet.view_t();
+  view.sub_opcode().Write(android_emb::ApcfSubOpcode::MANUFACTURER_DATA);
+  view.action().Write(params.action().Read());
+  view.available_spaces().Write(available_filters);
+  RespondWithCommandComplete(pwemb::OpCode::ANDROID_APCF, &packet);
+}
+
+void FakeController::OnAndroidLEApcfManufacturerDataCommandClear(
+    const android_emb::LEApcfManufacturerDataCommandView& params) {
+  for (auto [_, filter] : packet_filter_state_.filters_manufacturer_data) {
+    filter->manufacturer_data.reset();
+    filter->manufacturer_data_mask.reset();
+  }
+  packet_filter_state_.filters_manufacturer_data.clear();
+
+  uint8_t available_filters =
+      packet_filter_state_.max_filters -
+      packet_filter_state_.filters_manufacturer_data.size();
+  auto packet =
+      hci::EventPacket::New<android_emb::LEApcfCommandCompleteEventWriter>(
+          hci_spec::kCommandCompleteEventCode);
+  auto view = packet.view_t();
+  view.sub_opcode().Write(android_emb::ApcfSubOpcode::MANUFACTURER_DATA);
+  view.action().Write(params.action().Read());
+  view.available_spaces().Write(available_filters);
+  RespondWithCommandComplete(pwemb::OpCode::ANDROID_APCF, &packet);
+}
+
+void FakeController::OnAndroidLEApcfManufacturerDataCommand(
+    const android_emb::LEApcfManufacturerDataCommandView& params) {
+  android_emb::ApcfAction action = params.action().Read();
+
+  switch (action) {
+    case android_emb::ApcfAction::ADD:
+      OnAndroidLEApcfManufacturerDataCommandAdd(params);
+      break;
+    case android_emb::ApcfAction::DELETE:
+      OnAndroidLEApcfManufacturerDataCommandDelete(params);
+      break;
+    case android_emb::ApcfAction::CLEAR:
+      OnAndroidLEApcfManufacturerDataCommandClear(params);
+      break;
+  }
+}
+
+void FakeController::OnAndroidLEApcfServiceDataCommandAdd(
+    const android_emb::LEApcfServiceDataCommandView& params) {
+  uint8_t filter_index = params.filter_index().Read();
+  if (packet_filter_state_.filters.count(filter_index) == 0) {
+    bt_log(WARN,
+           "fake-hci",
+           "packet filter index (%d) doesn't exist",
+           filter_index);
+    RespondWithCommandComplete(
+        pwemb::OpCode::ANDROID_APCF,
+        pwemb::StatusCode::INVALID_HCI_COMMAND_PARAMETERS);
+    return;
+  }
+
+  PacketFilter* filter = &packet_filter_state_.filters[filter_index];
+
+  filter->service_data = std::vector<uint8_t>();
+  filter->service_data->resize(params.service_data().SizeInBytes());
+  std::memcpy(filter->service_data->data(),
+              params.service_data().BackingStorage().data(),
+              filter->service_data->size());
+
+  filter->service_data_mask = std::vector<uint8_t>();
+  filter->service_data_mask->reserve(params.service_data_mask().SizeInBytes());
+  std::memcpy(filter->service_data_mask->data(),
+              params.service_data_mask().BackingStorage().data(),
+              filter->service_data_mask->size());
+
+  uint8_t available_filters = packet_filter_state_.max_filters -
+                              packet_filter_state_.filters_service_data.size();
+  auto packet =
+      hci::EventPacket::New<android_emb::LEApcfCommandCompleteEventWriter>(
+          hci_spec::kCommandCompleteEventCode);
+  auto view = packet.view_t();
+  view.sub_opcode().Write(android_emb::ApcfSubOpcode::SERVICE_DATA);
+  view.action().Write(params.action().Read());
+  view.available_spaces().Write(available_filters);
+  RespondWithCommandComplete(pwemb::OpCode::ANDROID_APCF, &packet);
+}
+
+void FakeController::OnAndroidLEApcfServiceDataCommandDelete(
+    const android_emb::LEApcfServiceDataCommandView& params) {
+  uint8_t filter_index = params.filter_index().Read();
+  if (packet_filter_state_.filters.count(filter_index) == 0) {
+    bt_log(WARN,
+           "fake-hci",
+           "packet filter index (%d) doesn't exist",
+           filter_index);
+    RespondWithCommandComplete(
+        pwemb::OpCode::ANDROID_APCF,
+        pwemb::StatusCode::INVALID_HCI_COMMAND_PARAMETERS);
+    return;
+  }
+
+  PacketFilter& filter = packet_filter_state_.filters[filter_index];
+  filter.service_data.reset();
+  filter.service_data_mask.reset();
+  packet_filter_state_.filters_manufacturer_data.erase(filter_index);
+
+  uint8_t available_filters = packet_filter_state_.max_filters -
+                              packet_filter_state_.filters_service_data.size();
+  auto packet =
+      hci::EventPacket::New<android_emb::LEApcfCommandCompleteEventWriter>(
+          hci_spec::kCommandCompleteEventCode);
+  auto view = packet.view_t();
+  view.sub_opcode().Write(android_emb::ApcfSubOpcode::SERVICE_DATA);
+  view.action().Write(params.action().Read());
+  view.available_spaces().Write(available_filters);
+  RespondWithCommandComplete(pwemb::OpCode::ANDROID_APCF, &packet);
+}
+
+void FakeController::OnAndroidLEApcfServiceDataCommandClear(
+    const android_emb::LEApcfServiceDataCommandView& params) {
+  for (auto [_, filter] : packet_filter_state_.filters_manufacturer_data) {
+    filter->service_data.reset();
+    filter->service_data_mask.reset();
+  }
+  packet_filter_state_.filters_service_data.clear();
+
+  uint8_t available_filters = packet_filter_state_.max_filters -
+                              packet_filter_state_.filters_service_data.size();
+  auto packet =
+      hci::EventPacket::New<android_emb::LEApcfCommandCompleteEventWriter>(
+          hci_spec::kCommandCompleteEventCode);
+  auto view = packet.view_t();
+  view.sub_opcode().Write(android_emb::ApcfSubOpcode::SERVICE_DATA);
+  view.action().Write(params.action().Read());
+  view.available_spaces().Write(available_filters);
+  RespondWithCommandComplete(pwemb::OpCode::ANDROID_APCF, &packet);
+}
+
+void FakeController::OnAndroidLEApcfServiceDataCommand(
+    const android_emb::LEApcfServiceDataCommandView& params) {
+  android_emb::ApcfAction action = params.action().Read();
+
+  switch (action) {
+    case android_emb::ApcfAction::ADD:
+      OnAndroidLEApcfServiceDataCommandAdd(params);
+      break;
+    case android_emb::ApcfAction::DELETE:
+      OnAndroidLEApcfServiceDataCommandDelete(params);
+      break;
+    case android_emb::ApcfAction::CLEAR:
+      OnAndroidLEApcfServiceDataCommandClear(params);
+      break;
+  }
+}
+
+void FakeController::OnAndroidLEApcfAdTypeCommandAdd(
+    const android_emb::LEApcfAdTypeCommandView& params) {
+  uint8_t filter_index = params.filter_index().Read();
+  if (packet_filter_state_.filters.count(filter_index) == 0) {
+    bt_log(WARN,
+           "fake-hci",
+           "packet filter index (%d) doesn't exist",
+           filter_index);
+    RespondWithCommandComplete(
+        pwemb::OpCode::ANDROID_APCF,
+        pwemb::StatusCode::INVALID_HCI_COMMAND_PARAMETERS);
+    return;
+  }
+
+  PacketFilter* filter = &packet_filter_state_.filters[filter_index];
+  filter->advertising_data_type = params.ad_type().Read();
+
+  filter->advertising_data = std::vector<uint8_t>();
+  filter->advertising_data->reserve(params.ad_data().SizeInBytes());
+  std::memcpy(filter->advertising_data->data(),
+              params.ad_data().BackingStorage().data(),
+              filter->advertising_data->size());
+
+  filter->advertising_data_mask = std::vector<uint8_t>();
+  filter->advertising_data_mask->reserve(params.ad_data_mask().SizeInBytes());
+  std::memcpy(filter->advertising_data_mask->data(),
+              params.ad_data_mask().BackingStorage().data(),
+              filter->advertising_data_mask->size());
+
+  uint8_t available_filters =
+      packet_filter_state_.max_filters -
+      packet_filter_state_.filters_advertising_data.size();
+  auto packet =
+      hci::EventPacket::New<android_emb::LEApcfCommandCompleteEventWriter>(
+          hci_spec::kCommandCompleteEventCode);
+  auto view = packet.view_t();
+  view.sub_opcode().Write(android_emb::ApcfSubOpcode::AD_TYPE_FILTER);
+  view.action().Write(params.action().Read());
+  view.available_spaces().Write(available_filters);
+  RespondWithCommandComplete(pwemb::OpCode::ANDROID_APCF, &packet);
+}
+
+void FakeController::OnAndroidLEApcfAdTypeCommandDelete(
+    const android_emb::LEApcfAdTypeCommandView& params) {
+  uint8_t filter_index = params.filter_index().Read();
+  if (packet_filter_state_.filters.count(filter_index) == 0) {
+    bt_log(WARN,
+           "fake-hci",
+           "packet filter index (%d) doesn't exist",
+           filter_index);
+    RespondWithCommandComplete(
+        pwemb::OpCode::ANDROID_APCF,
+        pwemb::StatusCode::INVALID_HCI_COMMAND_PARAMETERS);
+    return;
+  }
+
+  PacketFilter& filter = packet_filter_state_.filters[filter_index];
+  filter.advertising_data_type.reset();
+  filter.advertising_data.reset();
+  filter.advertising_data_mask.reset();
+  packet_filter_state_.filters_advertising_data.erase(filter_index);
+
+  uint8_t available_filters =
+      packet_filter_state_.max_filters -
+      packet_filter_state_.filters_advertising_data.size();
+  auto packet =
+      hci::EventPacket::New<android_emb::LEApcfCommandCompleteEventWriter>(
+          hci_spec::kCommandCompleteEventCode);
+  auto view = packet.view_t();
+  view.sub_opcode().Write(android_emb::ApcfSubOpcode::AD_TYPE_FILTER);
+  view.action().Write(params.action().Read());
+  view.available_spaces().Write(available_filters);
+  RespondWithCommandComplete(pwemb::OpCode::ANDROID_APCF, &packet);
+}
+
+void FakeController::OnAndroidLEApcfAdTypeCommandClear(
+    const android_emb::LEApcfAdTypeCommandView& params) {
+  for (auto [_, filter] : packet_filter_state_.filters_advertising_data) {
+    filter->advertising_data_type.reset();
+    filter->advertising_data.reset();
+    filter->advertising_data_mask.reset();
+  }
+  packet_filter_state_.filters_advertising_data.clear();
+
+  uint8_t available_filters =
+      packet_filter_state_.max_filters -
+      packet_filter_state_.filters_advertising_data.size();
+  auto packet =
+      hci::EventPacket::New<android_emb::LEApcfCommandCompleteEventWriter>(
+          hci_spec::kCommandCompleteEventCode);
+  auto view = packet.view_t();
+  view.sub_opcode().Write(android_emb::ApcfSubOpcode::AD_TYPE_FILTER);
+  view.action().Write(params.action().Read());
+  view.available_spaces().Write(available_filters);
+  RespondWithCommandComplete(pwemb::OpCode::ANDROID_APCF, &packet);
+}
+
+void FakeController::OnAndroidLEApcfAdTypeCommand(
+    const android_emb::LEApcfAdTypeCommandView& params) {
+  android_emb::ApcfAction action = params.action().Read();
+
+  switch (action) {
+    case android_emb::ApcfAction::ADD:
+      OnAndroidLEApcfAdTypeCommandAdd(params);
+      break;
+    case android_emb::ApcfAction::DELETE:
+      OnAndroidLEApcfAdTypeCommandDelete(params);
+      break;
+    case android_emb::ApcfAction::CLEAR:
+      OnAndroidLEApcfAdTypeCommandClear(params);
+      break;
+  }
+}
+
+void FakeController::OnAndroidLEApcfCommand(
+    const PacketView<hci_spec::CommandHeader>& command_packet) {
+  const auto& payload = command_packet.payload_data();
+
+  uint8_t subopcode = payload.To<uint8_t>();
+  switch (subopcode) {
+    case android_hci::kLEApcfEnableSubopcode: {
+      auto params = android_emb::MakeLEApcfEnableCommandView(
+          command_packet.data().data(), command_packet.size());
+      OnAndroidLEApcfEnableCommand(params);
+      break;
+    }
+    case android_hci::kLEApcfSetFilteringParametersSubopcode: {
+      auto params = android_emb::MakeLEApcfSetFilteringParametersCommandView(
+          command_packet.data().data(), command_packet.size());
+      OnAndroidLEApcfSetFilteringParametersCommand(params);
+      break;
+    }
+    case android_hci::kLEApcfBroadcastAddressSubopcode: {
+      auto params = android_emb::MakeLEApcfBroadcastAddressCommandView(
+          command_packet.data().data(), command_packet.size());
+      OnAndroidLEApcfBroadcastAddressCommand(params);
+      break;
+    }
+    case android_hci::kLEApcfServiceUUIDSubopcode: {
+      size_t size = command_packet.size();
+      if (size == android_emb::LEApcfServiceUUID16Command::MaxSizeInBytes()) {
+        auto params = android_emb::MakeLEApcfServiceUUID16CommandView(
+            command_packet.data().data(), command_packet.size());
+        OnAndroidLEApcfServiceUUID16Command(params);
+      } else if (size ==
+                 android_emb::LEApcfServiceUUID32Command::MaxSizeInBytes()) {
+        auto params = android_emb::MakeLEApcfServiceUUID32CommandView(
+            command_packet.data().data(), command_packet.size());
+        OnAndroidLEApcfServiceUUID32Command(params);
+      } else if (size ==
+                 android_emb::LEApcfServiceUUID128Command::MaxSizeInBytes()) {
+        auto params = android_emb::MakeLEApcfServiceUUID128CommandView(
+            command_packet.data().data(), command_packet.size());
+        OnAndroidLEApcfServiceUUID128Command(params);
+      } else {
+        bt_log(
+            WARN,
+            "fake-hci",
+            "unhandled android packet filter command (service uuid), size: %zu",
+            size);
+        RespondWithCommandComplete(pwemb::OpCode::ANDROID_APCF,
+                                   pwemb::StatusCode::COMMAND_DISALLOWED);
+      }
+      break;
+    }
+    case android_hci::kLEApcfServiceSolicitationUUIDSubopcode: {
+      size_t size = command_packet.size();
+      if (size ==
+          android_emb::LEApcfSolicitationUUID16Command::MaxSizeInBytes()) {
+        auto params = android_emb::MakeLEApcfSolicitationUUID16CommandView(
+            command_packet.data().data(), command_packet.size());
+        OnAndroidLEApcfSolicitationUUID16Command(params);
+      } else if (size == android_emb::LEApcfSolicitationUUID32Command::
+                             MaxSizeInBytes()) {
+        auto params = android_emb::MakeLEApcfSolicitationUUID32CommandView(
+            command_packet.data().data(), command_packet.size());
+        OnAndroidLEApcfSolicitationUUID32Command(params);
+      } else if (size == android_emb::LEApcfSolicitationUUID128Command::
+                             MaxSizeInBytes()) {
+        auto params = android_emb::MakeLEApcfSolicitationUUID128CommandView(
+            command_packet.data().data(), command_packet.size());
+        OnAndroidLEApcfSolicitationUUID128Command(params);
+      } else {
+        bt_log(WARN,
+               "fake-hci",
+               "unhandled android packet filter command (solicitation uuid), "
+               "size: %zu",
+               size);
+        RespondWithCommandComplete(pwemb::OpCode::ANDROID_APCF,
+                                   pwemb::StatusCode::COMMAND_DISALLOWED);
+      }
+      break;
+    }
+    case android_hci::kLEApcfLocalNameSubopcode: {
+      size_t data_length =
+          command_packet.size() -
+          android_emb::LEApcfLocalNameCommand::MinSizeInBytes();
+      auto params = android_emb::MakeLEApcfLocalNameCommandView(
+          data_length, command_packet.data().data(), command_packet.size());
+      OnAndroidLEApcfLocalNameCommand(params);
+      break;
+    }
+    case android_hci::kLEApcfManufacturerDataSubopcode: {
+      size_t data_length =
+          (command_packet.size() -
+           android_emb::LEApcfManufacturerDataCommand::MinSizeInBytes()) /
+          2;
+      auto params = android_emb::MakeLEApcfManufacturerDataCommandView(
+          data_length, command_packet.data().data(), command_packet.size());
+      OnAndroidLEApcfManufacturerDataCommand(params);
+      break;
+    }
+    case android_hci::kLEApcfServiceDataSubopcode: {
+      size_t data_length =
+          (command_packet.size() -
+           android_emb::LEApcfServiceDataCommand::MinSizeInBytes()) /
+          2;
+      auto params = android_emb::MakeLEApcfServiceDataCommandView(
+          data_length, command_packet.data().data(), command_packet.size());
+      OnAndroidLEApcfServiceDataCommand(params);
+      break;
+    }
+    case android_hci::kLEApcfAdTypeFilter: {
+      auto params = android_emb::MakeLEApcfAdTypeCommandView(
+          command_packet.data().data(), command_packet.size());
+      OnAndroidLEApcfAdTypeCommand(params);
+      break;
+    }
+    default: {
+      bt_log(WARN,
+             "fake-hci",
+             "unhandled android packet filter command, subopcode: %#.4x",
+             subopcode);
+      RespondWithCommandComplete(pwemb::OpCode::ANDROID_APCF,
+                                 pwemb::StatusCode::UNKNOWN_COMMAND);
+      break;
+    }
+  }
+}
+
+void FakeController::OnAndroidLEBatchScanEnableCommand(
+    const android_emb::LEBatchScanEnableCommandView& params) {
+  auto packet =
+      hci::EventPacket::New<android_emb::LEBatchScanCommandCompleteEventWriter>(
+          hci_spec::kCommandCompleteEventCode);
+  auto view = packet.view_t();
+  view.sub_opcode().Write(android_emb::BatchScanSubOpcode::ENABLE);
+
+  if (!EnableVendorBatchScanning()) {
+    bt_log(INFO,
+           "fake-hci",
+           "vendor batch scanning command rejected, another scan type in use");
+    view.status().Write(pwemb::StatusCode::COMMAND_DISALLOWED);
+    RespondWithCommandComplete(pwemb::OpCode::ANDROID_LE_BATCH_SCAN, &packet);
+    return;
+  }
+
+  if (params.enabled().Read() == pwemb::GenericEnableParam::ENABLE) {
+    le_scan_state_.batch_scan_enabled = true;
+  } else {
+    le_scan_state_.batch_scan_enabled = false;
+  }
+
+  le_scan_state_.batch_scan_num_peers_read = 0;
+  RespondWithCommandComplete(pwemb::OpCode::ANDROID_LE_BATCH_SCAN, &packet);
+}
+
+void FakeController::OnAndroidLEBatchScanSetStorageParametersCommand(
+    [[maybe_unused]] const android_emb::
+        LEBatchScanSetStorageParametersCommandView& params) {
+  auto packet =
+      hci::EventPacket::New<android_emb::LEBatchScanCommandCompleteEventWriter>(
+          hci_spec::kCommandCompleteEventCode);
+  auto view = packet.view_t();
+  view.sub_opcode().Write(
+      android_emb::BatchScanSubOpcode::SET_STORAGE_PARAMETERS);
+
+  if (!EnableVendorBatchScanning()) {
+    bt_log(INFO,
+           "fake-hci",
+           "vendor batch scanning command rejected, another scan type in use");
+    view.status().Write(pwemb::StatusCode::COMMAND_DISALLOWED);
+    RespondWithCommandComplete(pwemb::OpCode::ANDROID_LE_BATCH_SCAN, &packet);
+    return;
+  }
+
+  // For testing purposes, we don't store storage threshold configurations for
+  // truncated and full format batched scan results or the storage threshold to
+  // send the results back to the Host. Rather, the tests themselves can
+  // simulate these conditions by calling trigger functions on the
+  // FakeController itself.
+  if (!le_scan_state_.batch_scan_enabled) {
+    bt_log(WARN, "fake-hci", "Cannot set storage parameters without enabling");
+    view.status().Write(pwemb::StatusCode::COMMAND_DISALLOWED);
+  }
+
+  le_scan_state_.batch_scan_num_peers_read = 0;
+  RespondWithCommandComplete(pwemb::OpCode::ANDROID_LE_BATCH_SCAN, &packet);
+}
+
+void FakeController::OnAndroidLEBatchScanSetScanParametersCommand(
+    const android_emb::LEBatchScanSetScanParametersCommandView& params) {
+  auto packet =
+      hci::EventPacket::New<android_emb::LEBatchScanCommandCompleteEventWriter>(
+          hci_spec::kCommandCompleteEventCode);
+  auto view = packet.view_t();
+  view.sub_opcode().Write(android_emb::BatchScanSubOpcode::SET_SCAN_PARAMETERS);
+
+  if (!EnableVendorBatchScanning()) {
+    bt_log(INFO,
+           "fake-hci",
+           "vendor batch scanning command rejected, another scan type in use");
+    view.status().Write(pwemb::StatusCode::COMMAND_DISALLOWED);
+    RespondWithCommandComplete(pwemb::OpCode::ANDROID_LE_BATCH_SCAN, &packet);
+    return;
+  }
+
+  if (!le_scan_state_.batch_scan_enabled) {
+    bt_log(WARN, "fake-hci", "Cannot set scan parameters without enabling");
+    view.status().Write(pwemb::StatusCode::COMMAND_DISALLOWED);
+    RespondWithCommandComplete(pwemb::OpCode::ANDROID_LE_BATCH_SCAN, &packet);
+    return;
+  }
+
+  // Sapphire doesn't support truncated scan mode because it doesn't contain the
+  // advertising data or scan response data. Disallow our code to try and enable
+  // only truncated mode.
+  if (params.full_mode_enabled().Read()) {
+    le_scan_state_.enabled = true;
+  } else {
+    if (params.truncated_mode_enabled().Read()) {
+      bt_log(WARN, "fake-hci", "Cannot enable only batch scan truncated mode");
+      view.status().Write(pwemb::StatusCode::INVALID_HCI_COMMAND_PARAMETERS);
+      RespondWithCommandComplete(pwemb::OpCode::ANDROID_LE_BATCH_SCAN, &packet);
+      return;
+    } else {
+      le_scan_state_.enabled = false;
+    }
+  }
+
+  le_scan_state_.scan_window = params.window().Read();
+  le_scan_state_.scan_interval = params.interval().Read();
+  le_scan_state_.batch_scan_num_peers_read = 0;
+
+  if (params.own_address_type().Read() ==
+      android_emb::BatchScanOwnAddressType::PUBLIC) {
+    le_scan_state_.own_address_type = pwemb::LEOwnAddressType::PUBLIC;
+  } else if (params.own_address_type().Read() ==
+             android_emb::BatchScanOwnAddressType::RANDOM) {
+    le_scan_state_.own_address_type = pwemb::LEOwnAddressType::RANDOM;
+  }
+
+  // For testing purposes, we don't store the discard rule. The tests themselves
+  // can simulate these conditions by calling trigger functions on the
+  // FakeController itself.
+  RespondWithCommandComplete(pwemb::OpCode::ANDROID_LE_BATCH_SCAN, &packet);
+}
+
+auto FakeController::LEBatchScanReadResultNextPacketSize() const {
+  struct result {
+    int num_records;
+    size_t packet_size;
+  };
+
+  uint8_t num_records = 0;
+  size_t max_hci_packet_size = std::numeric_limits<uint8_t>::max();
+  size_t packet_size =
+      android_emb::LEBatchScanReadResultsCommandCompleteEvent::MinSizeInBytes();
+
+  auto itr = peers_.cbegin();
+  std::advance(itr, le_scan_state_.batch_scan_num_peers_read);
+  for (; itr != peers_.cend(); ++itr) {
+    const std::unique_ptr<FakePeer>& peer = itr->second;
+    size_t full_result_size =
+        android_emb::LEBatchScanFullResult::MinSizeInBytes() +
+        peer->advertising_data().size() + peer->scan_response().size();
+
+    if (packet_size + full_result_size > max_hci_packet_size) {
+      break;
+    }
+
+    num_records++;
+    packet_size += full_result_size;
+  }
+
+  return result{num_records, packet_size};
+}
+
+void FakeController::LEBatchScanFillFullResult(
+    android_emb::LEBatchScanFullResultWriter& full_result,
+    const std::unique_ptr<FakePeer>& peer) const {
+  full_result.peer_address().bd_addr().CopyFrom(
+      peer->address().value().view().bd_addr());
+
+  if (peer->address().type() == DeviceAddress::Type::kLERandom) {
+    full_result.peer_address_type().Write(pwemb::LEAddressType::RANDOM);
+  } else {
+    full_result.peer_address_type().Write(pwemb::LEAddressType::PUBLIC);
+  }
+
+  full_result.tx_power().Write(peer->tx_power());
+  full_result.rssi().Write(peer->rssi());
+
+  full_result.advertising_data_length().Write(peer->advertising_data().size());
+  if (!peer->advertising_data().empty()) {
+    std::memcpy(full_result.advertising_data().BackingStorage().begin(),
+                peer->advertising_data().data(),
+                peer->advertising_data().size());
+  }
+
+  full_result.scan_response_length().Write(peer->scan_response().size());
+  if (!peer->scan_response().empty()) {
+    std::memcpy(full_result.scan_response_data().BackingStorage().begin(),
+                peer->scan_response().data(),
+                peer->scan_response().size());
+  }
+}
+
+void FakeController::OnAndroidLEBatchScanReadResultsCommand(
+    const android_emb::LEBatchScanReadResultsCommandView& params) {
+  auto regular_packet =
+      hci::EventPacket::New<android_emb::LEBatchScanCommandCompleteEventWriter>(
+          hci_spec::kCommandCompleteEventCode);
+  auto regular_view = regular_packet.view_t();
+  regular_view.sub_opcode().Write(
+      android_emb::BatchScanSubOpcode::READ_RESULT_PARAMETERS);
+
+  if (!EnableVendorBatchScanning()) {
+    bt_log(INFO,
+           "fake-hci",
+           "vendor batch scanning command rejected, another scan type in use");
+    regular_view.status().Write(pwemb::StatusCode::COMMAND_DISALLOWED);
+    RespondWithCommandComplete(pwemb::OpCode::ANDROID_LE_BATCH_SCAN,
+                               &regular_packet);
+    return;
+  }
+
+  if (!le_scan_state_.batch_scan_enabled) {
+    bt_log(WARN, "fake-hci", "Cannot read batch scan results without enabling");
+    regular_view.status().Write(pwemb::StatusCode::COMMAND_DISALLOWED);
+    RespondWithCommandComplete(pwemb::OpCode::ANDROID_LE_BATCH_SCAN,
+                               &regular_packet);
+    return;
+  }
+
+  // Sapphire doesn't support truncated scan mode because it doesn't contain
+  // the advertising data or scan response data. Disallow our code to try and
+  // enable only truncated mode.
+  if (params.read_mode().Read() == android_emb::BatchScanReadMode::TRUNCATED) {
+    bt_log(WARN, "fake-hci", "Cannot read truncated batch scan results");
+    regular_view.status().Write(pwemb::StatusCode::COMMAND_DISALLOWED);
+    RespondWithCommandComplete(pwemb::OpCode::ANDROID_LE_BATCH_SCAN,
+                               &regular_packet);
+    return;
+  }
+
+  auto [num_records, packet_size] = LEBatchScanReadResultNextPacketSize();
+
+  auto packet = hci::EventPacket::New<
+      android_emb::LEBatchScanReadResultsCommandCompleteEventWriter>(
+      hci_spec::kCommandCompleteEventCode, packet_size);
+  auto view = packet.view_t();
+  view.status().Write(pwemb::StatusCode::SUCCESS);
+  view.sub_opcode().Write(
+      android_emb::BatchScanSubOpcode::READ_RESULT_PARAMETERS);
+  view.read_mode().Write(android_emb::BatchScanReadMode::FULL);
+  view.num_records().Write(num_records);
+
+  if (num_records == 0) {
+    RespondWithCommandComplete(pwemb::OpCode::ANDROID_LE_BATCH_SCAN, &packet);
+    return;
+  }
+
+  size_t write_offset = 0;
+  int start_num_peers_read = le_scan_state_.batch_scan_num_peers_read;
+  auto itr = peers_.cbegin();
+  for (; itr != peers_.cend(); ++itr) {
+    if (start_num_peers_read + num_records <=
+        le_scan_state_.batch_scan_num_peers_read) {
+      break;
+    }
+
+    le_scan_state_.batch_scan_num_peers_read++;
+
+    const std::unique_ptr<FakePeer>& peer = itr->second;
+    size_t full_result_size =
+        android_emb::LEBatchScanFullResult::MinSizeInBytes() +
+        peer->advertising_data().size() + peer->scan_response().size();
+
+    android_emb::LEBatchScanFullResultWriter full_result(
+        view.full_results().BackingStorage().begin() + write_offset,
+        full_result_size);
+
+    LEBatchScanFillFullResult(full_result, peer);
+    write_offset += full_result_size;
+  }
+
+  RespondWithCommandComplete(pwemb::OpCode::ANDROID_LE_BATCH_SCAN, &packet);
+}
+
+void FakeController::OnAndroidLEBatchScanCommand(
+    const PacketView<hci_spec::CommandHeader>& command_packet) {
+  const auto& payload = command_packet.payload_data();
+
+  uint8_t subopcode = payload.To<uint8_t>();
+  switch (subopcode) {
+    case android_hci::kLEBatchScanEnableSubopcode: {
+      auto params = android_emb::MakeLEBatchScanEnableCommandView(
+          command_packet.data().data(), command_packet.size());
+      OnAndroidLEBatchScanEnableCommand(params);
+      break;
+    }
+    case android_hci::kLEBatchScanSetStorageParametersSubopcode: {
+      auto params = android_emb::MakeLEBatchScanSetStorageParametersCommandView(
+          command_packet.data().data(), command_packet.size());
+      OnAndroidLEBatchScanSetStorageParametersCommand(params);
+      break;
+    }
+    case android_hci::kLEBatchScanSetScanParametersSubopcode: {
+      auto params = android_emb::MakeLEBatchScanSetScanParametersCommandView(
+          command_packet.data().data(), command_packet.size());
+      OnAndroidLEBatchScanSetScanParametersCommand(params);
+      break;
+    }
+    case android_hci::kLEBatchScanReadResultParametersSubopcode: {
+      auto params = android_emb::MakeLEBatchScanReadResultsCommandView(
+          command_packet.data().data(), command_packet.size());
+      OnAndroidLEBatchScanReadResultsCommand(params);
+      break;
+    }
+    default: {
+      bt_log(WARN,
+             "fake-hci",
+             "unhandled android batch scan command, subopcode: %#.4x",
+             subopcode);
+      RespondWithCommandComplete(pwemb::OpCode::ANDROID_LE_BATCH_SCAN,
+                                 pwemb::StatusCode::UNKNOWN_COMMAND);
+      break;
+    }
+  }
+}
+
 void FakeController::OnVendorCommand(
     const PacketView<hci_spec::CommandHeader>& command_packet) {
   auto opcode = pw::bytes::ConvertOrderFrom(cpp20::endian::little,
@@ -4051,6 +6342,12 @@ void FakeController::OnVendorCommand(
       break;
     case android_hci::kLEMultiAdvt:
       OnAndroidLEMultiAdvt(command_packet);
+      break;
+    case android_hci::kLEApcf:
+      OnAndroidLEApcfCommand(command_packet);
+      break;
+    case android_hci::kLEBatchScan:
+      OnAndroidLEBatchScanCommand(command_packet);
       break;
     default:
       bt_log(WARN,
@@ -4159,8 +6456,9 @@ void FakeController::SetDataCallback(DataCallback callback,
 }
 
 void FakeController::ClearDataCallback() {
-  // Leave dispatcher set (if already set) to preserve its write-once-ness (this
-  // catches bugs with setting multiple data callbacks in class hierarchies).
+  // Leave dispatcher set (if already set) to preserve its write-once-ness
+  // (this catches bugs with setting multiple data callbacks in class
+  // hierarchies).
   acl_data_callback_ = nullptr;
 }
 
@@ -4169,20 +6467,62 @@ bool FakeController::LEAdvertisingState::IsDirectedAdvertising() const {
 }
 
 bool FakeController::EnableLegacyAdvertising() {
-  if (advertising_procedure() == AdvertisingProcedure::kExtended) {
+  if (advertising_procedure() != ExtendedOperationType::kLegacy &&
+      advertising_procedure() != ExtendedOperationType::kUnknown) {
     return false;
   }
 
-  advertising_procedure_ = AdvertisingProcedure::kLegacy;
+  advertising_procedure_ = ExtendedOperationType::kLegacy;
   return true;
 }
 
 bool FakeController::EnableExtendedAdvertising() {
-  if (advertising_procedure() == AdvertisingProcedure::kLegacy) {
+  if (advertising_procedure() != ExtendedOperationType::kExtended &&
+      advertising_procedure() != ExtendedOperationType::kUnknown) {
     return false;
   }
 
-  advertising_procedure_ = AdvertisingProcedure::kExtended;
+  advertising_procedure_ = ExtendedOperationType::kExtended;
+  return true;
+}
+
+bool FakeController::EnableVendorAdvertising() {
+  if (advertising_procedure() != ExtendedOperationType::kVendor &&
+      advertising_procedure() != ExtendedOperationType::kUnknown) {
+    return false;
+  }
+
+  advertising_procedure_ = ExtendedOperationType::kVendor;
+  return true;
+}
+
+bool FakeController::EnableLegacyScanning() {
+  if (scan_procedure() != ExtendedOperationType::kLegacy &&
+      scan_procedure() != ExtendedOperationType::kUnknown) {
+    return false;
+  }
+
+  scan_procedure_ = ExtendedOperationType::kLegacy;
+  return true;
+}
+
+bool FakeController::EnableExtendedScanning() {
+  if (scan_procedure() != ExtendedOperationType::kExtended &&
+      scan_procedure() != ExtendedOperationType::kUnknown) {
+    return false;
+  }
+
+  scan_procedure_ = ExtendedOperationType::kExtended;
+  return true;
+}
+
+bool FakeController::EnableVendorBatchScanning() {
+  if (scan_procedure() != ExtendedOperationType::kVendor &&
+      scan_procedure() != ExtendedOperationType::kUnknown) {
+    return false;
+  }
+
+  scan_procedure_ = ExtendedOperationType::kVendor;
   return true;
 }
 
@@ -4205,8 +6545,8 @@ void FakeController::HandleReceivedCommandPacket(
     return;
   }
 
-  // TODO(fxbug.dev/42175513): Validate size of payload to be the correct length
-  // below.
+  // TODO(fxbug.dev/42175513): Validate size of payload to be the correct
+  // length below.
   switch (opcode) {
     case hci_spec::kReadLocalVersionInfo: {
       OnReadLocalVersionInfo();
@@ -4301,6 +6641,16 @@ void FakeController::HandleReceivedCommandPacket(
     case hci_spec::kLEConnectionUpdate:
     case hci_spec::kLECreateConnection:
     case hci_spec::kLEExtendedCreateConnection:
+    case static_cast<uint16_t>(
+        pwemb::OpCode::LE_PERIODIC_ADVERTISING_CREATE_SYNC):
+    case static_cast<uint16_t>(
+        pwemb::OpCode::LE_PERIODIC_ADVERTISING_SYNC_TRANSFER):
+    case static_cast<uint16_t>(
+        pwemb::OpCode::LE_PERIODIC_ADVERTISING_TERMINATE_SYNC):
+    case static_cast<uint16_t>(
+        pwemb::OpCode::LE_ADD_DEVICE_TO_PERIODIC_ADVERTISER_LIST):
+    case static_cast<uint16_t>(
+        pwemb::OpCode::LE_REMOVE_DEVICE_FROM_PERIODIC_ADVERTISER_LIST):
     case hci_spec::kLEReadMaximumAdvertisingDataLength:
     case hci_spec::kLEReadNumSupportedAdvertisingSets:
     case hci_spec::kLEReadRemoteFeatures:
@@ -4322,6 +6672,7 @@ void FakeController::HandleReceivedCommandPacket(
     case hci_spec::kLESetScanParameters:
     case hci_spec::kLESetScanResponseData:
     case hci_spec::kLEStartEncryption:
+    case hci_spec::kLERejectCISRequest:
     case hci_spec::kLinkKeyRequestNegativeReply:
     case hci_spec::kReadEncryptionKeySize:
     case hci_spec::kReadLocalExtendedFeatures:
@@ -4345,10 +6696,10 @@ void FakeController::HandleReceivedCommandPacket(
     case hci_spec::kWriteSecureConnectionsHostSupport:
     case hci_spec::kWriteSimplePairingMode:
     case hci_spec::kWriteSynchronousFlowControlEnable: {
-      // This case is for packet types that have been migrated to the new Emboss
-      // architecture. Their old version can be still be assembled from the
-      // HciEmulator channel, so here we repackage and forward them as Emboss
-      // packets.
+      // This case is for packet types that have been migrated to the new
+      // Emboss architecture. Their old version can be still be assembled from
+      // the HciEmulator channel, so here we repackage and forward them as
+      // Emboss packets.
       auto emboss_packet =
           bt::hci::CommandPacket::New<pwemb::CommandHeaderView>(
               opcode, command_packet.size());
@@ -4649,6 +7000,45 @@ void FakeController::HandleReceivedCommandPacket(
       OnLEExtendedCreateConnectionCommandReceived(params);
       break;
     }
+    case static_cast<uint16_t>(
+        pwemb::OpCode::LE_PERIODIC_ADVERTISING_CREATE_SYNC): {
+      const auto& params =
+          command_packet
+              .view<pwemb::LEPeriodicAdvertisingCreateSyncCommandView>();
+      OnLEPeriodicAdvertisingCreateSyncCommandReceived(params);
+      break;
+    }
+    case static_cast<uint16_t>(
+        pwemb::OpCode::LE_PERIODIC_ADVERTISING_SYNC_TRANSFER): {
+      const auto& params =
+          command_packet
+              .view<pwemb::LEPeriodicAdvertisingSyncTransferCommandView>();
+      OnLEPeriodicAdvertisingSyncTransferCommandReceived(params);
+      break;
+    }
+    case static_cast<uint16_t>(
+        pwemb::OpCode::LE_PERIODIC_ADVERTISING_TERMINATE_SYNC): {
+      const auto& params =
+          command_packet
+              .view<pwemb::LEPeriodicAdvertisingTerminateSyncCommandView>();
+      OnLEPeriodicAdvertisingTerminateSyncCommandReceived(params);
+      break;
+    }
+    case static_cast<uint16_t>(
+        pwemb::OpCode::LE_ADD_DEVICE_TO_PERIODIC_ADVERTISER_LIST): {
+      const auto& params =
+          command_packet
+              .view<pwemb::LEAddDeviceToPeriodicAdvertiserListCommandView>();
+      OnLEAddDeviceToPeriodicAdvertiserListCommandReceived(params);
+      break;
+    }
+    case static_cast<uint16_t>(
+        pwemb::OpCode::LE_REMOVE_DEVICE_FROM_PERIODIC_ADVERTISER_LIST): {
+      const auto& params = command_packet.view<
+          pwemb::LERemoveDeviceFromPeriodicAdvertiserListCommandView>();
+      OnLERemoveDeviceFromPeriodicAdvertiserListCommandReceived(params);
+      break;
+    }
     case hci_spec::kLEConnectionUpdate: {
       const auto& params =
           command_packet.view<pwemb::LEConnectionUpdateCommandView>();
@@ -4723,6 +7113,12 @@ void FakeController::HandleReceivedCommandPacket(
           command_packet
               .view<pwemb::ReadLocalSupportedControllerDelayCommandView>();
       OnReadLocalSupportedControllerDelay(params);
+      break;
+    }
+    case hci_spec::kLERejectCISRequest: {
+      const auto& params =
+          command_packet.view<pwemb::LERejectCISRequestCommandView>();
+      OnLERejectCisRequestCommand(params);
       break;
     }
     default: {

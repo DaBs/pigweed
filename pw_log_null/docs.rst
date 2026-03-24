@@ -7,7 +7,7 @@ pw_log_null
    :name: pw_log_null
 
 ``pw_log_null`` is a ``pw_log`` backend that ignores all ``pw_log`` statements.
-The backend implements ``PW_LOG`` with an empty inline function. Using an empty
+The backend implements :cc:`PW_LOG` with an empty inline function. Using an empty
 function ensures that the arguments are evaluated and their types are correct.
 Since the function is inline in the header, the compiler will optimize out the
 function call.

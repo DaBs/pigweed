@@ -12,20 +12,21 @@ Compatibility
 =============
 C and C++
 
+API reference
+=============
+Moved: :cc:`pw_preprocessor`
+
 Headers
 =======
 The preprocessor module provides several headers.
 
 pw_preprocessor/apply.h
----------------------------------
-Defines general macro to support macro expansion. Includes the following macro:
-
-API Reference
-^^^^^^^^^^^^^
-.. doxygendefine:: PW_APPLY
+-----------------------
+Defines the :cc:`PW_APPLY` macro, which expands to a macro invocation for each
+argument it is passed, with optional separators.
 
 pw_preprocessor/arguments.h
----------------------------------
+---------------------------
 Defines macros for handling variadic arguments to function-like macros. Macros
 include the following:
 
@@ -35,16 +36,16 @@ include the following:
   to ``<name><arg_count>(...)``. For example,
   ``PW_DELEGATE_BY_ARG_COUNT(foo_, 1, 2, 3)`` expands to ``foo_3(1, 2, 3)``.
 
-  This example shows how ``PW_DELEGATE_BY_ARG_COUNT`` could be used to log a
+  This example shows how :c:macro:`PW_DELEGATE_BY_ARG_COUNT` could be used to log a
   customized message based on the number of arguments provided.
 
   .. code-block:: cpp
 
-     #define ARG_PRINT(...)  PW_DELEGATE_BY_ARG_COUNT(_ARG_PRINT, __VA_ARGS__)
-     #define _ARG_PRINT0(a)        LOG_INFO("nothing!")
-     #define _ARG_PRINT1(a)        LOG_INFO("1 arg: %s", a)
-     #define _ARG_PRINT2(a, b)     LOG_INFO("2 args: %s, %s", a, b)
-     #define _ARG_PRINT3(a, b, c)  LOG_INFO("3 args: %s, %s, %s", a, b, c)
+     #define ARG_PRINT(...) PW_DELEGATE_BY_ARG_COUNT(_ARG_PRINT, __VA_ARGS__)
+     #define _ARG_PRINT0(a) LOG_INFO("nothing!")
+     #define _ARG_PRINT1(a) LOG_INFO("1 arg: %s", a)
+     #define _ARG_PRINT2(a, b) LOG_INFO("2 args: %s, %s", a, b)
+     #define _ARG_PRINT3(a, b, c) LOG_INFO("3 args: %s, %s, %s", a, b, c)
 
   When used, ``ARG_PRINT`` expands to the ``_ARG_PRINT#`` macro corresponding
   to the number of arguments.
@@ -83,11 +84,11 @@ Modifying compiler diagnostics
 ``pw_preprocessor/compiler.h`` provides macros for enabling or disabling
 compiler diagnostics (warnings or errors) for sections of code.
 
-:c:macro:`PW_MODIFY_DIAGNOSTICS_PUSH` and :c:macro:`PW_MODIFY_DIAGNOSTICS_POP`
+:cc:`PW_MODIFY_DIAGNOSTICS_PUSH` and :cc:`PW_MODIFY_DIAGNOSTICS_POP`
 are used to turn off or on diagnostics (warnings or errors) for a section of
-code. Use :c:macro:`PW_MODIFY_DIAGNOSTICS_PUSH`, use
-:c:macro:`PW_MODIFY_DIAGNOSTIC` as many times as needed, then use
-:c:macro:`PW_MODIFY_DIAGNOSTICS_POP` to restore the previous settings.
+code. Use :cc:`PW_MODIFY_DIAGNOSTICS_PUSH`, use
+:cc:`PW_MODIFY_DIAGNOSTIC` as many times as needed, then use
+:cc:`PW_MODIFY_DIAGNOSTICS_POP` to restore the previous settings.
 
 .. code-block:: c
 
@@ -100,25 +101,11 @@ code. Use :c:macro:`PW_MODIFY_DIAGNOSTICS_PUSH`, use
 
 .. tip::
 
-  :c:macro:`PW_MODIFY_DIAGNOSTIC` and related macros should rarely be used.
+  :cc:`PW_MODIFY_DIAGNOSTIC` and related macros should rarely be used.
   Whenever possible, fix the underlying issues about which the compiler is
   warning, rather than silencing the diagnostics.
 
 .. _module-pw_preprocessor-integer-overflow:
-
-Integer with Overflow Checking
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-``pw_preprocessor/compiler.h`` provides macros for performing arithmetic
-operations and checking whether it overflowed.
-
-- :c:macro:`PW_ADD_OVERFLOW`
-- :c:macro:`PW_SUB_OVERFLOW`
-- :c:macro:`PW_MUL_OVERFLOW`
-
-API Reference
-^^^^^^^^^^^^^
-.. doxygengroup:: pw_preprocessor_compiler
-   :content-only:
 
 pw_preprocessor/concat.h
 ------------------------

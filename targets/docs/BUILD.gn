@@ -19,10 +19,10 @@ import("$dir_pw_boot_cortex_m/toolchain.gni")
 import("$dir_pw_docgen/docs.gni")
 import("$dir_pw_log_tokenized/backend.gni")
 import("$dir_pw_protobuf_compiler/proto.gni")
-import("$dir_pw_third_party/nanopb/nanopb.gni")
 import("$dir_pw_toolchain/arm_gcc/toolchains.gni")
 import("$dir_pw_toolchain/generate_toolchain.gni")
 import("$dir_pw_toolchain/traits.gni")
+import("$pw_external_nanopb/nanopb.gni")
 
 if (current_toolchain != default_toolchain) {
   pw_source_set("tokenized_log_handler") {
@@ -77,13 +77,11 @@ generate_toolchain("docs") {
       "PW_BOOT_VECTOR_TABLE_SIZE=512",
     ]
 
+    pw_async2_DISPATCHER_FOR_TEST_BACKEND =
+        "$dir_pw_async2:basic_dispatcher_for_test"
     pw_chrono_SYSTEM_CLOCK_BACKEND = "$dir_pw_chrono_stl:system_clock"
     pw_chrono_SYSTEM_TIMER_BACKEND = "$dir_pw_chrono_stl:system_timer"
     pw_async_TASK_BACKEND = "$dir_pw_async_basic:task"
     pw_async_FAKE_DISPATCHER_BACKEND = "$dir_pw_async_basic:fake_dispatcher"
   }
-}
-
-pw_doc_group("target_docs") {
-  sources = [ "target_docs.rst" ]
 }

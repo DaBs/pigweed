@@ -1,0 +1,58 @@
+# Copyright 2025 The Pigweed Authors
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may not
+# use this file except in compliance with the License. You may obtain a copy of
+# the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations under
+# the License.
+
+load("@rules_python//sphinxdocs:sphinx_docs_library.bzl", "sphinx_docs_library")
+load("//pw_build:compatibility.bzl", "incompatible_with_mcu")
+
+# This is called "fuchsia_host" because the real fuchsia platform is the result
+# of a platform transition derived from this configuration.
+platform(
+    name = "fuchsia_host",
+    flags = [
+        "--@rules_fuchsia//fuchsia/flags:fuchsia_targets_enabled=True",
+        "--//pw_assert:assert_backend=//pw_assert_fuchsia:assert_backend",
+        "--//pw_assert:assert_backend_impl=@rules_cc//:empty_lib",
+        "--//pw_assert:check_backend=//pw_assert_fuchsia:check_backend",
+        "--//pw_assert:check_backend_impl=@rules_cc//:empty_lib",
+        "--//pw_chrono:system_clock_backend=//pw_chrono_stl:system_clock",
+        "--//pw_log:backend=//pw_log_fuchsia",
+        "--//pw_log:backend_impl=@rules_cc//:empty_lib",
+        "--//pw_unit_test:backend=//pw_unit_test:googletest",
+        "--//pw_async:task_backend=//pw_async_fuchsia:task",
+        "--//pw_async:fake_dispatcher_backend=//pw_async_fuchsia:fake_dispatcher",
+        "--//pw_sync:mutex_backend=//pw_sync_stl:mutex",
+        "--//pw_crypto:aes_backend=//pw_crypto:aes_boringssl",
+        "--//pw_crypto:ecdh_backend=//pw_crypto:ecdh_boringssl",
+        "--//pw_sync:interrupt_spin_lock_backend=//pw_sync_stl:interrupt_spin_lock",
+        # These prevent `--copt` entries from the CLI from applying to this
+        # platform. Ideally, the Fuchsia SDK eventually has a proper way to
+        # set defines like these instead of relying on copt. Using --copt for
+        # production-required flags is an anti-pattern.
+        "--copt=-DBORINGSSL_ALLOW_CXX_RUNTIME",
+        "--copt=-DOPENSSL_SMALL",
+        "--copt=-DOPENSSL_NO_ASM",
+        "--copt=-DOPENSSL_NO_SOCK",
+        "--copt=-DNDEBUG",
+    ],
+    parents = ["@bazel_tools//tools:host_platform"],
+)
+
+sphinx_docs_library(
+    name = "docs",
+    srcs = [
+        "target_docs.rst",
+    ],
+    target_compatible_with = incompatible_with_mcu(),
+    visibility = ["//targets:__pkg__"],
+)

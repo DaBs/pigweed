@@ -15,6 +15,8 @@
 
 #include "pw_tokenizer/enum.h"
 
+/// @submodule{pw_log,tokenized_args}
+
 /// If nested tokenization is supported by the logging backend, this is a
 /// format specifier to declare a nested token with a specific domain value.
 ///
@@ -31,7 +33,8 @@
 #include "pw_tokenizer/tokenize.h"
 
 #define PW_LOG_TOKEN_TYPE pw_tokenizer_Token
-#define PW_LOG_TOKEN PW_TOKENIZE_STRING_OPTIONAL_DOMAIN
+#define PW_LOG_TOKEN_DEFAULT_VALUE ((pw_tokenizer_Token)0)
+#define PW_LOG_TOKEN PW_TOKENIZE_STRING
 #define PW_LOG_TOKEN_EXPR PW_TOKENIZE_STRING_EXPR
 #define PW_LOG_TOKEN_FMT PW_TOKEN_FMT
 #define PW_LOG_ENUM(enumerator) ::pw::tokenizer::EnumToToken(enumerator)
@@ -45,6 +48,16 @@
 /// For non-tokenizing backends, defaults to `const char*`.
 #define PW_LOG_TOKEN_TYPE const char*
 
+/// An "empty" value for a token.
+///
+/// If nested tokenization is supported by the logging backend, this is `0`.
+/// Otherwise, it is `nullptr`.
+#ifdef __cplusplus
+#define PW_LOG_TOKEN_DEFAULT_VALUE nullptr
+#else
+#define PW_LOG_TOKEN_DEFAULT_VALUE NULL
+#endif  // __cplusplus
+
 /// If nested tokenization is supported by the logging backend, this is an
 /// alias for `PW_TOKENIZE_STRING`. No-op otherwise.
 #define PW_LOG_TOKEN(...) \
@@ -54,7 +67,8 @@
 
 /// If nested tokenization is supported by the logging backend, this is an
 /// alias for `PW_TOKENIZE_STRING_EXPR`. No-op otherwise.
-#define PW_LOG_TOKEN_EXPR(string_literal) string_literal
+#define PW_LOG_TOKEN_EXPR(...) \
+  PW_DELEGATE_BY_ARG_COUNT(_PW_STRING_OPTIONAL_DOMAIN_, __VA_ARGS__)
 
 /// If nested tokenization is supported by the logging backend, this is an
 /// alias for `PW_TOKEN_FORMAT`.
@@ -76,3 +90,20 @@
 #define PW_LOG_NESTED_TOKEN_FMT(...) "%s::%s"
 
 #endif  //__has_include("log_backend/log_backend_uses_pw_tokenizer.h")
+
+#ifdef __cplusplus
+
+namespace pw::log {
+
+/// Type of a log token. Either a `const char*` or a `pw::tokenizer::Token`.
+/// Use in C++ instead of `PW_LOG_TOKEN_TYPE`.
+using Token = PW_LOG_TOKEN_TYPE;
+
+/// Default value of a log token. This token should not be logged.
+inline constexpr Token kDefaultToken = PW_LOG_TOKEN_DEFAULT_VALUE;
+
+}  // namespace pw::log
+
+#endif  // __cplusplus
+
+/// @}

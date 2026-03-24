@@ -20,6 +20,7 @@ include($ENV{PW_ROOT}/pw_assert/backend.cmake)
 include($ENV{PW_ROOT}/pw_async2/backend.cmake)
 include($ENV{PW_ROOT}/pw_chrono/backend.cmake)
 include($ENV{PW_ROOT}/pw_log/backend.cmake)
+include($ENV{PW_ROOT}/pw_malloc/backend.cmake)
 include($ENV{PW_ROOT}/pw_perf_test/backend.cmake)
 include($ENV{PW_ROOT}/pw_rpc/system_server/backend.cmake)
 include($ENV{PW_ROOT}/pw_sync/backend.cmake)
@@ -37,9 +38,6 @@ pw_add_global_compile_options(-std=c++20 LANGUAGES CXX)
 # Configure backend for assert facade.
 pw_set_backend(pw_assert.check pw_assert.print_and_abort_check_backend)
 pw_set_backend(pw_assert.assert pw_assert.print_and_abort_assert_backend)
-
-# Configure backend for async dispatcher facade
-pw_set_backend(pw_async2.dispatcher pw_async2_epoll.dispatcher_backend)
 
 # Configure backend for logging facade.
 pw_set_backend(pw_log pw_log_basic)
@@ -88,6 +86,8 @@ pw_set_backend(pw_system.io pw_system.sys_io_target_io)
 pw_set_backend(pw_trace pw_trace_tokenized)
 # Maybe this should just be a facade?
 set(pw_trace_tokenizer_time pw_trace_tokenized.host_trace_time CACHE STRING "Tokenizer trace time implementation" FORCE)
+
+pw_set_backend(pw_malloc pw_malloc.best_fit)
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
     # The CIPD provided Clang/LLVM toolchain must link against the matched

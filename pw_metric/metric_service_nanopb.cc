@@ -1,4 +1,4 @@
-// Copyright 2020 The Pigweed Authors
+// Copyright 2025 The Pigweed Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License"); you may not
 // use this file except in compliance with the License. You may obtain a copy of
@@ -14,21 +14,53 @@
 
 #include "pw_metric/metric_service_nanopb.h"
 
+#include <algorithm>
 #include <cstring>
+#include <optional>
 
 #include "pw_assert/check.h"
 #include "pw_containers/vector.h"
 #include "pw_metric/metric.h"
-#include "pw_metric_private/metric_walker.h"
-#include "pw_preprocessor/util.h"
+#include "pw_metric/metric_walker.h"
 #include "pw_span/span.h"
 
 namespace pw::metric {
 namespace {
 
-class NanopbMetricWriter : public virtual internal::MetricWriter {
+// Writes a pw::metric::Metric object to a nanopb-generated Metric struct.
+// This is a shared helper used by both the streaming and unary writers.
+template <typename ResponseStruct>
+void WriteMetricToResponse(const Metric& metric,
+                           const Vector<Token>& path,
+                           ResponseStruct& response) {
+  // Grab the next available Metric slot to write to in the response.
+  pw_metric_proto_Metric& proto_metric =
+      response.metrics[response.metrics_count];
+
+  // Copy the path.
+  span<Token> proto_path(proto_metric.token_path);
+  PW_CHECK_INT_LE(path.size(), proto_path.size());
+  std::copy(path.begin(), path.end(), proto_path.begin());
+  proto_metric.token_path_count = static_cast<pb_size_t>(path.size());
+
+  // Copy the metric value.
+  if (metric.is_float()) {
+    proto_metric.value.as_float = metric.as_float();
+    proto_metric.which_value = pw_metric_proto_Metric_as_float_tag;
+  } else {
+    proto_metric.value.as_int = metric.as_int();
+    proto_metric.which_value = pw_metric_proto_Metric_as_int_tag;
+  }
+
+  // Move write head to the next slot.
+  ++response.metrics_count;
+}
+
+// A MetricWriter for the legacy, streaming Get RPC. It writes metrics to a
+// nanopb struct and flushes the batch when it's full.
+class NanopbStreamingMetricWriter : public virtual MetricWriter {
  public:
-  NanopbMetricWriter(
+  NanopbStreamingMetricWriter(
       MetricService::ServerWriter<pw_metric_proto_MetricResponse>&
           response_writer)
       : response_(pw_metric_proto_MetricResponse_init_zero),
@@ -43,27 +75,7 @@ class NanopbMetricWriter : public virtual internal::MetricWriter {
     span<pw_metric_proto_Metric> metrics(response_.metrics);
     PW_CHECK_INT_LT(response_.metrics_count, metrics.size());
 
-    // Grab the next available Metric slot to write to in the response.
-    pw_metric_proto_Metric& proto_metric =
-        response_.metrics[response_.metrics_count];
-
-    // Copy the path.
-    span<Token> proto_path(proto_metric.token_path);
-    PW_CHECK_INT_LE(path.size(), proto_path.size());
-    std::copy(path.begin(), path.end(), proto_path.begin());
-    proto_metric.token_path_count = path.size();
-
-    // Copy the metric value.
-    if (metric.is_float()) {
-      proto_metric.value.as_float = metric.as_float();
-      proto_metric.which_value = pw_metric_proto_Metric_as_float_tag;
-    } else {
-      proto_metric.value.as_int = metric.as_int();
-      proto_metric.which_value = pw_metric_proto_Metric_as_int_tag;
-    }
-
-    // Move write head to the next slot.
-    response_.metrics_count++;
+    WriteMetricToResponse(metric, path, response_);
 
     // If the metric response object is full, send the response and reset.
     // TODO(keir): Support runtime batch sizes < max proto size.
@@ -88,14 +100,62 @@ class NanopbMetricWriter : public virtual internal::MetricWriter {
   MetricService::ServerWriter<pw_metric_proto_MetricResponse>& response_writer_;
 };
 
+// A UnaryMetricWriter that populates a nanopb WalkResponse struct. This writer
+// is used by the ResumableMetricWalker to fill a page of metrics.
+class NanopbUnaryMetricWriter : public UnaryMetricWriter {
+ public:
+  explicit NanopbUnaryMetricWriter(pw_metric_proto_WalkResponse& response)
+      : response_(response) {}
+
+  // Writes a metric to the next available slot in the response's metrics
+  // array. If the array is full, this method returns RESOURCE_EXHAUSTED to
+  // signal the walker to stop and paginate.
+  Status Write(const Metric& metric, const Vector<Token>& path) override {
+    span<pw_metric_proto_Metric> metrics(response_.metrics);
+    if (response_.metrics_count >= metrics.size()) {
+      return Status::ResourceExhausted();
+    }
+
+    WriteMetricToResponse(metric, path, response_);
+    return OkStatus();
+  }
+
+ private:
+  pw_metric_proto_WalkResponse& response_;
+};
+
+// Helper to recursively search the metric tree for a metric at a given memory
+// address. This is used for pre-flight cursor validation.
+bool FindMetricByAddress(const MetricList& metrics,
+                         const GroupList& groups,
+                         uint64_t address) {
+  bool found = false;
+  metrics.ForEach([&](const auto& metric) {
+    if (static_cast<uint64_t>(reinterpret_cast<uintptr_t>(&metric)) ==
+        address) {
+      found = true;
+    }
+  });
+  if (found) {
+    return true;
+  }
+
+  groups.ForEach([&](const auto& group) {
+    if (FindMetricByAddress(group.metrics(), group.children(), address)) {
+      found = true;
+    }
+  });
+  return found;
+}
+
 }  // namespace
 
 void MetricService::Get(
     const pw_metric_proto_MetricRequest& /* request */,
     ServerWriter<pw_metric_proto_MetricResponse>& response) {
   // For now, ignore the request and just stream all the metrics back.
-  NanopbMetricWriter writer(response);
-  internal::MetricWalker walker(writer);
+  NanopbStreamingMetricWriter writer(response);
+  MetricWalker walker(writer);
 
   // This will stream all the metrics in the span of this Get() method call.
   // This will have the effect of blocking the RPC thread until all the metrics
@@ -107,6 +167,45 @@ void MetricService::Get(
   walker.Walk(metrics_).IgnoreError();
   walker.Walk(groups_).IgnoreError();
   writer.Flush();
+}
+
+// This method populates the response struct that is provided by the pw_rpc
+// framework.
+Status MetricService::Walk(const pw_metric_proto_WalkRequest& request,
+                           pw_metric_proto_WalkResponse& response) {
+  // Pre-flight check for cursor validity.
+  if (request.has_cursor && request.cursor != 0) {
+    if (!FindMetricByAddress(metrics_, groups_, request.cursor)) {
+      return Status::NotFound();
+    }
+  }
+
+  response = pw_metric_proto_WalkResponse_init_zero;
+  NanopbUnaryMetricWriter writer(response);
+  ResumableMetricWalker walker(writer);
+
+  Result<uint64_t> result = walker.Walk(
+      metrics_,
+      groups_,
+      request.has_cursor ? std::optional(request.cursor) : std::nullopt);
+
+  if (result.status().IsResourceExhausted()) {
+    // Pagination case: The page is full.
+    response.has_cursor = true;
+    response.cursor = walker.next_cursor();
+    response.done = false;
+    return OkStatus();  // Successful RPC, just paginated.
+  }
+
+  if (!result.ok()) {
+    return result.status();  // Propagate other errors.
+  }
+
+  // The walk completed successfully.
+  response.done = true;
+  response.has_cursor = false;
+
+  return OkStatus();
 }
 
 }  // namespace pw::metric

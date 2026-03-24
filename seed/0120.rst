@@ -78,30 +78,27 @@ is represented as a ``uint32_t``.
      struct {
        uint16_t name_token;
        uint16_t unit_token;
-     }
-     uint32_t type;
+     } uint32_t type;
    };
 
-   #define PW_SENSOR_MEASUREMENT_TYPE(domain, name_str, unit_str)              \
-     {                                                                         \
-       .name_token =                                                           \
-           PW_TOKENIZE_STRING_MASK(domain, 0xffff, name_str),                  \
-       .unit_token =                                                           \
-           PW_TOKENIZE_STRING_MASK(domain, 0xffff, unit_str),                  \
+   #define PW_SENSOR_MEASUREMENT_TYPE(domain, name_str, unit_str)         \
+     {                                                                    \
+         .name_token = PW_TOKENIZE_STRING_MASK(domain, 0xffff, name_str), \
+         .unit_token = PW_TOKENIZE_STRING_MASK(domain, 0xffff, unit_str), \
      }
 
 Pigweed would include some common measurement types:
 
 .. code-block:: c++
 
-   constexpr MeasurementType kAcceleration =
-       PW_SENSOR_MEASUREMENT_TYPE("PW_SENSOR_MEASUREMENT_TYPE", "acceleration", "m/s2");
-   constexpr MeasurementType kRotationalVelocity =
-       PW_SENSOR_MEASUREMENT_TYPE("PW_SENSOR_MEASUREMENT_TYPE", "rotational velocity", "rad/s");
-   constexpr MeasurementType kMagneticField =
-       PW_SENSOR_MEASUREMENT_TYPE("PW_SENSOR_MEASUREMENT_TYPE", "magnetic field", "T");
-   constexpr MeasurementType kStep =
-       PW_SENSOR_MEASUREMENT_TYPE("PW_SENSOR_MEASUREMENT_TYPE", "step count", "step");
+   constexpr MeasurementType kAcceleration = PW_SENSOR_MEASUREMENT_TYPE(
+       "PW_SENSOR_MEASUREMENT_TYPE", "acceleration", "m/s2");
+   constexpr MeasurementType kRotationalVelocity = PW_SENSOR_MEASUREMENT_TYPE(
+       "PW_SENSOR_MEASUREMENT_TYPE", "rotational velocity", "rad/s");
+   constexpr MeasurementType kMagneticField = PW_SENSOR_MEASUREMENT_TYPE(
+       "PW_SENSOR_MEASUREMENT_TYPE", "magnetic field", "T");
+   constexpr MeasurementType kStep = PW_SENSOR_MEASUREMENT_TYPE(
+       "PW_SENSOR_MEASUREMENT_TYPE", "step count", "step");
 
 Applications can add their own unique units which will not collide as long as
 they have a unique domain, name, or unit representation:
@@ -122,8 +119,8 @@ represented via a single token:
 
    using AttributeType = uint32_t;
 
-   #define PW_SENSOR_ATTRIBUTE_TYPE(domain, name_str)                          \
-       PW_TOKENIZE_STRING_DOMAIN(domain, name_str)
+   #define PW_SENSOR_ATTRIBUTE_TYPE(domain, name_str) \
+     PW_TOKENIZE_STRING_DOMAIN(domain, name_str)
 
 Similar to the ``MeasurementType``, Pigweed will define a few common attribute
 types:
@@ -170,9 +167,9 @@ measurement type, attribute type, and value.
      }
 
      template <typename T>
-     typename std::enable_if<std::is_integral_v<T> ||
-                                               std::is_floating_point_v<T>,
-                                           T>::type GetValue() {
+     typename std::enable_if<std::is_integral_v<T> || std::is_floating_point_v<T>,
+                             T>::type
+     GetValue() {
        return *static_cast<T*>(data);
      }
 

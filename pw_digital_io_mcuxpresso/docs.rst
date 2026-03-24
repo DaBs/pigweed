@@ -15,11 +15,19 @@ Overview
 
 This module consists of these main classes:
 
-- `McuxpressoDigitalIn`_ - Provides only input support.
-- `McuxpressoDigitalOut`_ - Provides only output support.
-- `McuxpressoDigitalInOutInterrupt`_ - Provides support for input, output, and GPIO interrupts.
-- `McuxpressoPintController`_ - Controller class for use with ``McuxpressoPintInterrupt``.
-- `McuxpressoPintInterrupt`_ - Provides only interrupt support for a PINT interrupt.
+- :cc:`McuxpressoDigitalIn <pw::digital_io::McuxpressoDigitalIn>`:
+  Provides only input support.
+- :cc:`McuxpressoDigitalOut <pw::digital_io::McuxpressoDigitalOut>`:
+  Provides only output support.
+- :cc:`McuxpressoDigitalInOutInterrupt
+  <pw::digital_io::McuxpressoDigitalInOutInterrupt>`:
+  Provides support for input, output, and GPIO interrupts.
+- :cc:`McuxpressoPintController
+  <pw::digital_io::McuxpressoPintController>`: Controller class for use with
+  ``McuxpressoPintInterrupt``.
+- :cc:`McuxpressoPintInterrupt
+  <pw::digital_io::McuxpressoPintInterrupt>`: Provides only interrupt support
+  for a PINT interrupt.
 
 -----
 Setup
@@ -34,7 +42,8 @@ Examples
 
 Digital input
 =============
-Use `McuxpressoDigitalIn`_ to read the state of an input.
+Use :cc:`McuxpressoDigitalIn <pw::digital_io::McuxpressoDigitalIn>` to
+read the state of an input.
 
 Example code to use GPIO pins from an NXP SDK board definition:
 
@@ -47,9 +56,7 @@ Example code to use GPIO pins from an NXP SDK board definition:
                              BOARD_INITPINS_D9_PORT,
                              BOARD_INITPINS_D9_PIN);
 
-   Status Init() {
-     return input.Enable();
-   }
+   Status Init() { return input.Enable(); }
 
    Status InputExample() {
      PW_TRY_ASSIGN(const DigitalIo::State state, input.GetState());
@@ -58,7 +65,8 @@ Example code to use GPIO pins from an NXP SDK board definition:
 
 Digital output
 ==============
-Use `McuxpressoDigitalOut`_ to set the state of an output.
+Use :cc:`McuxpressoDigitalOut <pw::digital_io::McuxpressoDigitalOut>` to
+set the state of an output.
 
 Example code to use GPIO pins from an NXP SDK board definition:
 
@@ -73,9 +81,7 @@ Example code to use GPIO pins from an NXP SDK board definition:
                                BOARD_INITPINS_D8_PIN,
                                pw::digital_io::State::kActive);
 
-   Status Init() {
-     return output.Enable();
-   }
+   Status Init() { return output.Enable(); }
 
    Status OutputExample() {
      return output.SetState(pw::digital_io::State::kInactive);
@@ -83,8 +89,9 @@ Example code to use GPIO pins from an NXP SDK board definition:
 
 GPIO interrupt
 ==============
-Use `McuxpressoDigitalInOutInterrupt`_ to handle interrupts via the GPIO
-module.
+Use :cc:`McuxpressoDigitalInOutInterrupt
+<pw::digital_io::McuxpressoDigitalInOutInterrupt>` to handle interrupts via
+the GPIO module.
 
 Example code to use GPIO pins from an NXP SDK board definition:
 
@@ -103,17 +110,24 @@ Example code to use GPIO pins from an NXP SDK board definition:
      PW_TRY(irq_pin.Enable());
      PW_TRY(irq_pin.SetInterruptHandler(
          pw::digital_io::InterruptTrigger::kDeactivatingEdge,
-         [](State /* state */) {
-           irq_count++;
-         }));
+         [](State /* state */) { irq_count++; }));
      PW_TRY(irq_pin.EnableInterruptHandler());
      return OkStatus();
    }
 
 PINT interrupt
 ==============
-`McuxpressoPintInterrupt`_ can also be used to handle interrupts, via the PINT
-module. It must be used with an instance of `McuxpressoPintController`_.
+``pw::digital_io::McuxpressoPintInterrupt`` can also be used to handle
+interrupts, via the PINT module, which supports other features:
+
+* Dedicated (non-shared) IRQs for each interrupt
+* Double edge detection (``InterruptTrigger::kBothEdges``)
+* Waking from deep sleep with edge detection
+* Pattern matching support (currently unsupported here)
+* Triggering interrupts on pins configured for a non-GPIO function
+
+It must be used with an instance of :cc:`McuxpressoPintController
+<pw::digital_io::McuxpressoPintController>`.
 
 .. code-block:: cpp
 
@@ -124,21 +138,20 @@ module. It must be used with an instance of `McuxpressoPintController`_.
 
    pw::sync::VirtualInterruptSpinLock controller_lock;
 
-   pw::sync::Borrowable<McuxpressoPintController>
-       pint_controller(raw_pint_controller, controller_lock);
+   pw::sync::Borrowable<McuxpressoPintController> pint_controller(
+       raw_pint_controller, controller_lock);
 
    McuxpressoPintInterrupt irq_line0(pint_controller, kPINT_PinInt0);
 
    Status Init() {
      // Attach pin PIO0_4 to PINT interrupt 0.
-     INPUTMUX_AttachSignal(INPUTMUX, kPINT_PinInt0, kINPUTMUX_GpioPort0Pin4ToPintsel);
+     INPUTMUX_AttachSignal(
+         INPUTMUX, kPINT_PinInt0, kINPUTMUX_GpioPort0Pin4ToPintsel);
 
      PW_TRY(irq_line0.Enable());
      PW_TRY(irq_line0.SetInterruptHandler(
          pw::digital_io::InterruptTrigger::kBothEdges,
-         [](State /* state */) {
-           irq_count++;
-         }));
+         [](State /* state */) { irq_count++; }));
      PW_TRY(irq_line0.EnableInterruptHandler());
      return OkStatus();
    }
@@ -146,37 +159,4 @@ module. It must be used with an instance of `McuxpressoPintController`_.
 -------------
 API reference
 -------------
-
-McuxpressoDigitalIn
-===================
-.. doxygenclass:: pw::digital_io::McuxpressoDigitalIn
-  :members:
-
-McuxpressoDigitalOut
-====================
-.. doxygenclass:: pw::digital_io::McuxpressoDigitalOut
-  :members:
-
-McuxpressoDigitalInOutInterrupt
-===============================
-.. doxygenclass:: pw::digital_io::McuxpressoDigitalInOutInterrupt
-  :members:
-
-McuxpressoPintInterrupt
-=======================
-``pw::digital_io::McuxpressoPintInterrupt`` can also be used to handle
-interrupts, via the PINT module, which supports other features:
-
-* Dedicated (non-shared) IRQs for each interrupt
-* Double edge detection (``InterruptTrigger::kBothEdges``)
-* Waking from deep sleep with edge detection
-* Pattern matching support (currently unsupported here)
-* Triggering interrupts on pins configured for a non-GPIO function
-
-.. doxygenclass:: pw::digital_io::McuxpressoPintInterrupt
-  :members:
-
-McuxpressoPintController
-========================
-.. doxygenclass:: pw::digital_io::McuxpressoPintController
-  :members:
+Moved: :cc:`pw_digital_io_mcuxpresso`

@@ -158,6 +158,66 @@ printed out if it is found.
    $ python -m pw_build_info.build_id my_device_image.elf
    d43cce74f18522052f77a1fa3fb7a25fe33f40dd
 
+------------------------------
+Bazel Workspace Status Command
+------------------------------
+Bazel supports running a single command to inspect the current workspace status
+each build. This is configured via the ``--workspace_status_command`` flag,
+typically in ``.bazelrc``, e.g.:
+
+.. code-block::
+
+   build --workspace_status_command=path/to/pigweed/pw_build_info/git_workspace_status_command.sh
+
+More info about `bazel workspace status commands <https://bazel.build/docs/user-manual#workspace-status-command>`__.
+
+pw_build_info provides a script and bazel tool for substituting variables from
+the workspace_status_command into source file templates. See
+``substitute_workspace_status.bzl``.
+
+Auto-generated headers in this module leverage this facility to expose
+workspace status information to C++.
+
+Downstream projects may wish to provide their own workspace status script which
+invokes Pigweed-provided workspace status scripts, e.g.:
+
+.. code-block:: sh
+
+   #!/bin/bash
+   pigweed/pw_build_info/git_workspace_status_command.sh || exit $?
+   echo "STABLE_CUSTOM_ATTRIBUTE pizza" || exit $?
+
+
+------------
+Build Origin
+------------
+You can use the ``//pw_build_info:build_origin`` header to embed a "build
+origin" into your firmware.
+
+The build origin is a string identifying the unique "build" from which this
+firmware originates. This will typically refer to a CI/CD build or job
+identifier.
+
+The recommended format is ``<build_system>/<unique_id>`` but the exact format
+of this string is up to the user. Examples:
+
+* GitHub Actions: ``github/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}``
+* GitLab CI/CD: ``gitlab/${CI_PIPELINE_ID}``
+* Jenkins: ``jenkins/${BUILD_NUMBER}``
+* LUCI: ``luci/<build-id>``
+
+Local builds can leave this field empty or specify ``local``.
+
+Projects using Pigweed's LUCI build system should use the LUCI format specified
+above.
+
+This is only supported in Bazel.
+
+Downstream projects must use a Bazel workspace_status_command to set the
+``STABLE_PW_BUILD_INFO_BUILD_ORIGIN`` key.
+
+This is intended for use in the ``pw.snapshot.Metadata.build_origin`` proto field.
+
 ---------------
 Git Commit Info
 ---------------
@@ -167,43 +227,47 @@ commit your binary was built from. This requires a bit of setup to use.
 
 Bazel Workspace Status Command
 ==============================
-Bazel supports running a command to inspect the current workspace status each
-build. Add the following to your ``.bazelrc,`` replacing the ``path/to/pigweed``
-portion with where you have pigweed checked out.
+If you are using no other ``workspace_status_command``, simply add the
+following to your ``.bazelrc,`` replacing the ``path/to/pigweed`` portion with
+where you have pigweed checked out.
 
 .. code-block::
 
    build --workspace_status_command=path/to/pigweed/pw_build_info/git_workspace_status_command.sh
 
+Otherwise, *invoke* this script from your own.
+
 Use ``pw_build_info/git_build_info.h`` Header
 =============================================
-Add generated header directly to the target where you want to use it.
+Add a dependency on ``//pw_build_info:git_build_info``:
 
 .. code-block:: python
 
    cc_binary(
      name = "main",
-     srcs = [
-       "main.cc",
-       "@pigweed//pw_build_info:git_build_info",
-     ]
+     srcs = ["main.cc"],
+     deps = [
+        "@pigweed//pw_build_info:git_build_info",
+        "//pw_log",
+      ],
    )
 
 Include the header. The following constants are available:
 
-* ``pw::build_info::kGitCommit``: The git commit this binary was built from.
-* ``pw::build_info::kGitTreeDirty``: True if there were any uncommitted changes.
+* ``pw::InlineBasicString pw::build_info::kGitCommit``: The git commit this
+  binary was built from. Includes ``-dirty`` suffix if ``kGitTreeDirty`` is
+  true.
+* ``bool pw::build_info::kGitTreeDirty``: True if there were any uncommitted
+  changes.
 
 .. code-block:: cpp
 
    #include "pw_build_info/git_build_info.h"
-   #include "pw_string/string.h"
    #include "pw_log/log.h"
+   #include "pw_string/string.h"
 
    int main() {
-     PW_LOG_INFO("kGitCommit %s", pw::InlineString<40>(pw::build_info::kGitCommit).c_str());
+     PW_LOG_INFO("kGitCommit %s", pw::build_info::kGitCommit.c_str());
      PW_LOG_INFO("kGitTreeDirty %d", pw::build_info::kGitTreeDirty);
      return 0;
    }
-
-More info about `bazel workspace status commands <https://bazel.build/docs/user-manual#workspace-status-command>`__.

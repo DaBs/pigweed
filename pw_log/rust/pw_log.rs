@@ -50,8 +50,9 @@ pub use pw_log_backend_api::LogLevel;
 // Re-export dependencies of `pw_log` macros to be accessed via `$crate::__private`.
 #[doc(hidden)]
 pub mod __private {
-    pub use crate::*;
     pub use pw_log_backend::{pw_log_backend, pw_logf_backend};
+
+    pub use crate::*;
 }
 
 /// Emit a log message using `core::fmt` format string semantics.
@@ -67,12 +68,12 @@ pub mod __private {
 /// ```
 #[macro_export]
 macro_rules! log {
-  ($log_level:expr, $format_string:literal) => {{
+  ($log_level:expr, $format_string:literal $(,)?) => {{
     use $crate::__private as __pw_log_crate;
     $crate::__private::pw_log_backend!($log_level, $format_string)
   }};
 
-  ($log_level:expr, $format_string:literal, $($args:expr),*) => {{
+  ($log_level:expr, $format_string:literal, $($args:expr),* $(,)?) => {{
     use $crate::__private as __pw_log_crate;
     $crate::__private::pw_log_backend!($log_level, $format_string, $($args),*)
   }};
@@ -91,12 +92,12 @@ macro_rules! log {
 /// ```
 #[macro_export]
 macro_rules! logf {
-  ($log_level:expr, $format_string:literal) => {{
+  ($log_level:expr, $format_string:literal $(,)?) => {{
     use $crate::__private as __pw_log_crate;
     $crate::__private::pw_logf_backend!($log_level, $format_string)
   }};
 
-  ($log_level:expr, $format_string:literal, $($args:expr),*) => {{
+  ($log_level:expr, $format_string:literal, $($args:expr),* $(,)?) => {{
     use $crate::__private as __pw_log_crate;
     $crate::__private::pw_logf_backend!($log_level, $format_string, $($args),*)
   }};
@@ -105,7 +106,7 @@ macro_rules! logf {
 /// Deprecated alias for [`logf!`].
 #[macro_export]
 macro_rules! pw_logf {
-  ($($args:expr),*) => {{
+  ($($args:expr),* $(,)?) => {{
     logf!($($args),*)
   }}
 }
@@ -120,7 +121,7 @@ macro_rules! pw_logf {
 /// ```
 #[macro_export]
 macro_rules! debug {
-  ($($args:expr),*) => {{
+  ($($args:expr),* $(,)?) => {{
     use $crate::__private as __pw_log_crate;
     __pw_log_crate::log!(__pw_log_crate::LogLevel::Debug, $($args),*)
   }};
@@ -136,7 +137,7 @@ macro_rules! debug {
 /// ```
 #[macro_export]
 macro_rules! debugf {
-  ($($args:expr),*) => {{
+  ($($args:expr),* $(,)?) => {{
     use $crate::__private as __pw_log_crate;
     __pw_log_crate::logf!(__pw_log_crate::LogLevel::Debug, $($args),*)
   }};
@@ -145,7 +146,7 @@ macro_rules! debugf {
 /// Deprecated alias for [`debugf!`].
 #[macro_export]
 macro_rules! pw_log_debugf {
-  ($($args:expr),*) => {{
+  ($($args:expr),* $(,)?) => {{
     debugf!($($args),*)
   }}
 }
@@ -161,7 +162,7 @@ macro_rules! pw_log_debugf {
 /// ```
 #[macro_export]
 macro_rules! info {
-  ($($args:expr),*) => {{
+  ($($args:expr),* $(,)?) => {{
     use $crate::__private as __pw_log_crate;
     __pw_log_crate::log!(__pw_log_crate::LogLevel::Info, $($args),*)
   }};
@@ -178,7 +179,7 @@ macro_rules! info {
 /// ```
 #[macro_export]
 macro_rules! infof {
-  ($($args:expr),*) => {{
+  ($($args:expr),* $(,)?) => {{
     use $crate::__private as __pw_log_crate;
     __pw_log_crate::logf!(__pw_log_crate::LogLevel::Info, $($args),*)
   }};
@@ -187,7 +188,7 @@ macro_rules! infof {
 /// Deprecated alias for [`infof!`].
 #[macro_export]
 macro_rules! pw_log_infof {
-  ($($args:expr),*) => {{
+  ($($args:expr),* $(,)?) => {{
     infof!($($args),*)
   }}
 }
@@ -203,7 +204,7 @@ macro_rules! pw_log_infof {
 /// ```
 #[macro_export]
 macro_rules! warn {
-  ($($args:expr),*) => {{
+  ($($args:expr),* $(,)?) => {{
     use $crate::__private as __pw_log_crate;
     __pw_log_crate::log!(__pw_log_crate::LogLevel::Warn, $($args),*)
   }};
@@ -220,7 +221,7 @@ macro_rules! warn {
 /// ```
 #[macro_export]
 macro_rules! warnf {
-  ($($args:expr),*) => {{
+  ($($args:expr),* $(,)?) => {{
     use $crate::__private as __pw_log_crate;
     __pw_log_crate::logf!(__pw_log_crate::LogLevel::Warn, $($args),*)
   }};
@@ -229,7 +230,7 @@ macro_rules! warnf {
 /// Deprecated alias for [`warnf!`].
 #[macro_export]
 macro_rules! pw_log_warnf {
-  ($($args:expr),*) => {{
+  ($($args:expr),* $(,)?) => {{
     warnf!($($args),*)
   }}
 }
@@ -245,7 +246,7 @@ macro_rules! pw_log_warnf {
 /// ```
 #[macro_export]
 macro_rules! error {
-  ($($args:expr),*) => {{
+  ($($args:expr),* $(,)?) => {{
     use $crate::__private as __pw_log_crate;
     __pw_log_crate::log!(__pw_log_crate::LogLevel::Error, $($args),*)
   }};
@@ -262,7 +263,7 @@ macro_rules! error {
 /// ```
 #[macro_export]
 macro_rules! errorf {
-  ($($args:expr),*) => {{
+  ($($args:expr),* $(,)?) => {{
     use $crate::__private as __pw_log_crate;
     __pw_log_crate::logf!(__pw_log_crate::LogLevel::Error, $($args),*)
   }};
@@ -271,7 +272,7 @@ macro_rules! errorf {
 /// Deprecated alias for [`errorf!`].
 #[macro_export]
 macro_rules! pw_log_errorf {
-  ($($args:expr),*) => {{
+  ($($args:expr),* $(,)?) => {{
     errorf!($($args),*)
   }}
 }
@@ -287,7 +288,7 @@ macro_rules! pw_log_errorf {
 /// ```
 #[macro_export]
 macro_rules! critical {
-  ($($args:expr),*) => {{
+  ($($args:expr),* $(,)?) => {{
     use $crate::__private as __pw_log_crate;
     __pw_log_crate::log!(__pw_log_crate::LogLevel::Critical, $($args),*)
   }};
@@ -304,7 +305,7 @@ macro_rules! critical {
 /// ```
 #[macro_export]
 macro_rules! criticalf {
-  ($($args:expr),*) => {{
+  ($($args:expr),* $(,)?) => {{
     use $crate::__private as __pw_log_crate;
     __pw_log_crate::logf!(__pw_log_crate::LogLevel::Critical, $($args),*)
   }};
@@ -313,7 +314,7 @@ macro_rules! criticalf {
 /// Deprecated alias for [`criticalf!`].
 #[macro_export]
 macro_rules! pw_log_criticalf {
-  ($($args:expr),*) => {{
+  ($($args:expr),* $(,)?) => {{
     criticalf!($($args),*)
   }}
 }
@@ -329,7 +330,7 @@ macro_rules! pw_log_criticalf {
 /// ```
 #[macro_export]
 macro_rules! fatal {
-  ($($args:expr),*) => {{
+  ($($args:expr),* $(,)?) => {{
     use $crate::__private as __pw_log_crate;
     __pw_log_crate::log!(__pw_log_crate::LogLevel::Fatal, $($args),*)
   }};
@@ -346,7 +347,7 @@ macro_rules! fatal {
 /// ```
 #[macro_export]
 macro_rules! fatalf {
-  ($($args:expr),*) => {{
+  ($($args:expr),* $(,)?) => {{
     use $crate::__private as __pw_log_crate;
     __pw_log_crate::logf!(__pw_log_crate::LogLevel::Fatal, $($args),*)
   }};
@@ -355,7 +356,7 @@ macro_rules! fatalf {
 /// Deprecated alias for [`fatalf!`].
 #[macro_export]
 macro_rules! pw_log_fatalf {
-  ($($args:expr),*) => {{
+  ($($args:expr),* $(,)?) => {{
     fatalf!($($args),*)
   }}
 }

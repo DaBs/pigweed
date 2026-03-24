@@ -16,6 +16,7 @@
 #include <lib/fit/function.h>
 #include <pw_async/dispatcher.h>
 #include <pw_async/task.h>
+#include <pw_result/result.h>
 
 #include <list>
 #include <memory>
@@ -35,6 +36,8 @@
 #include "pw_bluetooth_sapphire/internal/host/hci-spec/constants.h"
 #include "pw_bluetooth_sapphire/internal/host/hci-spec/protocol.h"
 #include "pw_bluetooth_sapphire/internal/host/transport/control_packets.h"
+#include "pw_bluetooth_sapphire/lease.h"
+#include "pw_multibuf/v2/multibuf.h"
 
 namespace bt::hci {
 
@@ -45,9 +48,43 @@ namespace bt::hci {
 // until shutdown completes.
 class CommandChannel final {
  public:
+  // Used to identify an individual HCI event handler that was registered with
+  // this CommandChannel.
+  using EventHandlerId = size_t;
+
+  class OwnedEventHandle {
+   public:
+    OwnedEventHandle(hci::CommandChannel* cmd_channel,
+                     hci::CommandChannel::EventHandlerId id)
+        : cmd_channel_(cmd_channel), id_(id) {
+      PW_CHECK(id_ != 0);
+    }
+    OwnedEventHandle() = default;
+    OwnedEventHandle(OwnedEventHandle&& other) { swap(other); }
+    OwnedEventHandle& operator=(OwnedEventHandle&& other) {
+      swap(other);
+      return *this;
+    }
+
+    void swap(OwnedEventHandle& other) {
+      std::swap(cmd_channel_, other.cmd_channel_);
+      std::swap(id_, other.id_);
+    }
+    ~OwnedEventHandle() {
+      if (cmd_channel_) {
+        cmd_channel_->RemoveEventHandler(id_);
+      }
+    }
+
+   private:
+    hci::CommandChannel* cmd_channel_ = nullptr;
+    hci::CommandChannel::EventHandlerId id_ = 0;
+  };
   // Starts listening for HCI commands and starts handling commands and events.
-  explicit CommandChannel(pw::bluetooth::Controller* hci,
-                          pw::async::Dispatcher& dispatcher);
+  explicit CommandChannel(
+      pw::bluetooth::Controller* hci,
+      pw::async::Dispatcher& dispatcher,
+      pw::bluetooth_sapphire::LeaseProvider& wake_lease_provider);
 
   ~CommandChannel();
 
@@ -84,9 +121,9 @@ class CommandChannel final {
   // |complete_event_code| cannot be a code that has been registered for events
   // via AddEventHandler or its related methods.
   //
-  // Returns a ID unique to the command transaction, or zero if the parameters
-  // are invalid.  This ID will be supplied to |callback| in its |id| parameter
-  // to identify the transaction.
+  // Returns a ID unique to the command transaction, or an error if the
+  // parameters are invalid.  This ID will be supplied to |callback| in its |id|
+  // parameter to identify the transaction.
   //
   // NOTE: Commands queued are not guaranteed to be finished or sent in order,
   // although commands with the same opcode will be sent in order, and commands
@@ -98,10 +135,11 @@ class CommandChannel final {
   // Control" for more information about the HCI command flow control.
   using CommandCallback =
       fit::function<void(TransactionId id, const EventPacket& event_packet)>;
-  TransactionId SendCommand(CommandPacket command_packet,
-                            CommandCallback callback,
-                            hci_spec::EventCode complete_event_code =
-                                hci_spec::kCommandCompleteEventCode);
+  pw::Result<TransactionId> SendCommand(
+      CommandPacket command_packet,
+      CommandCallback callback,
+      hci_spec::EventCode complete_event_code =
+          hci_spec::kCommandCompleteEventCode);
 
   // As SendCommand, but the transaction completes on the LE Meta Event.
   // |le_meta_subevent_code| is a LE Meta Event subevent code as described in
@@ -109,16 +147,17 @@ class CommandChannel final {
   //
   // |le_meta_subevent_code| cannot be a code that has been registered for
   // events via AddLEMetaEventHandler.
-  TransactionId SendLeAsyncCommand(CommandPacket command_packet,
-                                   CommandCallback callback,
-                                   hci_spec::EventCode le_meta_subevent_code);
+  pw::Result<TransactionId> SendLeAsyncCommand(
+      CommandPacket command_packet,
+      CommandCallback callback,
+      hci_spec::EventCode le_meta_subevent_code);
 
   // As SendCommand, but will wait to run this command until there are no
   // commands with with opcodes specified in |exclude| from executing. This is
   // useful to prevent running different commands that cannot run concurrently
   // (i.e. Inquiry and Connect). Two commands with the same opcode will never
   // run simultaneously.
-  TransactionId SendExclusiveCommand(
+  pw::Result<TransactionId> SendExclusiveCommand(
       CommandPacket command_packet,
       CommandCallback callback,
       hci_spec::EventCode complete_event_code =
@@ -127,7 +166,7 @@ class CommandChannel final {
 
   // As SendExclusiveCommand, but the transaction completes on the LE Meta Event
   // with subevent code |le_meta_subevent_code|.
-  TransactionId SendLeAsyncExclusiveCommand(
+  pw::Result<TransactionId> SendLeAsyncExclusiveCommand(
       CommandPacket command_packet,
       CommandCallback callback,
       std::optional<hci_spec::EventCode> le_meta_subevent_code,
@@ -139,10 +178,6 @@ class CommandChannel final {
   // already been sent to the controller or if it does not exist, this has no
   // effect and returns false.
   [[nodiscard]] bool RemoveQueuedCommand(TransactionId id);
-
-  // Used to identify an individual HCI event handler that was registered with
-  // this CommandChannel.
-  using EventHandlerId = size_t;
 
   // Return values for EventCallbacks.
   enum class EventCallbackResult {
@@ -196,12 +231,19 @@ class CommandChannel final {
   EventHandlerId AddEventHandler(hci_spec::EventCode event_code,
                                  EventCallback event_callback);
 
+  // Same as `AddEventHandler` but the return is an OwnedEventHandle
+  // which gets cleaned up automatically when dropped.
+  std::optional<OwnedEventHandle> AddOwnedEventHandler(
+      hci_spec::EventCode event_code, EventCallback event_callback);
+
   // Works just like AddEventHandler but the passed in event code is only valid
   // within the LE Meta Event sub-event code namespace. |event_callback| will
   // get invoked whenever the controller sends a LE Meta Event with a matching
   // subevent code.
   EventHandlerId AddLEMetaEventHandler(
-      hci_spec::EventCode le_meta_subevent_code, EventCallback event_callback);
+      std::variant<hci_spec::EventCode, pw::bluetooth::emboss::LeSubEventCode>
+          le_meta_subevent_code,
+      EventCallback event_callback);
 
   // Works just like AddEventHandler but the passed in event code is only valid
   // for vendor related debugging events. The event_callback will get invoked
@@ -229,7 +271,7 @@ class CommandChannel final {
   WeakPtr AsWeakPtr() { return weak_ptr_factory_.GetWeakPtr(); }
 
  private:
-  TransactionId SendExclusiveCommandInternal(
+  pw::Result<TransactionId> SendExclusiveCommandInternal(
       CommandPacket command_packet,
       CommandCallback callback,
       hci_spec::EventCode complete_event_code,
@@ -260,7 +302,8 @@ class CommandChannel final {
                     hci_spec::EventCode complete_event_code,
                     std::optional<hci_spec::EventCode> le_meta_subevent_code,
                     std::unordered_set<hci_spec::OpCode> exclusions,
-                    CommandCallback callback);
+                    CommandCallback callback,
+                    pw::bluetooth_sapphire::Lease wake_lease);
     ~TransactionData();
 
     // Starts the transaction timer, which will call
@@ -279,13 +322,15 @@ class CommandChannel final {
     // Makes an EventCallback that calls |callback_| correctly.
     EventCallback MakeCallback();
 
+    void AttachInspect(inspect::Node& parent);
+
     hci_spec::EventCode complete_event_code() const {
-      return complete_event_code_;
+      return *complete_event_code_;
     }
     std::optional<hci_spec::EventCode> le_meta_subevent_code() const {
       return le_meta_subevent_code_;
     }
-    hci_spec::OpCode opcode() const { return opcode_; }
+    hci_spec::OpCode opcode() const { return *opcode_; }
     TransactionId id() const { return transaction_id_; }
 
     // The set of opcodes in progress that will hold this transaction in queue.
@@ -297,14 +342,21 @@ class CommandChannel final {
     void set_handler_id(EventHandlerId id) { handler_id_ = id; }
 
    private:
+    enum class State { kQueued, kPending, kComplete };
+
+    static const char* StateToString(State state);
+
     CommandChannel* channel_;
     TransactionId transaction_id_;
-    hci_spec::OpCode opcode_;
-    hci_spec::EventCode complete_event_code_;
+    UintInspectable<hci_spec::OpCode> opcode_;
+    UintInspectable<hci_spec::EventCode> complete_event_code_;
     std::optional<hci_spec::EventCode> le_meta_subevent_code_;
     std::unordered_set<hci_spec::OpCode> exclusions_;
     CommandCallback callback_;
     bt::SmartTask timeout_task_;
+    std::optional<pw::bluetooth_sapphire::Lease> wake_lease_;
+    inspect::Node node_;
+    StringInspectable<State> state_;
 
     // If non-zero, the id of the handler registered for this transaction.
     // Always zero if this transaction is synchronous.
@@ -391,7 +443,9 @@ class CommandChannel final {
   void UpdateTransaction(std::unique_ptr<EventPacket> event);
 
   // Event handler.
+  void OnEvent(pw::multibuf::v2::MultiBuf::Instance&& buffer);
   void OnEvent(pw::span<const std::byte> buffer);
+  void OnEvent(std::unique_ptr<EventPacket> event);
 
   // Called when a command times out. Notifies upper layers of the error.
   void OnCommandTimeout(TransactionId transaction_id);
@@ -451,8 +505,11 @@ class CommandChannel final {
 
   // Command channel inspect node.
   inspect::Node command_channel_node_;
+  inspect::Node transactions_node_;
 
   pw::async::Dispatcher& dispatcher_;
+
+  pw::bluetooth_sapphire::LeaseProvider& wake_lease_provider_;
 
   // As events can arrive in the event thread at any time, we should invalidate
   // our weak pointers early.

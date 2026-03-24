@@ -440,7 +440,7 @@ template("pw_test") {
       if (pw_unit_test_AUTOMATIC_RUNNER_TIMEOUT != "") {
         args += [
           "--timeout",
-          pw_unit_test_AUTOMATIC_RUNNER_TIMEOUT,
+          "$pw_unit_test_AUTOMATIC_RUNNER_TIMEOUT",
         ]
       }
       if (pw_toolchain_COVERAGE_ENABLED) {

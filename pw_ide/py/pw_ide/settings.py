@@ -131,9 +131,9 @@ class PigweedIdeSettings(YamlConfigLoaderMixin):
             project_file=project_file,
             project_user_file=project_user_file,
             user_file=user_file,
-            default_config=_DEFAULT_CONFIG
-            if default_config is None
-            else default_config,
+            default_config=(
+                _DEFAULT_CONFIG if default_config is None else default_config
+            ),
             environment_var='PW_IDE_CONFIG_FILE',
         )
 

@@ -54,6 +54,7 @@ pw_proto_library(pw_snapshot.snapshot_proto
     pw_chrono.protos
     pw_cpu_exception_cortex_m.cpu_state_protos
     pw_log.protos
+    pw_metric.metric_service_proto
     pw_snapshot.metadata_proto
     pw_thread.protos
 )

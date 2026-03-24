@@ -11,72 +11,33 @@
 // WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
 // License for the specific language governing permissions and limitations under
 // the License.
-
 #pragma once
 
 #include <cstdint>
 
-#include "pw_bluetooth_proxy/internal/l2cap_channel.h"
+#include "pw_bluetooth_proxy/internal/generic_l2cap_channel.h"
 
 namespace pw::bluetooth::proxy {
 
 /// `GattNotifyChannel` supports sending GATT characteristic notifications to a
 /// remote peer.
-class GattNotifyChannel : public L2capChannel {
+class GattNotifyChannel final : public internal::GenericL2capChannel {
  public:
-  GattNotifyChannel(const GattNotifyChannel& other) = delete;
-  GattNotifyChannel& operator=(const GattNotifyChannel& other) = delete;
-  GattNotifyChannel(GattNotifyChannel&&) = default;
-  // Move assignment operator allows channels to be erased from pw_containers.
+  GattNotifyChannel(GattNotifyChannel&& other) = default;
   GattNotifyChannel& operator=(GattNotifyChannel&& other) = default;
-  ~GattNotifyChannel() override;
 
-  /// Return the attribute handle of this GattNotify channel.
   uint16_t attribute_handle() const { return attribute_handle_; }
 
-  // @deprecated
-  // TODO: https://pwbug.dev/379337272 - Delete this once all downstreams
-  // have transitioned to Write(MultiBuf) for this channel type.
-  Status Write(pw::span<const uint8_t> attribute_value) override;
-
-  // Also make visible Write(MultiBuf)
-  // TODO: https://pwbug.dev/379337272 - Can delete when Write(span) is deleted.
-  using L2capChannel::Write;
-
- protected:
-  static pw::Result<GattNotifyChannel> Create(
-      L2capChannelManager& l2cap_channel_manager,
-      uint16_t connection_handle,
-      uint16_t attribute_handle,
-      ChannelEventCallback&& event_fn);
-
-  bool DoHandlePduFromController(pw::span<uint8_t>) override {
-    // Forward all packets to host.
-    return false;
-  }
-
-  bool HandlePduFromHost(pw::span<uint8_t>) override {
-    // Forward all packets to controller.
-    return false;
-  }
-
-  void DoClose() override {}
-
  private:
-  // TODO: https://pwbug.dev/379337272 - Move to true once this channel uses
-  // payload queue. Delete once all downstreams have transitioned to
-  // Write(MultiBuf) for this channel type.
-  bool UsesPayloadQueue() override { return false; }
+  friend class L2capChannelManager;
 
-  // TODO: https://pwbug.dev/349602172 - Define ATT CID in pw_bluetooth.
-  static constexpr uint16_t kAttributeProtocolCID = 0x0004;
+  explicit GattNotifyChannel(L2capChannel& channel, uint16_t attribute_handle);
 
-  explicit GattNotifyChannel(L2capChannelManager& l2cap_channel_manager,
-                             uint16_t connection_handle,
-                             uint16_t attribute_handle,
-                             ChannelEventCallback&& event_fn);
+  /// @copydoc internal::GenericL2capChannel::DoCheckWriteParameter
+  Status DoCheckWriteParameter(const multibuf::MultiBuf& payload) override;
 
   uint16_t attribute_handle_;
+  uint16_t max_attribute_size_ = 0;
 };
 
 }  // namespace pw::bluetooth::proxy

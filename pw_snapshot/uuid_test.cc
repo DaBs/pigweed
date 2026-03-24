@@ -27,8 +27,9 @@
 namespace pw::snapshot {
 namespace {
 
-ConstByteSpan EncodeSnapshotWithUuid(ConstByteSpan uuid, ByteSpan dest) {
-  pwpb::SnapshotBasicInfo::MemoryEncoder snapshot_encoder(dest);
+ConstByteSpan EncodeSnapshotWithUuid(
+    ConstByteSpan uuid,
+    pwpb::SnapshotBasicInfo::MemoryEncoder& snapshot_encoder) {
   {
     pwpb::Metadata::StreamEncoder metadata_encoder =
         snapshot_encoder.GetMetadataEncoder();
@@ -43,8 +44,9 @@ TEST(ReadUuid, ReadUuid) {
   const std::array<uint8_t, 8> kExpectedUuid = {
       0x1F, 0x8F, 0xBF, 0xC4, 0x86, 0x0E, 0xED, 0xD4};
   std::array<std::byte, 16> snapshot_buffer;
+  pwpb::SnapshotBasicInfo::MemoryEncoder snapshot_encoder(snapshot_buffer);
   ConstByteSpan snapshot =
-      EncodeSnapshotWithUuid(as_bytes(span(kExpectedUuid)), snapshot_buffer);
+      EncodeSnapshotWithUuid(as_bytes(span(kExpectedUuid)), snapshot_encoder);
 
   std::array<std::byte, kUuidSizeBytes> uuid_dest;
   Result<ConstByteSpan> result = ReadUuidFromSnapshot(snapshot, uuid_dest);
@@ -90,8 +92,9 @@ TEST(ReadUuid, UndersizedBuffer) {
                                                  0xB5,
                                                  0xBB};
   std::array<std::byte, 32> snapshot_buffer;
+  pwpb::SnapshotBasicInfo::MemoryEncoder snapshot_encoder(snapshot_buffer);
   ConstByteSpan snapshot =
-      EncodeSnapshotWithUuid(as_bytes(span(kExpectedUuid)), snapshot_buffer);
+      EncodeSnapshotWithUuid(as_bytes(span(kExpectedUuid)), snapshot_encoder);
 
   std::array<std::byte, kUuidSizeBytes> uuid_dest;
   Result<ConstByteSpan> result = ReadUuidFromSnapshot(snapshot, uuid_dest);

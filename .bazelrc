@@ -17,19 +17,25 @@
 import %workspace%/pw_build/pigweed.bazelrc
 import %workspace%/pw_build/pigweed_recommended.bazelrc
 
-# TODO: https://pwbug.dev/258836641 - Only until bzlmod migration is done.
-common --enable_workspace
+# Require updating MODULE.bazel to reflect changes in transitive dependency
+# requirements.
+common --check_direct_dependencies=error
+
+# Enable all desired formatters.
+common --//pw_presubmit/py:enable_gn_formatter=True
+common --//pw_presubmit/py:enable_go_formatter=True
+common --//pw_presubmit/py:enable_javascript_formatter=True
+common --//pw_presubmit/py:enable_rust_formatter=True
+common --//pw_presubmit/py:enable_typescript_formatter=True
 
 # Default build_tag_filters and test_tag_filters
 # ==============================================
-# Skip building any targets tagged do_not_build.
-build --build_tag_filters=-do_not_build,-kernel
-
-# Exclude integration tests from the default build. The test_tag_filters flag
-# doesn't accumulate (https://github.com/bazelbuild/bazel/issues/7322): we have
-# to specify it only once, setting all the exclusions in a comma-separated
-# list.
-test --test_tag_filters=-integration,-do_not_build,-do_not_run_test,-kernel
+# Exclude targets with certain tags from default build/test runs. The
+# build/test_tag_filters flag doesn't accumulate
+# (https://github.com/bazelbuild/bazel/issues/7322): we have to specify it only
+# once, setting all the exclusions in a comma-separated list.
+build --build_tag_filters=-do_not_build,-kernel,-jni
+test --test_tag_filters=-integration,-do_not_build,-do_not_run_test,-kernel,-jni
 
 # C++ related flags
 # =================
@@ -40,25 +46,25 @@ common --host_per_file_copt=external.*picotool.*@-fexceptions,-frtti
 # RP2xxx PIO assembler also needs exceptions.
 common --host_per_file_copt=external.*pioasm.*@-fexceptions,-frtti
 
-# Default to C++17 to ensure compatibility.
-common --//pw_toolchain/cc:cxx_standard=17
-common:cxx20 --//pw_toolchain/cc:cxx_standard=20
+# C++ standard compatibility configs.
+common:cxx17 --//pw_toolchain/cc:cxx_standard=17
+common:cxx23 --//pw_toolchain/cc:cxx_standard=23
 
 # Silence compiler warnings from external repositories.
 #
 # TODO: https://pwbug.dev/347317581 - This is supported by Bazel's default C++
 # toolchain, but not yet by Pigweed's own toolchains.
-build --features=external_include_paths
+common --features=external_include_paths
 
 # Turn on internal warnings for upstream Pigweed. DO NOT enable in downstream
 # projects to allow for warnings to be added in the future without breaking
 # downstream.
 #
-build --features=internal_strict_warnings
+common --features=internal_strict_warnings
 
 # This feature can't be enabled until __unordtf2 and __letf2 are implemented by
 # compiler-rt. See https://reviews.llvm.org/D53608.
-# build --features=fully_static_link
+# common --features=fully_static_link
 
 # Required for combined code coverage reports.
 coverage --experimental_generate_llvm_lcov
@@ -78,9 +84,10 @@ common --//pw_toolchain/host_clang:layering_check
 
 # Rust related flags
 # ==================
-# Ensure that rust channel gets propagated to the exec config under which
-# proc-macros and build.rs files are built.
+# Ensure that rust channel and error format get propagated to the exec config
+# under which proc-macros and build.rs files are built.
 common --experimental_propagate_custom_flag=@@rules_rust+//rust/toolchain/channel:channel
+common --experimental_propagate_custom_flag=@@rules_rust+//rust/settings:error_format
 
 # Java related flags
 # ==================
@@ -146,6 +153,12 @@ common:tsan --//pw_toolchain/host_clang:tsan
 # -integration because the test_tag_filters flag does not accumulate.
 test:tsan --test_tag_filters=-integration,-notsan,-do_not_build,-do_not_run_test,-kernel
 
+# msan currently has false positives in Pigweed (see b/234876100).
+common:msan --//pw_toolchain/host_clang:msan
+# TODO: https://github.com/bazelbuild/bazel/issues/7322 - We need to repeat the
+# -integration because the test_tag_filters flag does not accumulate.
+test:msan --test_tag_filters=-integration,-nomsan,-do_not_build,-do_not_run_test,-kernel
+
 # Include libFuzzer build configurations.
 import %workspace%/pw_fuzzer/libfuzzer.bazelrc
 
@@ -166,6 +179,18 @@ build:clang-tidy --build_tag_filters=-noclangtidy
 # TODO: https://pwbug.dev/341723612 - What do we do in GN?
 build:clang-tidy --copt=-Wno-pragma-once-outside-header
 
+# Pylint aspect configuration
+build --//pw_build:pylintrc=//:pylintrc
+build:pylint --aspects //pw_build:pw_pylint.bzl%pylint_aspect
+build:pylint --output_groups=report
+build:pylint --build_tag_filters=-nopylint
+
+# mypy aspect configuration
+build:mypy --aspects //pw_build/mypy:mypy.bzl%mypy_aspect
+build:mypy --output_groups=mypy
+# No build_tag_filters needed: the mypy aspect has built-in support for the
+# "nomypy" tag.
+
 # For some platforms i.e. google/oss-fuzz we need to use the system provided
 # rather than the hermetic toolchains. This allows oss-fuzz to override the
 # build with specialised compilers that are tightly coupled to the fuzzing
@@ -185,13 +210,16 @@ build --workspace_status_command=pw_build_info/git_workspace_status_command.sh
 # linux-amd64. This is the only platform that the Fuchsia SDK supports.
 common --enable_platform_specific_config
 
-# Import `--config=fuchsia` scoped pigweed backends.
-import %workspace%/pw_bluetooth_sapphire/fuchsia/backends.bazelrc
-
 # TODO: https://pwbug.dev/382533028 - The Fuchsia SDK doesn't work with these
 # flags yet. Unfortunately, this needs to be switched for all build types since
 # it's required for things to load properly in pw_bluetooth_sapphire.
 common --noincompatible_disallow_empty_glob
+
+# Configs for Fuchsia.
+# Disable the Fuchsia SDK unless building under the Fuchsia config. This flag
+# is flipped to True when the Fuchsia platform is being built.
+common --@rules_fuchsia//fuchsia/flags:fuchsia_targets_enabled=false
+common:fuchsia --platforms=//targets/fuchsia:fuchsia_host
 
 # Configs for RP2xxx platforms.
 build:rp2040 --platforms=@pigweed//targets/rp2040
@@ -201,13 +229,14 @@ build:rp2350 --platforms=@pigweed//targets/rp2040:rp2350
 test:rp2350 --run_under=//targets/rp2040/py:unit_test_client
 
 # Config for the stm32f429i_disc1 baremetal platform.
-build:stm32f429i_baremetal --platforms=//targets/stm32f429i_disc1:platform
+build:stm32f429i_baremetal --platforms=//targets/stm32f429i_disc1:stm32f429i_baremetal
 
 # Config for the stm32f429i_disc1_stm32cube freertos platform.
-build:stm32f429i_freertos --platforms=//targets/stm32f429i_disc1_stm32cube:platform
+build:stm32f429i_freertos --platforms=//targets/stm32f429i_disc1_stm32cube:stm32f429i_freertos
 
-# Config for the lm3s6965evb platform, used to build pw_rust/examples.
-build:lm3s6965evb --platforms=//targets/lm3s6965evb
+# Config for the lm3s6965evb platfor
+build:lm3s6965evb --platforms=//targets/lm3s6965evb_qemu
+test:lm3s6965evb --run_under=//targets/lm3s6965evb_qemu/py:exec_cfg_unit_test_runner
 
 # Config for the microbit platform, used to build pw_rust/examples.
 build:microbit --platforms=//targets/microbit
@@ -216,8 +245,7 @@ build:microbit --platforms=//targets/microbit
 # =================
 # This config can be used to build and run host tests using GoogleTest instead
 # of the default //pw_unit_test:light framework.
-common:googletest --//pw_unit_test:backend=//pw_unit_test:googletest
-common:googletest --//pw_unit_test:main=@com_google_googletest//:gtest_main
+common:googletest --platforms=//targets/host:host_googletest
 
 # Remote execution config definitions
 # ===================================
@@ -234,16 +262,16 @@ common:remote_cache --legacy_important_outputs
 common:remote_cache --remote_cache=grpcs://remotebuildexecution.googleapis.com
 common:remote_cache --remote_instance_name=projects/pigweed-rbe-open/instances/default-instance
 common:remote_cache --remote_upload_local_results=false
-# TODO: https://github.com/bazelbuild/bazel/issues/24867 - This flag breaks
-# runfiles handling with remote caching, and causes a bunch of
-# java.io.FileNotFoundException when creating runfiles trees.
-common:remote_cache --experimental_inprocess_symlink_creation=false
 
 # cache-silo-key: this is essentially a "salt" added to the remote cache key.
 # Change it to a new value when we want to create a new cache from scratch
 # (e.g. to recover from cache poisoning). We've used the current date in
 # YYYYMMDD format in the past.
 common --remote_default_exec_properties=cache-silo-key=20240918
+
+# Sets the credential helper script to generate an auth token when connecting
+# to the AirLock registry.
+common --credential_helper=*.pkg.dev=%workspace%/pw_build/cred_helper.sh
 
 # Configs for experimental //pw_kernel
 import %workspace%/pw_kernel/kernel.bazelrc
@@ -256,3 +284,8 @@ import %workspace%/pw_kernel/kernel.bazelrc
 # options override anything in this file
 # (https://bazel.build/run/bazelrc#imports)
 try-import %workspace%/user.bazelrc
+
+# (Experimental) Configuration to automatically generate compile_commands.json for IDEs.
+# Usage: bazel build --config=ide //your/target/...
+build:ide --aspects=//pw_ide/bazel/compile_commands:pw_cc_compile_commands_aspect.bzl%pw_cc_compile_commands_aspect
+build:ide --output_groups=+pw_cc_compile_commands_fragments

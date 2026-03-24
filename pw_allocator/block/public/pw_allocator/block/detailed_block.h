@@ -34,6 +34,8 @@
 
 namespace pw::allocator {
 
+/// @submodule{pw_allocator,block_impl}
+
 /// Parameters type that encapsulates the block parameters.
 ///
 /// @tparam   OffsetType  Unsigned integral type used to encode offsets. Larger
@@ -96,7 +98,7 @@ class DetailedBlockImpl
 
  private:
   constexpr explicit DetailedBlockImpl(size_t outer_size) : info_{} {
-    next_ = outer_size / Basic::kAlignment;
+    next_ = static_cast<OffsetType>(outer_size / Basic::kAlignment);
     info_.last = 1;
     info_.alignment = Basic::kAlignment;
   }
@@ -160,9 +162,7 @@ class DetailedBlockImpl
   // `WithLayout` required methods.
   using WithLayout = BlockWithLayout<BlockType>;
   friend WithLayout;
-  constexpr size_t RequestedSize() const {
-    return Basic::InnerSize() - padding_;
-  }
+  constexpr size_t RequestedSize() const;
   constexpr size_t RequestedAlignment() const { return info_.alignment; }
   constexpr void SetRequestedSize(size_t size);
   constexpr void SetRequestedAlignment(size_t alignment);
@@ -209,6 +209,8 @@ template <typename OffsetType = uintptr_t, typename WhenFree = void>
 using DetailedBlock =
     DetailedBlockImpl<DetailedBlockParameters<OffsetType, WhenFree>>;
 
+/// @}
+
 // Template method implementations.
 
 // `Basic` methods.
@@ -239,7 +241,7 @@ constexpr DetailedBlockImpl<Parameters>* DetailedBlockImpl<Parameters>::AsBlock(
 template <typename Parameters>
 constexpr void DetailedBlockImpl<Parameters>::SetNext(size_t outer_size,
                                                       BlockType* next) {
-  next_ = outer_size / Basic::kAlignment;
+  next_ = static_cast<OffsetType>(outer_size / Basic::kAlignment);
   if (next == nullptr) {
     info_.last = 1;
     return;
@@ -277,6 +279,7 @@ constexpr void DetailedBlockImpl<Parameters>::DoMergeNext() {
 template <typename Parameters>
 constexpr void DetailedBlockImpl<Parameters>::SetFree(bool is_free) {
   info_.used = !is_free;
+  padding_ = 0;
   Poisonable::SetFree(is_free);
 }
 
@@ -317,6 +320,14 @@ DetailedBlockImpl<Parameters>::DoFree(DetailedBlockImpl*&& block) {
 // `WithLayout` methods.
 
 template <typename Parameters>
+constexpr size_t DetailedBlockImpl<Parameters>::RequestedSize() const {
+  if constexpr (Hardening::kIncludesDebugChecks) {
+    PW_ASSERT(padding_ <= Basic::InnerSize());
+  }
+  return Basic::InnerSize() - padding_;
+}
+
+template <typename Parameters>
 constexpr void DetailedBlockImpl<Parameters>::SetRequestedSize(size_t size) {
   size_t inner_size = Basic::InnerSize();
   size_t padding = inner_size;
@@ -334,7 +345,7 @@ constexpr void DetailedBlockImpl<Parameters>::SetRequestedAlignment(
     PW_ASSERT((alignment & (alignment - 1)) == 0);
     PW_ASSERT(alignment < 0x2000);
   }
-  info_.alignment = alignment;
+  info_.alignment = static_cast<uint16_t>(alignment);
 }
 
 }  // namespace pw::allocator

@@ -12,17 +12,24 @@
 // License for the specific language governing permissions and limitations under
 // the License.
 
-#define PW_LOG_MODULE_NAME "PW_ASYNC"
+#include "pw_async2/internal/logging.h"
+// logging.h must be included first
 
 #include "pw_async2/coro.h"
-
 #include "pw_log/log.h"
 
 namespace pw::async2::internal {
 
-void LogCoroAllocationFailure(size_t requested_size) {
-  PW_LOG_ERROR("Failed to allocate space for a coroutine of size %zu.",
-               requested_size);
+void* CoroPromiseBase::SharedNew(CoroContext coro_cx,
+                                 std::size_t size,
+                                 std::size_t align) noexcept {
+  PW_LOG_DEBUG("Allocating %zu B coroutine with %zu B alignment", size, align);
+
+  auto ptr = coro_cx.allocator().Allocate(pw::allocator::Layout(size, align));
+  if (ptr == nullptr) {
+    PW_LOG_ERROR("Failed to allocate space for a coroutine of size %zu.", size);
+  }
+  return ptr;
 }
 
 }  // namespace pw::async2::internal

@@ -14,7 +14,6 @@
 
 #define PW_LOG_MODULE_NAME "pw_system_async"
 
-#include "FreeRTOS.h"
 #include "pico/stdlib.h"
 #include "pw_channel/rp2_stdio_channel.h"
 #include "pw_multibuf/simple_allocator_for_test.h"
@@ -27,6 +26,7 @@ int main() {
   stdio_usb_init();
 
   static pw::multibuf::test::SimpleAllocatorForTest<4096, 4096> mb_alloc;
-  pw::SystemStart(pw::channel::Rp2StdioChannelInit(mb_alloc, mb_alloc));
+  pw::system::StartAndClobberTheStack(
+      pw::channel::Rp2StdioChannelInit(mb_alloc, mb_alloc));
   PW_UNREACHABLE;
 }

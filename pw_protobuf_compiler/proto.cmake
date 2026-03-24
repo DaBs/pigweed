@@ -37,6 +37,9 @@ include($ENV{PW_ROOT}/pw_build/pigweed.cmake)
 #   INPUTS - files to include along with the .proto files (such as Nanopb
 #       .options files)
 #
+
+set(_pw_protobuf_compiler_NANOPB_PB2_DIR "${CMAKE_BINARY_DIR}/generated/nanopb" CACHE INTERNAL "Directory to generate nanopb_pb2.py to")
+
 function(pw_proto_library NAME)
   pw_parse_arguments(
     NUM_POSITIONAL_ARGS
@@ -220,6 +223,7 @@ function(_pw_generate_protos TARGET LANGUAGE)
       --language "${LANGUAGE}"
       --plugin-path "${arg_PLUGIN}"
       --include-file "${arg_INCLUDE_FILE}"
+      --nanopb-pb2-dir "${_pw_protobuf_compiler_NANOPB_PB2_DIR}"
       --compile-dir "${arg_OUT_DIR}/sources"
       --out-dir "${arg_OUT_DIR}/${LANGUAGE}"
       --sources ${arg_SOURCES}
@@ -271,6 +275,8 @@ function(_pw_pwpb_library NAME)
 
   # Create the library with the generated source files.
   pw_add_library_generic("${NAME}.pwpb" INTERFACE
+    GENERATED_HEADERS
+      ${generated_outputs}
     PUBLIC_INCLUDES
       "${arg_OUT_DIR}/pwpb"
     PUBLIC_DEPS
@@ -320,6 +326,8 @@ function(_pw_pwpb_rpc_library NAME)
 
   # Create the library with the generated source files.
   pw_add_library_generic("${NAME}.pwpb_rpc" INTERFACE
+    GENERATED_HEADERS
+      ${generated_outputs}
     PUBLIC_INCLUDES
       "${arg_OUT_DIR}/pwpb_rpc"
     PUBLIC_DEPS
@@ -369,6 +377,8 @@ function(_pw_raw_rpc_library NAME)
 
   # Create the library with the generated source files.
   pw_add_library_generic("${NAME}.raw_rpc" INTERFACE
+    GENERATED_HEADERS
+      ${generated_outputs}
     PUBLIC_INCLUDES
       "${arg_OUT_DIR}/raw_rpc"
     PUBLIC_DEPS
@@ -494,6 +504,8 @@ function(_pw_nanopb_rpc_library NAME)
 
   # Create the library with the generated source files.
   pw_add_library_generic("${NAME}.nanopb_rpc" INTERFACE
+    GENERATED_HEADERS
+      ${generated_outputs}
     PUBLIC_INCLUDES
       "${arg_OUT_DIR}/nanopb_rpc"
     PUBLIC_DEPS

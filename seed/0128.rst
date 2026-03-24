@@ -67,15 +67,14 @@ Example
    // "example_project/threads.h"
 
    // Define thread attributes for the main thread.
-   constexpr pw::ThreadAttrs kMainThread = pw::ThreadAttrs()
-         .set_name("app")
-         .set_priority(pw::ThreadPriority::Medium()),
-         .set_stack_size_bytes(MY_PROJECT_MAIN_STACK_SIZE_BYTES);
+   constexpr pw::ThreadAttrs
+       kMainThread = pw::ThreadAttrs().set_name("app").set_priority(
+           pw::ThreadPriority::Medium()),
+       .set_stack_size_bytes(MY_PROJECT_MAIN_STACK_SIZE_BYTES);
 
    // Define attributes for another thread, based on kMainThread.
-   constexpr pw::ThreadAttrs kLogThread = pw::ThreadAttrs(kMainThread)
-         .set_name("logging")
-         .set_priority_next_lower();
+   constexpr pw::ThreadAttrs kLogThread =
+       pw::ThreadAttrs(kMainThread).set_name("logging").set_priority_next_lower();
 
 .. code-block:: c++
 
@@ -109,7 +108,7 @@ Example
      app_thread.join();
      app_thread = pw::Thread(
          app_thread_context, pw::ThreadAttrs().set_name("app 2"), AppThreadBody2);
-     ...
+     // ...
    }
 
 ----------
@@ -151,10 +150,10 @@ it has significant downsides.
 =========================
 Currently, running :ref:`module-pw_system` requires writing custom low-level
 code that is aware of both ``pw_system`` and the RTOS it is running on
-(see e.g. `boot.cc
-<https://cs.opensource.google/pigweed/pigweed/+/4d23123c37a33638b2f1ce611423e74d385623ff:targets/stm32f429i_disc1_stm32cube/boot.cc;l=133>`_
-and `target_hooks.cc
-<https://cs.opensource.google/pigweed/pigweed/+/4d23123c37a33638b2f1ce611423e74d385623ff:pw_system/zephyr_target_hooks.cc>`_).
+(see e.g. :cs:`boot.cc
+<4d23123c37a33638b2f1ce611423e74d385623ff:targets/stm32f429i_disc1_stm32cube/boot.cc;l=133>`
+and :cs:`target_hooks.cc
+<4d23123c37a33638b2f1ce611423e74d385623ff:pw_system/zephyr_target_hooks.cc>`).
 Enabling cross-platform thread creation would make it easier to use
 ``pw_system``. The code for running ``pw_system`` on any target would be the
 same: a single function call in ``main``. The user would no longer have to
@@ -404,13 +403,13 @@ configuration pattern.
 
 .. code-block:: c++
 
-   #include "pw_thread/thread.h"
    #include "project/config.h"
+   #include "pw_thread/thread.h"
 
    constexpr auto kMyThread = pw::ThreadAttrs()
-       .set_name("my thread")
-       .set_priority(MY_THREAD_PRIORITY)
-       .set_stack_size_bytes(kMyThreadStackSizeBytes);
+                                  .set_name("my thread")
+                                  .set_priority(MY_THREAD_PRIORITY)
+                                  .set_stack_size_bytes(kMyThreadStackSizeBytes);
 
    pw::ThreadContext<kMyThread> my_thread_context;
 
@@ -467,8 +466,8 @@ require non-portable features. Other threads should continue to use
 
 .. code-block:: c++
 
-   #include "pw_thread/thread.h"
    #include "project/config.h"
+   #include "pw_thread/thread.h"
 
    // This function returns a `pw::thread::Options` for creating a thread.
    pw::thread::NativeOptions GetThreadOptions();
@@ -478,7 +477,8 @@ require non-portable features. Other threads should continue to use
    #if !PROJECT_CFG_THREAD_CUSTOM_OPTIONS
 
    pw::thread::NativeOptions GetThreadOptions() {
-     static constinit pw::ThreadContext<project::cfg::kThreadStackSizeHintBytes> context;
+     static constinit pw::ThreadContext<project::cfg::kThreadStackSizeHintBytes>
+         context;
      return pw::thread::GetNativeOptions(
          context, pw::ThreadAttrs().set_name("thread name"));
    }
@@ -509,7 +509,8 @@ Example configuration header:
 
    namespace project::cfg {
 
-   inline constexpr size_t kThreadStackSizeHintBytes = PROJECT_CFG_THREAD_STACKS_SIZE_HINT;
+   inline constexpr size_t kThreadStackSizeHintBytes =
+       PROJECT_CFG_THREAD_STACKS_SIZE_HINT;
 
    }  // namespace project::cfg
 
@@ -629,10 +630,8 @@ These features are used by ``pw_thread`` classes, not end users.
 
    inline NativeOptions GetNativeOptions(NativeContext& context,
                                          const ThreadAttrs& attrs) {
-     return pw::thread::freertos::Options()
-         .set_static_context(context),
-         .set_name(attrs.name())
-         .set_priority(attrs.priority().native())
+     return pw::thread::freertos::Options().set_static_context(context),
+            .set_name(attrs.name()).set_priority(attrs.priority().native())
    }
 
    }  // namespace pw::thread::backend
@@ -704,7 +703,7 @@ Here is a high-level overview of the class:
      // to static_assert that one priority is higher than another in the
      // backend.
      constexpr bool operator==(const ThreadPriority&);
-     ...
+     // ...
 
      // Access the native thread priority type. These functions may be helpful
      // when ThreadPriority is configured separately for each platform.
@@ -797,34 +796,37 @@ location.
 
 .. code-block:: c++
 
-   #include "pw_thread/attrs.h"
    #include "my_project/config.h"
+   #include "pw_thread/attrs.h"
 
    namespace my_project {
 
    // Global list of thread attributes.
 
-   inline constexpr auto kThreadOne = pw::ThreadAttrs()
-       .set_name("thread one")
-       .set_stack_size_bytes(1024)
-       .set_priority(pw::ThreadPriority::Medium());
+   inline constexpr auto kThreadOne =
+       pw::ThreadAttrs()
+           .set_name("thread one")
+           .set_stack_size_bytes(1024)
+           .set_priority(pw::ThreadPriority::Medium());
 
-   inline constexpr auto kThreadTwo = pw::ThreadAttrs(kThreadOne)
-       .set_name("thread two");
+   inline constexpr auto kThreadTwo =
+       pw::ThreadAttrs(kThreadOne).set_name("thread two");
 
-   inline constexpr auto kImportantThread = pw::ThreadAttrs()
-       .set_name("important!")
-       .set_stack_size_bytes(IMPORTANT_THREAD_STACK_SIZE_BYTES)
-       .set_priority(IMPORTANT_THREAD_PRIORITY);
+   inline constexpr auto kImportantThread =
+       pw::ThreadAttrs()
+           .set_name("important!")
+           .set_stack_size_bytes(IMPORTANT_THREAD_STACK_SIZE_BYTES)
+           .set_priority(IMPORTANT_THREAD_PRIORITY);
 
-   inline constexpr auto kLessImportantThread = pw::ThreadAttrs()
-       .set_name("also important!")
-       .set_stack_size_bytes(IMPORTANT_THREAD_STACK_SIZE_BYTES)
-       .set_priority(kImportantThread.priority().NextLower());
+   inline constexpr auto kLessImportantThread =
+       pw::ThreadAttrs()
+           .set_name("also important!")
+           .set_stack_size_bytes(IMPORTANT_THREAD_STACK_SIZE_BYTES)
+           .set_priority(kImportantThread.priority().NextLower());
 
    static_assert(
        !pw::ThreadPriority::IsSupported() ||
-       kImportantThread.priority() > kLessImportantThread.priority(),
+           kImportantThread.priority() > kLessImportantThread.priority(),
        "If the platform supports priorities, ImportantThread must be higher "
        "priority than LessImportantThread");
 
@@ -872,7 +874,8 @@ joined.
      constexpr ThreadContext() = default;
 
     private:
-     backend::NativeContextWithStack<kStackSizeHintBytes, kAlignmentBytes> native_context_;
+     backend::NativeContextWithStack<kStackSizeHintBytes, kAlignmentBytes>
+         native_context_;
    };
 
    // Alias for ThreadContext with the backend's default stack size.
@@ -919,9 +922,9 @@ from other items in the ``ThreadContext``. The ``ThreadStack`` is set on the
    STACK_SECTION alignas(256) constinit ThreadStack<kAppStackSizeBytes> kMainStack;
 
    constexpr pw::ThreadAttrs kMainThread = pw::ThreadAttrs()
-       .set_name("MainThread")
-       .set_stack(kMainStack)
-       .set_priority(kMainPriority);
+                                               .set_name("MainThread")
+                                               .set_stack(kMainStack)
+                                               .set_priority(kMainPriority);
 
    ThreadContext<kMainThread> kMainThreadContext;
 
@@ -944,9 +947,9 @@ similarly:
                        [] { /* thread body */ });
      thread.join()
 
-     pw::Thread thread(kAppThreadContext,
-                       pw::ThreadAttrs().set_stack(kAppStack).set_name("T2"),
-                       [] { /* thread body */ });
+         pw::Thread thread(kAppThreadContext,
+                           pw::ThreadAttrs().set_stack(kAppStack).set_name("T2"),
+                           [] { /* thread body */ });
      thread.join();
    }
 
@@ -956,9 +959,9 @@ The ``STACK_SECTION`` macro would be provided by a config header:
 
    #if BUILDING_FOR_DEVICE_A
    #define STACK_SECTION PW_PLACE_IN_SECTION(".thread_stacks")
-   #else  // building for device B
+   #else                  // building for device B
    #define STACK_SECTION  // section doesn't matter
-   #endif  // BUILDING_FOR_DEVICE_A
+   #endif                 // BUILDING_FOR_DEVICE_A
 
 ``Thread`` additions
 --------------------
@@ -970,14 +973,13 @@ The ``STACK_SECTION`` macro would be provided by a config header:
      // Existing constructor.
      Thread(const Options& options, Function<void()>&& entry)
 
-     // Creates a thread with a ThreadContext associated with a ThreadAttrs.
-     template <const ThreadAttrs& kAttributes>
-     Thread(ThreadContext<kAttributes>& context, Function<void()>&& entry);
+         // Creates a thread with a ThreadContext associated with a ThreadAttrs.
+         template <const ThreadAttrs& kAttributes>
+         Thread(ThreadContext<kAttributes>& context, Function<void()>&& entry);
 
      // Creates a thread from attributes passed in a template parameter.
      template <const ThreadAttrs& kAttributes, size_t kStackSizeHintBytes>
-     Thread(ThreadContext<kStackSizeHintBytes>& context,
-            Function<void()>&& entry);
+     Thread(ThreadContext<kStackSizeHintBytes>& context, Function<void()>&& entry);
 
      // Creates a thread from context and attributes. Performs a runtime check
      // that the ThreadContext's stack is large enough, which can be avoided by
@@ -1009,7 +1011,7 @@ upstream Pigweed.
    namespace pw {
 
    class Thread {
-     ...
+     // ...
 
      // Starts running the thread_body in a separate thread. The thread is
      // allocated and managed by the backend.
@@ -1017,7 +1019,9 @@ upstream Pigweed.
      static Thread Start(Function&& thread_body, Args&&... args);
 
      template <typename Function, typename... Args>
-     static Thread Start(const pw::ThreadAttrs& attributes, Function&& thread_body, Args&&... args);
+     static Thread Start(const pw::ThreadAttrs& attributes,
+                         Function&& thread_body,
+                         Args&&... args);
    };
 
    }  // namespace pw

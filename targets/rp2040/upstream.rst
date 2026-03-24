@@ -1,75 +1,286 @@
-.. _target-rp2040-upstream:
+.. _target-rp2-upstream:
 
-========================================
-Working with RP2040s in upstream Pigweed
-========================================
-.. _upstream Pigweed: https://pigweed.googlesource.com/pigweed/pigweed/
+=====================================
+Working with RP2s in upstream Pigweed
+=====================================
+RP2 is a family of microcontrollers (MCUs) from Raspberry Pi. The RP2040 MCU
+(which powers the Pico 1) and the RP2350 MCU (which powers the Pico 2) are both
+part of the RP2 family.
 
-This guide is intended for `upstream Pigweed`_ maintainers working with
-Raspberry Pi RP2040s. It shows maintainers how to do common RP2040-related
-tasks within upstream Pigweed, such as running on-device tests.
+This guide shows :ref:`docs-glossary-upstream` maintainers how to do common
+RP2-related development tasks in upstream Pigweed, such as building the upstream
+repo for the RP2350, running on-device unit tests on a Pico 2, etc.
 
-If you're trying to develop a Pigweed-based application that runs on the
-RP2040 or Pico, check out :ref:`docs-get-started-bazel` and
-:ref:`target-rp2040`.
+Most maintainers should use the newer Bazel-based workflows. If you need to use
+the older GN-based workflows, see :ref:`target-rp2-upstream-gn`.
 
-.. _target-rp2040-contributors-quickstarts:
+---------------
+Target Hardware
+---------------
 
-------------
-Bazel guides
-------------
-This section quickly explains the Bazel workflows for the most common
-upstream Pigweed tasks related to RP2040s.
+.. list-table:: MCU support
+   :widths: 1 1
+   :header-rows: 1
 
-Build everything
-================
+   * - Target
+     - Supported
+   * - RP2040
+     - ✅ Yes
+   * - RP2350
+     - ✅ Yes
+
+.. list-table:: Board support
+   :widths: 1 1
+   :header-rows: 1
+
+   * - Board
+     - Support
+   * - Pico 1
+     - ✅ Yes
+   * - Pico 2
+     - ✅ Yes
+   * - Pico 1W
+     - ❌ No
+   * - Pico 2W
+     - ❌ No
+
+-------------------------
+Additional Debug Hardware
+-------------------------
+.. _PicoPico: https://pigweed.googlesource.com/pigweed/hardware/picopico
+.. _Debug Probe: https://www.raspberrypi.com/products/debug-probe/
+
+The core Pigweed team uses `PicoPico`_, a custom development board that makes
+parallel on-device testing easier.
+
+If you don't have access to a PicoPico board, the next best option is a Pico 2
+and a `Debug Probe`_ (either the official product, or a second Pico or Pico 2
+to use as one).
+
+The debug probe also is the way to go if you are are working with a project
+like our :ref:`Sense <showcase-sense>`, where the target Pico is connected to
+other hardware.
+
+.. _target-rp2-debug-probe:
+
+Setting up a debug probe
+========================
+After setting one up, using a debug probe is the most hands-off way of
+interacting with the target device.
+
+You won't need to use the :kbd:`BOOTSEL` button when flashing the target
+afterwards, as the debug probe will be able to drive the flashing process.
+
+You will also be able to debug issues on the target with ``gdb`` and
+`OpenOCD <https://openocd.org/>`_
+
+Using the official Raspberry Pi debug probe product
+---------------------------------------------------
+The `Debug Probe`_ itself is really just a RP2040 on a small board with a few
+extra connectors to make wiring it to your target Pi Pico easier.
+You can `learn more about it
+<https://www.raspberrypi.com/documentation/microcontrollers/debug-probe.html#about-the-debug-probe>`_
+on the Raspberry Pi website.
+
+Their website also has good setup instructions.
+
+1. `Flash the latest firmware <https://www.raspberrypi.com/documentation/microcontrollers/debug-probe.html#updating-the-firmware-on-the-debug-probe>`_
+2. `Connecting to the target Pico <https://www.raspberrypi.com/documentation/microcontrollers/debug-probe.html#getting-started>`_
+
+Using a second Pi Pico as a debug probe
+---------------------------------------
+1. First, flash your second Pi Pico with the latest ``debugprobe_on_pico.uf2`` from
+`debugprobe releases <https://github.com/raspberrypi/debugprobe/releases/latest>`_.
+
+2. Connect the two Pico boards as follows:
+
+- Debug connection
+
+  - 2nd debug probe Pico GND ⭤ target Pico GND
+
+  - 2nd debug probe Pico GP2 ⭤ target Pico SWCLK
+
+  - 2nd debug probe Pico GP3 ⭤ target Pico SWDIO
+
+- UART connection
+
+  - 2nd debug probe Pico GP4/UART1 TX ⭤ target Pico GP1/UART0 RX
+
+  - 2nd debug probe Pico GP5/UART1 RX ⭤ target Pico GP0/UART0 TX
+
+.. tip::
+
+   You can also connect the VSYS pins between the two boards to power both off
+   of the USB connection to the debug probe Pico. Then you won't need to power
+   the target Pico via its USB connection.
+
+For more detailed instructions on using a debug probe Pico, including wiring
+pictures, see ``Appendix A: Debugprobe`` of the
+`Getting started with Raspberry Pi Pico
+<https://datasheets.raspberrypi.com/pico/getting-started-with-pico.pdf>`_
+guide.
+
+-------------------
+Additional Software
+-------------------
+
+.. _target-rp2-udev:
+
+Setting up udev rules
+=====================
+On Linux, you may need to update your udev rules to access the device as a
+normal user (not root).
+
+Add the following rules to ``/etc/udev/rules.d/49-pico.rules`` or
+``/usr/lib/udev/rules.d/49-pico.rules``. Create the file if it doesn't exist.
+
+.. literalinclude:: /targets/rp2040/49-pico.rules
+   :language: linuxconfig
+   :start-at: # Raspberry
+
+Then reload the rules:
+
+.. code-block:: console
+
+   sudo udevadm control --reload-rules
+   sudo udevadm trigger
+
+.. _target-rp2-installing-openocd:
+
+OpenOCD (The Open On-Chip-Debugger)
+===================================
+
+OpenOCD supports a variety of embedded targets, and supports a variety of
+programming (flashing) and other low-level debugging operations. It also acts
+as a server for GDB to connect to for debugging higher-level languages like C
+and C++.
+
+You can obtain OpenOCD in many ways, including your operating system package
+manager. Note that OpenOCD does not support the RP2350 as of the 0.12.0
+release. However changes since that release have added support, and you may have
+to built it from source if you need it.
+
+An alternative is to get a fork of OpenOCD from the Raspberry Pi Foundation's
+GitHub repositories, which does include RP2350 support, however their fork lags
+behind the latest upstream sources.
+
+- Prebuilt binaries: https://github.com/raspberrypi/pico-sdk-tools
+- Source code: https://github.com/raspberrypi/openocd
+
+.. note::
+
+   If you are building OpenOCD from it source code, you can find some notes on
+   the thread just below.
+
+   https://forums.raspberrypi.com/viewtopic.php?p=2322149#p2322149
+
+   The `cmsis-dap.cfg` driver support for the Debug Probe is optional, and is
+   only included in the build by the `configure` step if your host's equivalent
+   to the ``libusb-1.0-0-dev`` package is found.
+
+The base command for using OpenOCD with a RP2x target is below, and without
+any other commands (``-c`` option) it will just act as a server for GDB to
+connect to.
+
+.. code-block:: console
+
+   $ openocd -f interface/cmsis-dap.cfg               \
+             -f target/rp2040.cfg        # or rp2350  \
+             -c "adapter speed 5000"
+
+------------------
+Common Build notes
+------------------
+
+MCU selection flags (``--config`` and ``--chip``)
+=================================================
+If your command requires a ``-config`` flag (e.g. ``--config=<mcu>``)
+or a ``--chip`` flag (e.g. ``--chip <mcu>``) then you must replace
+the ``<mcu>`` placeholder with one of these values:
+
+* ``rp2040``
+* ``rp2350``
+
+For example, to build upstream Pigweed for a Pico 1 you run:
+
 .. code-block:: console
 
    $ bazelisk build --config=rp2040 //...
 
+Whereas to build upstream Pigweed for a Pico 2 you run:
+
+.. code-block:: console
+
+   $ bazelisk build --config=rp2350 //...
+
+.. important::
+
+   If the build command uses  target path that begins ``//targets/rp2040``,
+   then you should use for both the RP2040 and the RP2350.
+
+   Bug :bug:`449742221` tracks the effort to clean this up, so that the target
+   path would become the more generic ``//targets/rp2``.
+
+   When we originally created ``//targets/rp2040``, the RP2350 did not yet
+   exist, and we didn't know there would be a future product that was mostly
+   compatible, which is why the RP2350 uses the RP2040 target configuration,
+   but is then modified by the ``--config`` and ``--chip`` flags where needed.
+
+   If you forget, you will get a error that the target package dos not exist,
+   which may look like:
+
+   .. code-block:: console
+
+      ERROR: no such package 'targets/rp2350/py': BUILD file not found in any
+      of the following directories. Add a BUILD file to a directory to mark it
+      as a package.
+
+.. _target-rp2-upstream-build:
+
+---------------
+Bazel workflows
+---------------
+
+Building
+========
+
+This builds everything for <mcu>
+
+.. code-block:: console
+
+   $ bazelisk build --config=<mcu> //...
+
+Flashing
+========
+Some modules have flash targets named "flash_<mcu>" which can be used to flash
+a binary to the target, using a debug-probe or picopico connected to your host
+via USB.
+
+The ``--config`` does not need to be used for those.
+
+.. code-block:: console
+
+   $ bazelisk run //path/to:flash_<mcu>
+
+For example:
+
+.. code-block:: console
+
+   $ bazelisk run //pw_system:flash_rp2350
+
+If you need to flash in some other way, you will have to build the binary, and
+flash it from the ``bazel-bin/`` build path.
+
+.. _target-rp2-upstream-tests:
+
 Run on-device tests
 ===================
-.. _PicoPico: https://pigweed.googlesource.com/pigweed/hardware/picopico
-
-The recommended way to run on-device RP2040 tests is with a
-`Raspberry Pi Pico <https://www.raspberrypi.com/products/raspberry-pi-pico/>`_
-connected through a
-`Raspberry Pi Debug Probe <https://www.raspberrypi.com/products/debug-probe/>`_.
-
-The Pigweed team uses
-`PicoPico <https://pigweed.googlesource.com/pigweed/hardware/picopico>`_,
-a custom hardware setup that makes parallel on-device testing easier.
-
 .. _Updating the firmware on the Debug Probe: https://www.raspberrypi.com/documentation/microcontrollers/debug-probe.html#updating-the-firmware-on-the-debug-probe
 .. _Getting Started: https://www.raspberrypi.com/documentation/microcontrollers/debug-probe.html#getting-started
-
 
 #. Set up your hardware:
 
    .. tab-set::
-
-      .. tab-item:: Raspberry Pi Debug Probe
-         :sync: debug_probe
-
-         Make sure that your Debug Probe is running firmware version 2.0.1
-         or later. See `Updating the firmware on the Debug Probe`_.
-
-         Wire up your Pico to the Debug Probe as described in `Getting Started`_.
-
-         .. important::
-
-            UART must be wired up as described in `Getting Started`_.
-
-      .. tab-item:: Standalone Raspberry Pi Pico
-         :sync: single_pico
-
-         You can run Pigweed's tests with a single Pi Pico and no additional
-         hardware with the following limitations:
-
-         * Tests will not be parallelized if more than one Pi Pico is attached.
-         * If the Pi Pico crashes during a test, the failure will cascade into
-           subsequent tests. You'll need to manually disconnect and re-connect
-           the device to get it working again.
 
       .. tab-item:: PicoPico
          :sync: picopico
@@ -78,63 +289,94 @@ a custom hardware setup that makes parallel on-device testing easier.
          to a USB port on your development host. Don't connect the
          **DEVICE UNDER TEST** Pico to anything.
 
+      .. tab-item:: Debug Probe
+         :sync: probe
+
+         Make sure that your Debug Probe is running firmware version 2.0.1
+         or later. See `Updating the firmware on the Debug Probe`_.
+
+         Wire up your Pico to the Debug Probe as described in `Getting Started`_.
+
+      .. tab-item:: Standalone
+         :sync: standalone
+
+         You can run Pigweed's tests with a single Pico and no additional
+         hardware with the following limitations:
+
+         * Tests will not be parallelized if more than one Pico is attached.
+
+         * If the Pico crashes during a test, the failure will cascade into
+           subsequent tests. You'll need to manually disconnect and re-connect
+           the device to get it working again.
+
 #. Start the test runner server:
 
    .. tab-set::
-
-      .. tab-item:: Raspberry Pi Debug Probe
-         :sync: debug_probe
-
-         .. code-block:: console
-
-            $ bazelisk run //targets/rp2040/py:unit_test_server -- --chip RP2040 --debug-probe-only
-
-      .. tab-item:: Standalone Raspberry Pi Pico
-         :sync: single_pico
-
-         .. code-block:: console
-
-            $ bazelisk run //targets/rp2040/py:unit_test_server -- --chip RP2040
 
       .. tab-item:: PicoPico
          :sync: picopico
 
          .. code-block:: console
 
+            # For the RP2040 use this:
             $ bazelisk run //targets/rp2040/py:unit_test_server -- --chip RP2040
+
+            # For the RP2350 use the same target, but specify "--chip RP2350"
+            $ bazelisk run //targets/rp2040/py:unit_test_server -- --chip RP2350
+
+      .. tab-item:: Debug Probe
+         :sync: probe
+
+         .. code-block:: console
+
+            # For the RP2040 use this:
+            $ bazelisk run //targets/rp2040/py:unit_test_server -- --chip RP2040 --debug-probe-only
+
+            # For the RP2350 use the same target, but specify "--chip RP2350"
+            $ bazelisk run //targets/rp2040/py:unit_test_server -- --chip RP2350 --debug-probe-only
+
+      .. tab-item:: Standalone
+         :sync: standalone
+
+         .. code-block:: console
+
+            # For the RP2040 use this:
+            $ bazelisk run //targets/rp2040/py:unit_test_server -- --chip RP2040
+
+            # For the RP2350 use the same target, but specify "--chip RP2350"
+            $ bazelisk run //targets/rp2040/py:unit_test_server -- --chip RP2350
 
 
 #. Open another terminal and run the tests:
 
    .. code-block:: console
 
-      $ bazelisk test --config=rp2040 //...
+      $ bazelisk test --config=<mcu> //...
 
----------------
-Older GN guides
----------------
-The following guides may be outdated. Most Pigweed contributors use
-(and should use) the Bazel workflows explained in
-:ref:`target-rp2040-contributors-quickstarts`. We're keeping these
-older GN guides around for Pigweed contributors that are maintaining
-the upstream GN build system.
+.. _target-rp2-upstream-gn:
+
+----------------------------------
+GN workflows (less maintained)
+----------------------------------
+The following guides may be outdated. We're keeping them around for Pigweed
+contributors that are maintaining the upstream GN build system.
 
 First-time setup
 ================
+To build for a RP2 target, Pigweed must be set up to use FreeRTOS and the Pico
+SDK HAL.
 
-GN
-==
-To use this target, Pigweed must be set up to use FreeRTOS and the Pico SDK
-HAL. When using Bazel, dependencies will be automatically installed.  For the GN
-build, the supported repositories can be downloaded via ``pw package``, and then
-the build must be manually configured to point to the locations the repositories
-were downloaded to.
+For the GN build, the supported repositories can be downloaded via
+``pw package``, and then the build must be manually configured to point to the
+locations the repositories were downloaded to.
+
+When using Bazel, those dependencies are automatically installed.
 
 .. warning::
 
-   The GN build does not distribute the libusb headers which are required by
-   picotool.  If the picotool installation fails due to missing libusb headers,
-   it can be fixed by installing them manually.
+   The packages downloaded do not include ``libusb-1.0`` as needed by
+   ``picotool``.  If the ``picotool`` installation fails due to missing
+   headers, it can be fixed by installing them manually.
 
    .. tab-set::
 
@@ -191,30 +433,9 @@ were downloaded to.
       dir_pw_third_party_freertos = getenv("PW_PACKAGE_ROOT") + "/freertos"
       PICO_SRC_DIR = getenv("PW_PACKAGE_ROOT") + "/pico_sdk"
 
-.. _target-rp2040-udev:
-
-Setting up udev rules
-=====================
-On Linux, you may need to update your udev rules to access the device as a
-normal user (not root).
-
-Add the following rules to ``/etc/udev/rules.d/49-pico.rules`` or
-``/usr/lib/udev/rules.d/49-pico.rules``. Create the file if it doesn't exist.
-
-.. literalinclude:: /targets/rp2040/49-pico.rules
-   :language: linuxconfig
-   :start-at: # Raspberry
-
-Then reload the rules:
-
-.. code-block:: console
-
-   sudo udevadm control --reload-rules
-   sudo udevadm trigger
 
 Building
 ========
-
 .. tab-set::
 
    .. tab-item:: GN
@@ -232,110 +453,6 @@ Building
       .. code-block:: console
 
          $ ninja -C out pw_system_demo
-
-Flashing
-========
-
-Using the mass-storage booloader
---------------------------------
-Hold down the **BOOTSEL** button when plugging in the Pico and it will appear as a
-mass storage device. Copy the UF2 firmware image (for example,
-``out/rp2040.size_optimized/obj/pw_system/system_example.uf2``) to
-your Pico when it is in USB bootloader mode.
-
-.. tip::
-
-   This is the simplest solution if you are fine with physically interacting
-   with your Pico whenever you want to flash a new firmware image.
-
-.. _target-rp2040-openocd:
-
-Using OpenOCD
--------------
-To flash using OpenOCD, you'll either need a
-`Pico debug probe <https://www.raspberrypi.com/products/debug-probe/>`_ or a
-second Raspberry Pi Pico to use as a debug probe. Also, on Linux you'll need to
-follow the instructions for
-:ref:`target-rp2040-udev`.
-
-First-time setup
-^^^^^^^^^^^^^^^^
-First, flash your first Pi Pico with ``debugprobe_on_pico.uf2`` from `the
-latest release of debugprobe <https://github.com/raspberrypi/debugprobe/releases/latest>`_.
-
-Next, connect the two Pico boards as follows:
-
-- Pico probe GND -> target Pico GND
-- Pico probe GP2 -> target Pico SWCLK
-- Pico probe GP3 -> target Pico SWDIO
-
-If you do not jump VSYS -> VSYS, you'll need to connect both Pi Pico boards
-to USB ports so that they have power.
-
-For more detailed instructions on how how to connect two Pico boards, see
-``Appendix A: Using Picoprobe`` of the `Getting started with Raspberry Pi Pico
-<https://datasheets.raspberrypi.com/pico/getting-started-with-pico.pdf>`_
-guide.
-
-Flashing a new firmware
-^^^^^^^^^^^^^^^^^^^^^^^
-Once your Pico is all wired up, you'll be able to flash it using OpenOCD:
-
-.. code-block:: console
-
-   $ openocd -f interface/cmsis-dap.cfg \
-         -f target/rp2040.cfg -c "adapter speed 5000" \
-         -c "program out/rp2040.size_optimized/obj/pw_system/bin/system_example.elf verify reset exit"
-
-Typical output:
-
-.. code-block:: none
-
-   xPack Open On-Chip Debugger 0.12.0+dev-01312-g18281b0c4-dirty (2023-09-05-01:33)
-   Licensed under GNU GPL v2
-   For bug reports, read
-      http://openocd.org/doc/doxygen/bugs.html
-   Info : Hardware thread awareness created
-   Info : Hardware thread awareness created
-   adapter speed: 5000 kHz
-   Info : Using CMSIS-DAPv2 interface with VID:PID=0x2e8a:0x000c, serial=415032383337300B
-   Info : CMSIS-DAP: SWD supported
-   Info : CMSIS-DAP: Atomic commands supported
-   Info : CMSIS-DAP: Test domain timer supported
-   Info : CMSIS-DAP: FW Version = 2.0.0
-   Info : CMSIS-DAP: Interface Initialised (SWD)
-   Info : SWCLK/TCK = 0 SWDIO/TMS = 0 TDI = 0 TDO = 0 nTRST = 0 nRESET = 0
-   Info : CMSIS-DAP: Interface ready
-   Info : clock speed 5000 kHz
-   Info : SWD DPIDR 0x0bc12477, DLPIDR 0x00000001
-   Info : SWD DPIDR 0x0bc12477, DLPIDR 0x10000001
-   Info : [rp2040.core0] Cortex-M0+ r0p1 processor detected
-   Info : [rp2040.core0] target has 4 breakpoints, 2 watchpoints
-   Info : [rp2040.core1] Cortex-M0+ r0p1 processor detected
-   Info : [rp2040.core1] target has 4 breakpoints, 2 watchpoints
-   Info : starting gdb server for rp2040.core0 on 3333
-   Info : Listening on port 3333 for gdb connections
-   Warn : [rp2040.core1] target was in unknown state when halt was requested
-   [rp2040.core0] halted due to debug-request, current mode: Thread
-   xPSR: 0xf1000000 pc: 0x000000ee msp: 0x20041f00
-   [rp2040.core1] halted due to debug-request, current mode: Thread
-   xPSR: 0xf1000000 pc: 0x000000ee msp: 0x20041f00
-   ** Programming Started **
-   Info : Found flash device 'win w25q16jv' (ID 0x001540ef)
-   Info : RP2040 B0 Flash Probe: 2097152 bytes @0x10000000, in 32 sectors
-
-   Info : Padding image section 1 at 0x10022918 with 232 bytes (bank write end alignment)
-   Warn : Adding extra erase range, 0x10022a00 .. 0x1002ffff
-   ** Programming Finished **
-   ** Verify Started **
-   ** Verified OK **
-   ** Resetting Target **
-   shutdown command invoked
-
-.. tip::
-
-   This is the most robust flashing solution if you don't want to physically
-   interact with the attached devices every time you want to flash a Pico.
 
 Running unit tests
 ==================
@@ -385,8 +502,101 @@ since the last build will be rebuilt and then run on the attached device.
 Alternatively, you may use ``pw watch`` to set up Pigweed to trigger
 builds/tests whenever changes to source files are detected.
 
+--------
+Flashing
+--------
+
+Using the mass-storage bootloader
+=================================
+Hold down the :kbd:`BOOTSEL` button when plugging in the Pico and it will appear
+as a mass storage device. Copy the UF2 firmware image (for example,
+``out/rp2040.size_optimized/obj/pw_system/system_example.uf2``) to
+your Pico, and it will restart and run it.
+
+.. tip::
+
+   This is the simplest solution if you are fine with physically interacting
+   with your Pico whenever you want to flash a new firmware image.
+
+.. _target-rp2-flashing-with-openocd:
+
+Flashing with OpenOCD
+=====================
+You will need (:ref:`OpenOCD<target-rp2-installing-openocd>`), and a Debug
+Probe (:ref:`target-rp2-debug-probe`).
+
+On Linux you will also need to follow :ref:`target-rp2-udev`.
+
+You can then flash from the command line:
+
+.. tab-set::
+
+   .. tab-item:: RP2040
+      :sync: RP2040
+
+      .. code-block:: console
+
+         $ openocd -f interface/cmsis-dap.cfg \
+               -f target/rp2040.cfg -c "adapter speed 5000" \
+               -c "program out/rp2040.size_optimized/obj/pw_system/bin/system_example.elf verify reset exit"
+
+   .. tab-item:: RP2350
+      :sync: RP2350
+
+      .. code-block:: console
+
+         $ openocd -f interface/cmsis-dap.cfg \
+               -f target/rp2350.cfg -c "adapter speed 5000" \
+               -c "program out/rp2350.size_optimized/obj/pw_system/bin/system_example.elf verify reset exit"
+
+Typical output:
+
+.. code-block:: none
+
+   xPack Open On-Chip Debugger 0.12.0+dev-01312-g18281b0c4-dirty (2023-09-05-01:33)
+   Licensed under GNU GPL v2
+   For bug reports, read
+      http://openocd.org/doc/doxygen/bugs.html
+   Info : Hardware thread awareness created
+   Info : Hardware thread awareness created
+   adapter speed: 5000 kHz
+   Info : Using CMSIS-DAPv2 interface with VID:PID=0x2e8a:0x000c, serial=415032383337300B
+   Info : CMSIS-DAP: SWD supported
+   Info : CMSIS-DAP: Atomic commands supported
+   Info : CMSIS-DAP: Test domain timer supported
+   Info : CMSIS-DAP: FW Version = 2.0.0
+   Info : CMSIS-DAP: Interface Initialised (SWD)
+   Info : SWCLK/TCK = 0 SWDIO/TMS = 0 TDI = 0 TDO = 0 nTRST = 0 nRESET = 0
+   Info : CMSIS-DAP: Interface ready
+   Info : clock speed 5000 kHz
+   Info : SWD DPIDR 0x0bc12477, DLPIDR 0x00000001
+   Info : SWD DPIDR 0x0bc12477, DLPIDR 0x10000001
+   Info : [rp2040.core0] Cortex-M0+ r0p1 processor detected
+   Info : [rp2040.core0] target has 4 breakpoints, 2 watchpoints
+   Info : [rp2040.core1] Cortex-M0+ r0p1 processor detected
+   Info : [rp2040.core1] target has 4 breakpoints, 2 watchpoints
+   Info : starting gdb server for rp2040.core0 on 3333
+   Info : Listening on port 3333 for gdb connections
+   Warn : [rp2040.core1] target was in unknown state when halt was requested
+   [rp2040.core0] halted due to debug-request, current mode: Thread
+   xPSR: 0xf1000000 pc: 0x000000ee msp: 0x20041f00
+   [rp2040.core1] halted due to debug-request, current mode: Thread
+   xPSR: 0xf1000000 pc: 0x000000ee msp: 0x20041f00
+   ** Programming Started **
+   Info : Found flash device 'win w25q16jv' (ID 0x001540ef)
+   Info : RP2040 B0 Flash Probe: 2097152 bytes @0x10000000, in 32 sectors
+
+   Info : Padding image section 1 at 0x10022918 with 232 bytes (bank write end alignment)
+   Warn : Adding extra erase range, 0x10022a00 .. 0x1002ffff
+   ** Programming Finished **
+   ** Verify Started **
+   ** Verified OK **
+   ** Resetting Target **
+   shutdown command invoked
+
+-----------------------
 Connect with pw_console
-=======================
+-----------------------
 Once the board has been flashed, you can connect to it and send RPC commands
 via the Pigweed console:
 
@@ -397,16 +607,26 @@ via the Pigweed console:
 
       .. code-block:: console
 
+         # RP2040
          $ bazel run --config=rp2040 //pw_system:system_example_console
+
+         # RP2350
+         $ bazel run --config=rp2350 //pw_system:system_example_console
 
    .. tab-item:: GN
       :sync: gn
 
       .. code-block:: console
 
+         # RP2040
          $ pw-system-console --device /dev/{ttyX} --baudrate 115200 \
              --token-databases \
                out/rp2040.size_optimized/obj/pw_system/bin/system_example.elf
+
+         # RP2350
+         $ pw-system-console --device /dev/{ttyX} --baudrate 115200 \
+             --token-databases \
+               out/rp2350.size_optimized/obj/pw_system/bin/system_example.elf
 
       Replace ``{ttyX}`` with the appropriate device on your machine. On Linux
       this may look like ``ttyACM0``, and on a Mac it may look like
@@ -454,36 +674,110 @@ You are now up and running!
    :bdg-ref-primary-line:`module-pw_console-user_guide` for more info on using
    the pw_console UI.
 
-Interactive debugging
+------------------
+Debugging with GDB
+------------------
+To interactively debug a Pico, first ensure you have
+:ref:`OpenOCD <target-rp2-installing-openocd>`.
+
+1. In one terminal window, start OpenOCD as a GDB server with the following
+   command:
+
+.. tab-set::
+
+   .. tab-item:: RP2040
+      :sync: RP2040
+
+      .. code-block:: console
+
+         $ openocd -f interface/cmsis-dap.cfg \
+               -f target/rp2040.cfg -c "adapter speed 5000"
+
+
+   .. tab-item:: RP2350
+      :sync: RP2350
+
+      .. code-block:: console
+
+         $ openocd -f interface/cmsis-dap.cfg \
+               -f target/rp2350.cfg -c "adapter speed 5000"
+
+.. note::
+
+   If you need to flash the target through some other software (such as a Bazel
+   build), you will need to stop ``openocd`` as it will have exclusive access
+   to the target.
+
+2. In a second terminal window, connect to the open GDB server, passing the
+   binary you will be debugging:
+
+.. tab-set::
+
+   .. tab-item:: RP2040
+      :sync: RP2040
+
+      .. code-block:: console
+
+         $ arm-none-eabi-gdb -ex "target extended-remote :3333" \
+            out/rp2040.size_optimized/obj/pw_system/bin/system_example.elf
+
+   .. tab-item:: RP2350
+      :sync: RP2350
+
+      .. code-block:: console
+
+         $ arm-none-eabi-gdb -ex "target extended-remote :3333" \
+            out/rp2350.size_optimized/obj/pw_system/bin/system_example.elf
+
+.. tip::
+
+   You can pass in additional commands to run on the command line with
+   additional ``-ex`` flags. Or you can stick multiple commands in a file and
+   use ``-x <path>`` to execute them all.
+
+   Some useful commands to add to startup:
+
+   - ``-ex monitor reset halt`` --- Resets and halt after connecting
+
+   - ``-ex monitor cortex_m vector_catch all`` --- Breaks on hardware exceptions,
+     such as bus errors (bad memory access) and dividing by zero, as that does
+     not otherwise happen by default!
+
+   Note: both the RP2040 (ARM Cortex-M0+) and RP2350 (ARM Cortex-M33) are
+   compatible with the cortex_m commands like the last one.
+
+
+Quick GDB cheat-sheet
 =====================
-To interactively debug a Pico, first ensure you are set up for
-:ref:`target-rp2040-openocd`.
+.. list-table::
+   :widths: 2 1
+   :header-rows: 1
 
-In one terminal window, start an OpenOCD GDB server with the following command:
+   * - Action
+     - shortcut / command
+   * - Ask openocd to reset the running device, and breaking before running
+     - ``monitor reset halt`` (or just ``mon reset halt``)
+   * - Execute an arbitrary OpenOCD command in gdb
+     - ``mon <cmd>``
+   * - Break while running
+     - :kbd:`Ctrl` + :kbd:`C`
+   * - Continue execution until pause or breakpoint
+     - ``continue`` (abbrev: ``c``)
+   * - Set a breakpoint
+     - ``break <name or address>`` (abbrev: ``b``)
+   * - Set a watchpoint (break on write)
+     - ``watch <name or *address>``
+   * - Show backtrace
+     - ``backtrace`` (abbrev: ``bt``)
+   * - Switch context to backtrace frame N
+     - ``frame <N>``
+   * - Print a value
+     - ``print <name>`` (abbrev: ``p``)
+   * - Examine memory
+     - ``x <name or address>``
+   * - Examine 64 bytes of memory as hex
+     - ``x/64bx <name or address>``
+   * - Examine 64 bytes of memory as decimal 4-byte words
+     - ``x/16wd <name or address>``
 
-.. code-block:: console
-
-   $ openocd -f interface/cmsis-dap.cfg \
-         -f target/rp2040.cfg -c "adapter speed 5000"
-
-In a second terminal window, connect to the open GDB server, passing the binary
-you will be debugging:
-
-.. code-block:: console
-
-   $ arm-none-eabi-gdb -ex "target remote :3333" \
-     out/rp2040.size_optimized/obj/pw_system/bin/system_example.elf
-
-Helpful GDB commands
---------------------
-+---------------------------------------------------------+--------------------+
-| Action                                                  | shortcut / command |
-+=========================================================+====================+
-| Reset the running device, stopping immediately          | ``mon reset halt`` |
-+---------------------------------------------------------+--------------------+
-| Continue execution until pause or breakpoint            |              ``c`` |
-+---------------------------------------------------------+--------------------+
-| Pause execution                                         |         ``ctrl+c`` |
-+---------------------------------------------------------+--------------------+
-| Show backtrace                                          |             ``bt`` |
-+---------------------------------------------------------+--------------------+
+See also the `GDB Users Manual <https://sourceware.org/gdb/current/onlinedocs/gdb.html/>`_

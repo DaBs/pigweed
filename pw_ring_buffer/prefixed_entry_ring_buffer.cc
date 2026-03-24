@@ -16,6 +16,8 @@
 
 #include <algorithm>
 #include <cstring>
+#include <optional>
+#include <utility>
 
 #include "pw_assert/assert.h"
 #include "pw_assert/check.h"
@@ -26,9 +28,8 @@ namespace pw {
 namespace ring_buffer {
 
 using std::byte;
-using Entry = PrefixedEntryRingBufferMulti::Entry;
 using Reader = PrefixedEntryRingBufferMulti::Reader;
-using iterator = PrefixedEntryRingBufferMulti::iterator;
+using ReadOutput = PrefixedEntryRingBuffer::ReadOutput;
 
 void PrefixedEntryRingBufferMulti::Clear() {
   write_idx_ = 0;
@@ -36,6 +37,30 @@ void PrefixedEntryRingBufferMulti::Clear() {
     reader.read_idx_ = 0;
     reader.entry_count_ = 0;
   }
+}
+
+pw::Status PrefixedEntryRingBufferMulti::PopBack(size_t num_entries) {
+  std::optional<size_t> min_entry_count;
+  for (Reader& reader : readers_) {
+    if (min_entry_count.has_value()) {
+      min_entry_count = std::min(min_entry_count.value(), reader.EntryCount());
+    } else {
+      min_entry_count = reader.EntryCount();
+    }
+  }
+
+  if (!min_entry_count.has_value()) {
+    return pw::Status::OutOfRange();
+  }
+
+  if (num_entries > min_entry_count.value()) {
+    return pw::Status::OutOfRange();
+  }
+
+  for (Reader& reader : readers_) {
+    reader.entry_count_ -= num_entries;
+  }
+  return pw::OkStatus();
 }
 
 Status PrefixedEntryRingBufferMulti::SetBuffer(span<byte> buffer) {
@@ -129,12 +154,19 @@ Status PrefixedEntryRingBufferMulti::InternalPushBack(
   return OkStatus();
 }
 
-auto GetOutput(span<byte> data_out, size_t* write_index) {
-  return [data_out, write_index](span<const byte> src) -> Status {
-    size_t copy_size = std::min(data_out.size_bytes(), src.size_bytes());
+struct GetOutputFnData {
+  pw::span<std::byte> data_out;
+  size_t* write_index;
+};
 
-    memcpy(data_out.data() + *write_index, src.data(), copy_size);
-    *write_index += copy_size;
+ReadOutput GetOutput(GetOutputFnData& fn_data) {
+  return [&fn_data](span<const byte> src) -> Status {
+    size_t copy_size =
+        std::min(fn_data.data_out.size_bytes(), src.size_bytes());
+
+    memcpy(
+        fn_data.data_out.data() + *fn_data.write_index, src.data(), copy_size);
+    *fn_data.write_index += copy_size;
 
     return (copy_size == src.size_bytes()) ? OkStatus()
                                            : Status::ResourceExhausted();
@@ -144,23 +176,25 @@ auto GetOutput(span<byte> data_out, size_t* write_index) {
 Status PrefixedEntryRingBufferMulti::InternalPeekFront(
     const Reader& reader, span<byte> data, size_t* bytes_read_out) const {
   *bytes_read_out = 0;
-  return InternalRead(reader, GetOutput(data, bytes_read_out), false);
+  GetOutputFnData fn_data = {.data_out = data, .write_index = bytes_read_out};
+  return InternalRead(reader, GetOutput(fn_data), false);
 }
 
 Status PrefixedEntryRingBufferMulti::InternalPeekFront(
-    const Reader& reader, ReadOutput output) const {
-  return InternalRead(reader, output, false);
+    const Reader& reader, ReadOutput&& output) const {
+  return InternalRead(reader, std::move(output), false);
 }
 
 Status PrefixedEntryRingBufferMulti::InternalPeekFrontWithPreamble(
     const Reader& reader, span<byte> data, size_t* bytes_read_out) const {
   *bytes_read_out = 0;
-  return InternalRead(reader, GetOutput(data, bytes_read_out), true);
+  GetOutputFnData fn_data = {.data_out = data, .write_index = bytes_read_out};
+  return InternalRead(reader, GetOutput(fn_data), true);
 }
 
 Status PrefixedEntryRingBufferMulti::InternalPeekFrontWithPreamble(
-    const Reader& reader, ReadOutput output) const {
-  return InternalRead(reader, output, true);
+    const Reader& reader, ReadOutput&& output) const {
+  return InternalRead(reader, std::move(output), true);
 }
 
 Status PrefixedEntryRingBufferMulti::InternalPeekFrontPreamble(
@@ -177,10 +211,9 @@ Status PrefixedEntryRingBufferMulti::InternalPeekFrontPreamble(
 // TODO: b/235351046 - Consider whether this internal templating is required, or
 // if we can simply promote GetOutput to a static function and remove the
 // template. T should be similar to Status (*read_output)(span<const byte>)
-template <typename T>
 Status PrefixedEntryRingBufferMulti::InternalRead(
     const Reader& reader,
-    T read_output,
+    ReadOutput&& read_output,
     bool include_preamble_in_output,
     uint32_t* user_preamble_out) const {
   if (buffer_ == nullptr) {
@@ -445,8 +478,10 @@ Status PrefixedEntryRingBufferMulti::Reader::PeekFrontWithPreamble(
     uint32_t& user_preamble_out,
     size_t& entry_bytes_read_out) const {
   entry_bytes_read_out = 0;
+  GetOutputFnData fn_data = {.data_out = data,
+                             .write_index = &entry_bytes_read_out};
   return buffer_->InternalRead(
-      *this, GetOutput(data, &entry_bytes_read_out), false, &user_preamble_out);
+      *this, GetOutput(fn_data), false, &user_preamble_out);
 }
 
 size_t PrefixedEntryRingBufferMulti::Reader::EntriesSize() const {
@@ -465,83 +500,6 @@ size_t PrefixedEntryRingBufferMulti::Reader::EntriesSize() const {
   }
 
   return buffer_->buffer_bytes_;
-}
-
-iterator& iterator::operator++() {
-  PW_DCHECK_OK(iteration_status_);
-  PW_DCHECK_INT_NE(entry_count_, 0);
-
-  Result<EntryInfo> info = ring_buffer_->RawFrontEntryInfo(read_idx_);
-  if (!info.status().ok()) {
-    SkipToEnd(info.status());
-    return *this;
-  }
-
-  // It is guaranteed that the buffer is deringed at this point.
-  read_idx_ += info.value().preamble_bytes + info.value().data_bytes;
-  entry_count_--;
-
-  if (entry_count_ == 0) {
-    SkipToEnd(OkStatus());
-    return *this;
-  }
-
-  if (read_idx_ >= ring_buffer_->TotalUsedBytes()) {
-    SkipToEnd(Status::DataLoss());
-    return *this;
-  }
-
-  info = ring_buffer_->RawFrontEntryInfo(read_idx_);
-  if (!info.status().ok()) {
-    SkipToEnd(info.status());
-    return *this;
-  }
-  return *this;
-}
-
-iterator& iterator::operator--() {
-  PW_DCHECK_OK(iteration_status_);
-  PW_DCHECK_INT_NE(entry_count_, 0);
-
-  Result<EntryInfo> info = ring_buffer_->RawFrontEntryInfo(read_idx_);
-  if (!info.status().ok()) {
-    SkipToEnd(info.status());
-    return *this;
-  }
-
-  // It is guaranteed that the buffer is deringed at this point.
-  read_idx_ -= info.value().preamble_bytes + info.value().data_bytes;
-  entry_count_++;
-
-  // If read_idx_ is larger that the total bytes, it's wrapped
-  // as the iterator has decremented past the last element.
-  if (read_idx_ > ring_buffer_->TotalSizeBytes()) {
-    SkipToEnd(Status::DataLoss());
-    return *this;
-  }
-
-  info = ring_buffer_->RawFrontEntryInfo(read_idx_);
-  if (!info.status().ok()) {
-    SkipToEnd(info.status());
-    return *this;
-  }
-  return *this;
-}
-
-const Entry& iterator::operator*() const {
-  PW_DCHECK_OK(iteration_status_);
-  PW_DCHECK_INT_NE(entry_count_, 0);
-
-  Result<EntryInfo> info = ring_buffer_->RawFrontEntryInfo(read_idx_);
-  PW_DCHECK_OK(info.status());
-
-  entry_ = {
-      .buffer = span<const byte>(
-          ring_buffer_->buffer_ + read_idx_ + info.value().preamble_bytes,
-          info.value().data_bytes),
-      .preamble = info.value().user_preamble,
-  };
-  return entry_;
 }
 
 }  // namespace ring_buffer

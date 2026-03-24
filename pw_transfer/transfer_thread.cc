@@ -19,6 +19,7 @@
 
 #include "pw_assert/check.h"
 #include "pw_log/log.h"
+#include "pw_transfer/client.h"
 #include "pw_transfer/internal/chunk.h"
 #include "pw_transfer/internal/client_context.h"
 #include "pw_transfer/internal/config.h"
@@ -52,7 +53,18 @@ void TransferThread::Run() {
   next_event_ownership_.release();
 
   while (true) {
-    if (event_notification_.try_acquire_until(GetNextTransferTimeout())) {
+    std::optional<chrono::SystemClock::time_point> timeout =
+        GetNextTransferTimeout();
+    bool has_event = false;
+
+    if (timeout.has_value()) {
+      has_event = event_notification_.try_acquire_until(timeout.value());
+    } else {
+      event_notification_.acquire();
+      has_event = true;
+    }
+
+    if (has_event) {
       HandleEvent(next_event_);
 
       // Sample event type before we release ownership of next_event_.
@@ -82,19 +94,21 @@ void TransferThread::Run() {
   }
 }
 
-chrono::SystemClock::time_point TransferThread::GetNextTransferTimeout() const {
-  chrono::SystemClock::time_point timeout =
-      chrono::SystemClock::TimePointAfterAtLeast(kMaxTimeout);
+std::optional<chrono::SystemClock::time_point>
+TransferThread::GetNextTransferTimeout() const {
+  std::optional<chrono::SystemClock::time_point> timeout = std::nullopt;
 
   for (Context& context : client_transfers_) {
     auto ctx_timeout = context.timeout();
-    if (ctx_timeout.has_value() && ctx_timeout.value() < timeout) {
+    if (ctx_timeout.has_value() &&
+        (!timeout.has_value() || ctx_timeout.value() < timeout.value())) {
       timeout = ctx_timeout.value();
     }
   }
   for (Context& context : server_transfers_) {
     auto ctx_timeout = context.timeout();
-    if (ctx_timeout.has_value() && ctx_timeout.value() < timeout) {
+    if (ctx_timeout.has_value() &&
+        (!timeout.has_value() || ctx_timeout.value() < timeout.value())) {
       timeout = ctx_timeout.value();
     }
   }
@@ -163,8 +177,8 @@ void TransferThread::StartTransfer(
   if (is_client_transfer) {
     next_event_.new_transfer.stream = stream;
     next_event_.new_transfer.rpc_writer =
-        &(type == TransferType::kTransmit ? client_write_stream_
-                                          : client_read_stream_)
+        &(type == TransferType::kTransmit ? client_write_stream_.stream
+                                          : client_read_stream_.stream)
              .as_writer();
   } else {
     auto handler = std::find_if(handlers_.begin(),
@@ -262,17 +276,122 @@ void TransferThread::EndTransfer(EventType type,
   event_notification_.release();
 }
 
-void TransferThread::SetStream(TransferStream stream) {
+void TransferThread::SetClientReadStream(
+    rpc::RawClientReaderWriter& read_stream,
+    Client* client,
+    Function<void(ConstByteSpan)>&& on_next,
+    internal::SetStreamBehavior behavior) {
+  client_read_stream_.stream.set_on_next(nullptr);
   if (!TryWaitForEventToProcess()) {
     return;
   }
+  staged_client_stream_.stream = std::move(read_stream);
+  staged_client_stream_.client = client;
+  staged_client_on_next_ = std::move(on_next);
 
   next_event_.type = EventType::kSetStream;
   next_event_.set_stream = {
-      .stream = stream,
+      .stream = TransferStream::kClientRead,
+      .behavior = behavior,
   };
 
   event_notification_.release();
+  WaitUntilEventIsProcessed();
+}
+
+void TransferThread::CloseClientReadStream(Client* client) {
+  if (!TryWaitForEventToProcess()) {
+    return;
+  }
+  staged_client_stream_.client = client;
+
+  next_event_.type = EventType::kSetStream;
+  next_event_.set_stream = {
+      .stream = TransferStream::kClientRead,
+      .behavior = internal::SetStreamBehavior::kCloseStream,
+  };
+
+  event_notification_.release();
+  WaitUntilEventIsProcessed();
+}
+
+void TransferThread::SetClientWriteStream(
+    rpc::RawClientReaderWriter& write_stream,
+    Client* client,
+    Function<void(ConstByteSpan)>&& on_next,
+    internal::SetStreamBehavior behavior) {
+  client_write_stream_.stream.set_on_next(nullptr);
+  if (!TryWaitForEventToProcess()) {
+    return;
+  }
+  staged_client_stream_.stream = std::move(write_stream);
+  staged_client_stream_.client = client;
+  staged_client_on_next_ = std::move(on_next);
+
+  next_event_.type = EventType::kSetStream;
+  next_event_.set_stream = {
+      .stream = TransferStream::kClientWrite,
+      .behavior = behavior,
+  };
+
+  event_notification_.release();
+  WaitUntilEventIsProcessed();
+}
+
+void TransferThread::CloseClientWriteStream(Client* client) {
+  if (!TryWaitForEventToProcess()) {
+    return;
+  }
+  staged_client_stream_.client = client;
+
+  next_event_.type = EventType::kSetStream;
+  next_event_.set_stream = {
+      .stream = TransferStream::kClientWrite,
+      .behavior = internal::SetStreamBehavior::kCloseStream,
+  };
+
+  event_notification_.release();
+  WaitUntilEventIsProcessed();
+}
+
+void TransferThread::SetServerReadStream(
+    rpc::RawServerReaderWriter& read_stream,
+    Function<void(ConstByteSpan)>&& on_next) {
+  server_read_stream_.set_on_next(nullptr);
+  if (!TryWaitForEventToProcess()) {
+    return;
+  }
+  staged_server_stream_ = std::move(read_stream);
+  staged_server_on_next_ = std::move(on_next);
+
+  next_event_.type = EventType::kSetStream;
+  next_event_.set_stream = {
+      .stream = TransferStream::kServerRead,
+      .behavior = internal::SetStreamBehavior::kNewClient,
+  };
+
+  event_notification_.release();
+  WaitUntilEventIsProcessed();
+}
+
+void TransferThread::SetServerWriteStream(
+    rpc::RawServerReaderWriter& write_stream,
+    Function<void(ConstByteSpan)>&& on_next) {
+  server_write_stream_.set_on_next(nullptr);
+  if (!TryWaitForEventToProcess()) {
+    return;
+  }
+  staged_server_stream_ = std::move(write_stream);
+  staged_server_on_next_ = std::move(on_next);
+
+  next_event_.type = EventType::kSetStream;
+  next_event_.set_stream = {
+      .stream = TransferStream::kServerWrite,
+      .behavior = internal::SetStreamBehavior::kNewClient,
+  };
+
+  event_notification_.release();
+  WaitUntilEventIsProcessed();
 }
 
 void TransferThread::UpdateClientTransfer(uint32_t handle_id,
@@ -336,8 +455,8 @@ void TransferThread::HandleEvent(const internal::Event& event) {
       }
 
       // Cancel/Finish streams.
-      client_read_stream_.Cancel().IgnoreError();
-      client_write_stream_.Cancel().IgnoreError();
+      client_read_stream_.stream.Cancel().IgnoreError();
+      client_write_stream_.stream.Cancel().IgnoreError();
       server_read_stream_.Finish(Status::Aborted()).IgnoreError();
       server_write_stream_.Finish(Status::Aborted()).IgnoreError();
       return;
@@ -369,7 +488,7 @@ void TransferThread::HandleEvent(const internal::Event& event) {
       return;
 
     case EventType::kSetStream:
-      HandleSetStreamEvent(event.set_stream.stream);
+      HandleSetStreamEvent(event.set_stream.stream, event.set_stream.behavior);
       return;
 
     case EventType::kGetResourceStatus:
@@ -516,49 +635,121 @@ template <typename T>
 void TerminateTransfers(span<T> contexts,
                         TransferType type,
                         EventType event_type,
-                        Status status) {
+                        Status status,
+                        bool skip_initiating = false) {
+  Event event;
+  event.type = event_type;
   for (Context& context : contexts) {
     if (context.active() && context.type() == type) {
-      context.HandleEvent(Event{
-          .type = event_type,
-          .end_transfer =
-              EndTransferEvent{
-                  .id_type = IdentifierType::Session,
-                  .id = context.session_id(),
-                  .status = status.code(),
-                  .send_status_chunk = false,
-              },
-      });
+      if (skip_initiating && context.is_initiating()) {
+        continue;
+      }
+      event.end_transfer = EndTransferEvent{
+          .id_type = IdentifierType::Session,
+          .id = context.session_id(),
+          .status = status.code(),
+          .send_status_chunk = false,
+      };
+
+      context.HandleEvent(event);
     }
   }
 }
 
-void TransferThread::HandleSetStreamEvent(TransferStream stream) {
+void TransferThread::CancelExistingStream(OwnedClientStream& stream,
+                                          TransferType type) {
+  if (stream.stream.active()) {
+    if (staged_client_stream_.client != nullptr && stream.client != nullptr &&
+        stream.client != staged_client_stream_.client) {
+      stream.client->OnRpcError(Status::Cancelled(), type);
+    }
+    stream.stream.Cancel().IgnoreError();
+  }
+}
+
+void TransferThread::HandleSetStreamEvent(
+    TransferStream stream, internal::SetStreamBehavior behavior) {
   switch (stream) {
-    case TransferStream::kClientRead:
+    case TransferStream::kClientRead: {
+      if (behavior == internal::SetStreamBehavior::kCloseStream) {
+        if (client_read_stream_.client == staged_client_stream_.client) {
+          CancelExistingStream(client_read_stream_, TransferType::kReceive);
+          TerminateTransfers(client_transfers_,
+                             TransferType::kReceive,
+                             EventType::kClientEndTransfer,
+                             Status::Aborted());
+          client_read_stream_.client = nullptr;
+          client_read_stream_.stream = rpc::RawClientReaderWriter();
+        }
+        break;
+      }
+
+      CancelExistingStream(client_read_stream_, TransferType::kReceive);
+
+      bool skip_initiating = behavior == internal::SetStreamBehavior::kReopen;
       TerminateTransfers(client_transfers_,
                          TransferType::kReceive,
                          EventType::kClientEndTransfer,
-                         Status::Aborted());
+                         Status::Aborted(),
+                         skip_initiating);
+
       client_read_stream_ = std::move(staged_client_stream_);
-      client_read_stream_.set_on_next(std::move(staged_client_on_next_));
-      client_read_stream_.set_on_error([](Status status) {
-        PW_LOG_WARN("Client read stream closed unexpectedly: %s", status.str());
-      });
+      client_read_stream_.stream.set_on_next(std::move(staged_client_on_next_));
+      // on_error must be controlled by the client
+
+      if (behavior == internal::SetStreamBehavior::kReopen) {
+        // Restart initiating transfers
+        for (Context& context : client_transfers_) {
+          if (context.active() && context.type() == TransferType::kReceive &&
+              context.is_initiating()) {
+            context.InitiateTransferAsClient();
+          }
+        }
+      }
       break;
-    case TransferStream::kClientWrite:
+    }
+
+    case TransferStream::kClientWrite: {
+      if (behavior == internal::SetStreamBehavior::kCloseStream) {
+        if (client_write_stream_.client == staged_client_stream_.client) {
+          CancelExistingStream(client_write_stream_, TransferType::kTransmit);
+          TerminateTransfers(client_transfers_,
+                             TransferType::kTransmit,
+                             EventType::kClientEndTransfer,
+                             Status::Aborted());
+          client_write_stream_.client = nullptr;
+          client_write_stream_.stream = rpc::RawClientReaderWriter();
+        }
+        break;
+      }
+
+      CancelExistingStream(client_write_stream_, TransferType::kTransmit);
+
+      bool skip_initiating = behavior == internal::SetStreamBehavior::kReopen;
       TerminateTransfers(client_transfers_,
                          TransferType::kTransmit,
                          EventType::kClientEndTransfer,
-                         Status::Aborted());
+                         Status::Aborted(),
+                         skip_initiating);
+
       client_write_stream_ = std::move(staged_client_stream_);
-      client_write_stream_.set_on_next(std::move(staged_client_on_next_));
-      client_write_stream_.set_on_error([](Status status) {
-        PW_LOG_WARN("Client write stream closed unexpectedly: %s",
-                    status.str());
-      });
+      client_write_stream_.stream.set_on_next(
+          std::move(staged_client_on_next_));
+      // on_error must be controlled by the client
+
+      if (behavior == internal::SetStreamBehavior::kReopen) {
+        // Restart initiating transfers
+        for (Context& context : client_transfers_) {
+          if (context.active() && context.type() == TransferType::kTransmit &&
+              context.is_initiating()) {
+            context.InitiateTransferAsClient();
+          }
+        }
+      }
       break;
-    case TransferStream::kServerRead:
+    }
+
+    case TransferStream::kServerRead: {
       TerminateTransfers(server_transfers_,
                          TransferType::kTransmit,
                          EventType::kServerEndTransfer,
@@ -569,7 +760,9 @@ void TransferThread::HandleSetStreamEvent(TransferStream stream) {
         PW_LOG_WARN("Server read stream closed unexpectedly: %s", status.str());
       });
       break;
-    case TransferStream::kServerWrite:
+    }
+
+    case TransferStream::kServerWrite: {
       TerminateTransfers(server_transfers_,
                          TransferType::kReceive,
                          EventType::kServerEndTransfer,
@@ -581,6 +774,7 @@ void TransferThread::HandleSetStreamEvent(TransferStream stream) {
                     status.str());
       });
       break;
+    }
   }
 }
 
@@ -589,6 +783,8 @@ void TransferThread::HandleSetStreamEvent(TransferStream stream) {
 void TransferThread::EnqueueResourceEvent(uint32_t resource_id,
                                           ResourceStatusCallback&& callback) {
   if (!TryWaitForEventToProcess()) {
+    internal::ResourceStatus stats;
+    callback(Status::Unavailable(), stats);
     return;
   }
 
@@ -622,6 +818,24 @@ void TransferThread::GetResourceState(uint32_t resource_id) {
   } else {
     resource_status_callback_(Status::NotFound(), stats);
   }
+
+  resource_status_callback_ = nullptr;
+}
+
+rpc::Writer& TransferThread::stream_for(TransferStream stream) {
+  switch (stream) {
+    case TransferStream::kClientRead:
+      return client_read_stream_.stream.as_writer();
+    case TransferStream::kClientWrite:
+      return client_write_stream_.stream.as_writer();
+    case TransferStream::kServerRead:
+      return server_read_stream_.as_writer();
+    case TransferStream::kServerWrite:
+      return server_write_stream_.as_writer();
+  }
+  // An unknown TransferStream value was passed, which means this function
+  // was passed an invalid enum value.
+  PW_CRASH("Unsupported stream type");
 }
 
 }  // namespace pw::transfer::internal

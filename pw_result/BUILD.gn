@@ -16,7 +16,6 @@ import("//build_overrides/pigweed.gni")
 
 import("$dir_pw_bloat/bloat.gni")
 import("$dir_pw_build/target_types.gni")
-import("$dir_pw_docgen/docs.gni")
 import("$dir_pw_unit_test/test.gni")
 
 config("public_include_path") {
@@ -27,6 +26,7 @@ pw_source_set("pw_result") {
   public_configs = [ ":public_include_path" ]
   public_deps = [
     "$dir_pw_assert",
+    "$dir_pw_containers:optional",
     "$dir_pw_preprocessor",
     "$dir_pw_status",
   ]
@@ -59,49 +59,10 @@ pw_source_set("expected") {
 }
 
 pw_test("expected_test") {
-  deps = [ ":expected" ]
-  sources = [ "expected_test.cc" ]
-}
-
-pw_doc_group("docs") {
-  inputs = [ "Kconfig" ]
-  sources = [ "docs.rst" ]
-  report_deps = [ ":result_size" ]
-}
-
-pw_size_diff("result_size") {
-  title = "pw::Result vs. pw::Status and out pointer"
-
-  binaries = [
-    {
-      target = "size_report:result_simple"
-      base = "size_report:pointer_simple"
-      label = "Simple function"
-    },
-    {
-      target = "size_report:result_noinline"
-      base = "size_report:pointer_noinline"
-      label = "Simple function without inlining"
-    },
-    {
-      target = "size_report:result_read"
-      base = "size_report:pointer_read"
-      label = "Returning a larger object (std::span)"
-    },
-    {
-      target = "size_report:monadic_and_then"
-      base = "size_report:ladder_and_then"
-      label = "Using and_then instead of if ladder"
-    },
-    {
-      target = "size_report:monadic_or_else"
-      base = "size_report:ladder_or_else"
-      label = "Using or_else instead of if ladder"
-    },
-    {
-      target = "size_report:monadic_transform"
-      base = "size_report:ladder_transform"
-      label = "Using transform instead of if ladder"
-    },
+  deps = [
+    ":expected",
+    "$dir_pw_status",
+    "$dir_pw_string",
   ]
+  sources = [ "expected_test.cc" ]
 }

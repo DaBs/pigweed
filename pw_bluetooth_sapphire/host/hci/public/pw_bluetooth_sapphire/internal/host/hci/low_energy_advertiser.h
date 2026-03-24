@@ -18,6 +18,7 @@
 #include <memory>
 
 #include "pw_bluetooth_sapphire/internal/host/hci-spec/constants.h"
+#include "pw_bluetooth_sapphire/internal/host/hci/advertising_handle_map.h"
 #include "pw_bluetooth_sapphire/internal/host/hci/local_address_delegate.h"
 #include "pw_bluetooth_sapphire/internal/host/hci/low_energy_connection.h"
 #include "pw_bluetooth_sapphire/internal/host/hci/sequential_command_runner.h"
@@ -54,7 +55,8 @@ class LowEnergyAdvertiser : public LocalAddressClient {
   ~LowEnergyAdvertiser() override = default;
 
   using ConnectionCallback =
-      fit::function<void(std::unique_ptr<hci::LowEnergyConnection> link)>;
+      fit::function<void(AdvertisementId advertisement_id,
+                         std::unique_ptr<hci::LowEnergyConnection> link)>;
 
   // TODO(armansito): The |address| parameter of this function doesn't always
   // correspond to the advertised device address as the local address for an
@@ -166,21 +168,27 @@ class LowEnergyAdvertiser : public LocalAddressClient {
   AdvertisingEventPropertiesToLEAdvertisingType(
       const AdvertisingEventProperties& p);
 
-  virtual void StartAdvertising(const DeviceAddress& address,
-                                const AdvertisingData& data,
-                                const AdvertisingData& scan_rsp,
-                                const AdvertisingOptions& options,
-                                ConnectionCallback connect_callback,
-                                ResultFunction<> result_callback) = 0;
+  // Asynchronously starts advertising. The result will be reported via
+  // |result_callback|. On success, an AdvertisingHandle will be returned that
+  // can be used to stop advertising.
+  virtual void StartAdvertising(
+      const DeviceAddress& address,
+      const AdvertisingData& data,
+      const AdvertisingData& scan_rsp,
+      const AdvertisingOptions& options,
+      ConnectionCallback connect_callback,
+      ResultFunction<hci::AdvertisementId> result_callback) = 0;
 
   // Stops advertisement on all currently advertising addresses. Idempotent and
   // asynchronous.
-  virtual void StopAdvertising();
+  virtual void StopAdvertising(
+      fit::function<void(Result<>)> result_cb = nullptr) = 0;
 
-  // Stops any advertisement currently active on |address|. Idempotent and
+  // Stops the advertisement identified by |handle|. Idempotent and
   // asynchronous.
-  virtual void StopAdvertising(const DeviceAddress& address,
-                               bool extended_pdu) = 0;
+  virtual void StopAdvertising(
+      hci::AdvertisementId advertisement_id,
+      fit::function<void(Result<>)> result_cb = nullptr) = 0;
 
   // Callback for an incoming LE connection. This function should be called in
   // reaction to any connection that was not initiated locally. This object will
@@ -193,11 +201,11 @@ class LowEnergyAdvertiser : public LocalAddressClient {
       const hci_spec::LEConnectionParameters& conn_params) = 0;
 
   // Returns true if currently advertising at all
-  bool IsAdvertising() const { return !connection_callbacks_.empty(); }
+  virtual bool IsAdvertising() const { return !connection_callbacks_.empty(); }
 
-  // Returns true if currently advertising for the given address
-  bool IsAdvertising(const DeviceAddress& address, bool extended_pdu) const {
-    return connection_callbacks_.count({address, extended_pdu}) != 0;
+  // Returns true if currently advertising for the given advertising handle.
+  bool IsAdvertising(hci::AdvertisementId advertisement_id) const {
+    return connection_callbacks_.count(advertisement_id) != 0;
   }
 
   // Returns the number of advertisements currently registered
@@ -206,54 +214,71 @@ class LowEnergyAdvertiser : public LocalAddressClient {
   // Returns the maximum number of advertisements that can be supported
   virtual size_t MaxAdvertisements() const = 0;
 
+  virtual void AttachInspect(inspect::Node& /*parent*/) {}
+
  protected:
+  using StartAdvertisingInternalResult =
+      fit::result<std::tuple<Error, std::optional<hci::AdvertisementId>>,
+                  hci::AdvertisementId>;
+  using StartAdvertisingInternalCallback =
+      fit::callback<void(StartAdvertisingInternalResult result)>;
+
+  // Return value of BuildSetAdvertisingParams.
+  struct SetAdvertisingParams {
+    CommandPacket packet;
+    hci::AdvertisementId advertisement_id;
+  };
+
   // Build the HCI command packet to enable advertising for the flavor of low
   // energy advertising being implemented.
   virtual CommandPacket BuildEnablePacket(
-      const DeviceAddress& address,
-      pw::bluetooth::emboss::GenericEnableParam enable,
-      bool extended_pdu) = 0;
+      AdvertisementId advertisement_id,
+      pw::bluetooth::emboss::GenericEnableParam enable) const = 0;
 
   // Build the HCI command packet to set the advertising parameters for the
-  // flavor of low energy advertising being implemented.
-  virtual std::optional<CommandPacket> BuildSetAdvertisingParams(
+  // flavor of low energy advertising being implemented. Also returns the
+  // AdvertisingHandle used for this advertising set.
+  virtual std::optional<SetAdvertisingParams> BuildSetAdvertisingParams(
       const DeviceAddress& address,
       const AdvertisingEventProperties& properties,
       pw::bluetooth::emboss::LEOwnAddressType own_address_type,
-      const AdvertisingIntervalRange& interval,
-      bool extended_pdu) = 0;
+      const AdvertisingIntervalRange& interval) = 0;
+
+  // Build the HCI command packet to set the random address to use for the
+  // flavor of low energy advertising being implemented. If no command packet is
+  // needed for this advertising mechanism, return a nullopt.
+  virtual std::optional<CommandPacket> BuildSetAdvertisingRandomAddr(
+      AdvertisementId advertisement_id) const = 0;
 
   // Build the HCI command packet to set the advertising data for the flavor of
   // low energy advertising being implemented.
   virtual std::vector<CommandPacket> BuildSetAdvertisingData(
-      const DeviceAddress& address,
+      AdvertisementId advertisement_id,
       const AdvertisingData& data,
-      AdvFlags flags,
-      bool extended_pdu) = 0;
+      AdvFlags flags) const = 0;
 
   // Build the HCI command packet to delete the advertising parameters from the
   // controller for the flavor of low energy advertising being implemented. This
   // method is used when stopping an advertisement.
-  virtual CommandPacket BuildUnsetAdvertisingData(const DeviceAddress& address,
-                                                  bool extended_pdu) = 0;
+  virtual CommandPacket BuildUnsetAdvertisingData(
+      AdvertisementId advertisement_id) const = 0;
 
   // Build the HCI command packet to set the data sent in a scan response (if
   // requested) for the flavor of low energy advertising being implemented.
   virtual std::vector<CommandPacket> BuildSetScanResponse(
-      const DeviceAddress& address,
-      const AdvertisingData& scan_rsp,
-      bool extended_pdu) = 0;
+      AdvertisementId advertisement_id,
+      const AdvertisingData& scan_rsp) const = 0;
 
   // Build the HCI command packet to delete the advertising parameters from the
   // controller for the flavor of low energy advertising being implemented.
-  virtual CommandPacket BuildUnsetScanResponse(const DeviceAddress& address,
-                                               bool extended_pdu) = 0;
+  virtual CommandPacket BuildUnsetScanResponse(
+      AdvertisementId advertisement_id) const = 0;
 
   // Build the HCI command packet to remove the advertising set entirely from
   // the controller's memory for the flavor of low energy advertising being
   // implemented.
-  virtual CommandPacket BuildRemoveAdvertisingSet(const DeviceAddress& address,
-                                                  bool extended_pdu) = 0;
+  virtual std::optional<CommandPacket> BuildRemoveAdvertisingSet(
+      AdvertisementId advertisement_id) const = 0;
 
   // Called when the command packet created with BuildSetAdvertisingParams
   // returns with a result
@@ -287,21 +312,26 @@ class LowEnergyAdvertiser : public LocalAddressClient {
                                 const AdvertisingData& scan_rsp,
                                 const AdvertisingOptions& options,
                                 ConnectionCallback connect_callback,
-                                hci::ResultFunction<> callback);
+                                StartAdvertisingInternalCallback callback);
+
+  // Unconditionally stop all advertising (all checks muts be performed in the
+  // methods that call this one).
+  void StopAdvertisingInternal(fit::function<void(Result<>)> result_cb);
 
   // Unconditionally stop advertising (all checks muts be performed in the
   // methods that call this one).
-  void StopAdvertisingInternal(const DeviceAddress& address, bool extended_pdu);
+  void StopAdvertisingInternal(AdvertisementId advertisement_id,
+                               fit::function<void(Result<>)> result_cb);
 
   // Handle shared housekeeping tasks when an incoming connection is completed
   // (e.g. clean up internal state, call callbacks, etc)
   void CompleteIncomingConnection(
-      hci_spec::ConnectionHandle handle,
+      hci_spec::ConnectionHandle connection_handle,
       pw::bluetooth::emboss::ConnectionRole role,
       const DeviceAddress& local_address,
       const DeviceAddress& peer_address,
       const hci_spec::LEConnectionParameters& conn_params,
-      bool extended_pdu);
+      std::optional<AdvertisementId> advertisement_id);
 
   SequentialCommandRunner& hci_cmd_runner() const { return *hci_cmd_runner_; }
   hci::Transport::WeakPtr hci() const { return hci_; }
@@ -321,33 +351,24 @@ class LowEnergyAdvertiser : public LocalAddressClient {
   // Continuation function for starting advertising, called automatically via
   // callbacks in StartAdvertisingInternal. Developers should not call this
   // function directly.
-  bool StartAdvertisingInternalStep2(const DeviceAddress& address,
-                                     const AdvertisingOptions& options,
-                                     ConnectionCallback connect_callback,
-                                     hci::ResultFunction<> result_callback);
+  void StartAdvertisingInternalStep2(
+      AdvertisementId advertisement_id,
+      const DeviceAddress& address,
+      const AdvertisingOptions& options,
+      ConnectionCallback connect_callback,
+      StartAdvertisingInternalCallback result_callback);
 
   // Enqueue onto the HCI command runner the HCI commands necessary to stop
   // advertising and completely remove a given address from the controller's
   // memory. If even one of the HCI commands cannot be generated for some
   // reason, no HCI commands are enqueued.
-  bool EnqueueStopAdvertisingCommands(const DeviceAddress& address,
-                                      bool extended_pdu);
+  bool EnqueueStopAdvertisingCommands(hci::AdvertisementId advertisement_id);
 
   hci::Transport::WeakPtr hci_;
   std::unique_ptr<SequentialCommandRunner> hci_cmd_runner_;
   StagedParameters staged_parameters_;
 
-  struct TupleKeyHasher {
-    size_t operator()(const std::tuple<DeviceAddress, bool>& t) const {
-      std::hash<DeviceAddress> device_address_hasher;
-      std::hash<bool> bool_hasher;
-      const auto& [address, extended_pdu] = t;
-      return device_address_hasher(address) ^ bool_hasher(extended_pdu);
-    }
-  };
-  std::unordered_map<std::tuple<DeviceAddress, bool>,
-                     ConnectionCallback,
-                     TupleKeyHasher>
+  std::unordered_map<hci::AdvertisementId, ConnectionCallback>
       connection_callbacks_;
 
   uint16_t max_advertising_data_length_ = hci_spec::kMaxLEAdvertisingDataLength;

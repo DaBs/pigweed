@@ -23,7 +23,7 @@ message TestCaseDescriptor {
   // Name of the test case.
   string test_name = 2;
 
-  // Path to the file in which the test case is defined.
+  // Path to the file in which the test case (TEST macro) is defined.
   string file_name = 3;
 }
 
@@ -39,6 +39,10 @@ message TestCaseExpectation {
 
   // Whether the expectation succeeded.
   bool success = 4;
+
+  // Path to the file where the expectation is located. This file may be
+  // different from the `file_name` in the `TestCaseDescriptor`.
+  string file_name = 5;
 }
 
 enum TestCaseResult {

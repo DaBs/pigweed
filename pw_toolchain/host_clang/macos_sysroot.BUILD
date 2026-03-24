@@ -16,28 +16,25 @@ load("@bazel_skylib//rules/directory:directory.bzl", "directory")
 load("@bazel_skylib//rules/directory:subdirectory.bzl", "subdirectory")
 load("@rules_cc//cc/toolchains/args:sysroot.bzl", "cc_sysroot")
 
-package(default_visibility = ["//visibility:public"])
-
 cc_sysroot(
     name = "sysroot",
     sysroot = ":root",
-    data = glob([
-        "usr/lib/*.tbd",
-        "System/Library/Frameworks/*/*.tbd",
-    ]),
+    data = [":root"],
     allowlist_include_directories = [
         ":usr-include",
         ":CoreFoundation.framework-Headers",
         ":IOKit.framework-Headers",
         ":Security.framework-Headers",
     ],
+    visibility = ["//visibility:public"]
 )
 
 directory(
     name = "root",
     srcs = glob([
         "usr/include/**/*",
-        "usr/lib/**/*",
+        "usr/lib/*.tbd",
+        "System/Library/Frameworks/*/*.tbd",
         "System/Library/Frameworks/CoreFoundation.framework/**/*",
         "System/Library/Frameworks/IOKit.framework/**/*",
         "System/Library/Frameworks/Security.framework/**/*",
@@ -48,6 +45,7 @@ subdirectory(
     name = "usr-include",
     parent = ":root",
     path = "usr/include",
+    visibility = ["@pigweed//pw_toolchain:__subpackages__"],
 )
 
 # Eventually, it's probably better to expose frameworks as cc_args with a
@@ -58,16 +56,19 @@ subdirectory(
     name = "CoreFoundation.framework-Headers",
     parent = ":root",
     path = "System/Library/Frameworks/CoreFoundation.framework/Headers",
+    visibility = ["@pigweed//pw_toolchain:__subpackages__"],
 )
 
 subdirectory(
     name = "IOKit.framework-Headers",
     parent = ":root",
     path = "System/Library/Frameworks/IOKit.framework/Headers",
+    visibility = ["@pigweed//pw_toolchain:__subpackages__"],
 )
 
 subdirectory(
     name = "Security.framework-Headers",
     parent = ":root",
     path = "System/Library/Frameworks/Security.framework/Headers",
+    visibility = ["@pigweed//pw_toolchain:__subpackages__"],
 )

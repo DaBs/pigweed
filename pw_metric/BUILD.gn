@@ -1,4 +1,4 @@
-# Copyright 2020 The Pigweed Authors
+# Copyright 2025 The Pigweed Authors
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may not
 # use this file except in compliance with the License. You may obtain a copy of
@@ -16,10 +16,11 @@ import("//build_overrides/pigweed.gni")
 
 import("$dir_pw_bloat/bloat.gni")
 import("$dir_pw_build/target_types.gni")
-import("$dir_pw_docgen/docs.gni")
+import("$dir_pw_chrono/backend.gni")
 import("$dir_pw_protobuf_compiler/proto.gni")
-import("$dir_pw_third_party/nanopb/nanopb.gni")
+import("$dir_pw_sync/backend.gni")
 import("$dir_pw_unit_test/test.gni")
+import("$pw_external_nanopb/nanopb.gni")
 
 config("default_config") {
   include_dirs = [ "public" ]
@@ -27,9 +28,14 @@ config("default_config") {
 
 pw_source_set("pw_metric") {
   public_configs = [ ":default_config" ]
-  public = [ "public/pw_metric/metric.h" ]
+  public = [
+    "public/pw_metric/list.h",
+    "public/pw_metric/metric.h",
+  ]
   sources = [ "metric.cc" ]
   public_deps = [
+    "$dir_pw_memory:no_destructor",
+    "$dir_pw_numeric:checked_arithmetic",
     "$dir_pw_tokenizer:base64",
     dir_pw_assert,
     dir_pw_containers,
@@ -71,11 +77,14 @@ pw_proto_library("metric_service_proto") {
 # Common MetricWalker/MetricWriter used by RPC service.
 pw_source_set("metric_walker") {
   visibility = [ ":*" ]
-  public = [ "pw_metric_private/metric_walker.h" ]
+  public = [ "public/pw_metric/metric_walker.h" ]
+  sources = [ "metric_walker.cc" ]
   deps = [
     ":pw_metric",
     "$dir_pw_assert:assert",
     "$dir_pw_containers",
+    "$dir_pw_function",
+    "$dir_pw_result",
     "$dir_pw_status",
     "$dir_pw_tokenizer",
   ]
@@ -87,9 +96,14 @@ if (dir_pw_third_party_nanopb != "") {
     public_deps = [
       ":metric_service_proto.nanopb_rpc",
       ":pw_metric",
+      "$dir_pw_containers:intrusive_list",
+      "$dir_pw_status",
       dir_pw_span,
     ]
-    public = [ "public/pw_metric/metric_service_nanopb.h" ]
+    public = [
+      "public/pw_metric/metric_service_nanopb.h",
+      "public/pw_metric/nanopb_metric_writer.h",
+    ]
     deps = [
       ":metric_service_proto.nanopb_rpc",
       ":metric_walker",
@@ -103,15 +117,20 @@ if (dir_pw_third_party_nanopb != "") {
     deps = [
       ":global",
       ":metric_service_nanopb",
+      ":metric_walker",
+      "$dir_pw_rpc:test_helpers",
       "$dir_pw_rpc/nanopb:test_method_context",
     ]
     sources = [ "metric_service_nanopb_test.cc" ]
+    enable_if = pw_chrono_SYSTEM_CLOCK_BACKEND != "" &&
+                pw_sync_COUNTING_SEMAPHORE_BACKEND != ""
   }
 }
 
 pw_source_set("metric_service_pwpb") {
   public_configs = [ ":default_config" ]
   public_deps = [
+    ":metric_service_proto.pwpb",
     ":metric_service_proto.raw_rpc",
     ":metric_walker",
     ":pw_metric",
@@ -119,13 +138,16 @@ pw_source_set("metric_service_pwpb") {
     "$dir_pw_containers",
     "$dir_pw_rpc/raw:server_api",
   ]
-  public = [ "public/pw_metric/metric_service_pwpb.h" ]
+  public = [
+    "public/pw_metric/metric_service_pwpb.h",
+    "public/pw_metric/pwpb_metric_writer.h",
+  ]
   deps = [
-    ":metric_service_proto.pwpb",
     ":metric_service_proto.raw_rpc",
     "$dir_pw_assert",
     "$dir_pw_containers:vector",
     "$dir_pw_preprocessor",
+    "$dir_pw_protobuf",
     "$dir_pw_span",
     "$dir_pw_status",
   ]
@@ -137,10 +159,19 @@ pw_test("metric_service_pwpb_test") {
     ":global",
     ":metric_service_proto.pwpb",
     ":metric_service_pwpb",
+    ":metric_walker",
+    "$dir_pw_rpc:test_helpers",
     "$dir_pw_rpc/pwpb:test_method_context",
     "$dir_pw_rpc/raw:test_method_context",
+    "$dir_pw_stream",
   ]
   sources = [ "metric_service_pwpb_test.cc" ]
+
+  # This test depends on pw_rpc:test_helpers, which requires a system_clock
+  # and counting_semaphore backend. This conditionally disables the test for
+  # toolchains that do not provide these backends.
+  enable_if = pw_chrono_SYSTEM_CLOCK_BACKEND != "" &&
+              pw_sync_COUNTING_SEMAPHORE_BACKEND != ""
 }
 
 ################################################################################
@@ -170,31 +201,4 @@ pw_test("global_test") {
   if (pw_build_EXECUTABLE_TARGET_TYPE == "pico_executable") {
     enable_if = false
   }
-}
-
-pw_size_diff("metric_size_report") {
-  title = "Typical pw_metric use (no RPC service)"
-
-  binaries = [
-    {
-      target = "size_report:one_metric"
-      base = "size_report:base"
-      label = "1 metric and 1 group no dump or export"
-    },
-    {
-      target = "size_report:dump"
-      base = "size_report:base"
-      label = "(+) dump group and metrics to log"
-    },
-    {
-      target = "size_report:more_metrics"
-      base = "size_report:dump"
-      label = "(+) 1 group (+) 4 metrics"
-    },
-  ]
-}
-
-pw_doc_group("docs") {
-  sources = [ "docs.rst" ]
-  report_deps = [ ":metric_size_report" ]
 }

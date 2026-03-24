@@ -13,6 +13,7 @@
 // the License.
 
 #pragma once
+#include "pw_bluetooth_sapphire/internal/host/hci/advertising_handle_map.h"
 #include "pw_bluetooth_sapphire/internal/host/hci/low_energy_advertiser.h"
 
 namespace bt::hci {
@@ -38,22 +39,20 @@ class LegacyLowEnergyAdvertiser final : public LowEnergyAdvertiser {
   // 1. If called while a start request is pending, reports kRepeatedAttempts.
   // 2. If called while a stop request is pending, then cancels the stop request
   //    and proceeds with start.
-  void StartAdvertising(const DeviceAddress& address,
-                        const AdvertisingData& data,
-                        const AdvertisingData& scan_rsp,
-                        const AdvertisingOptions& options,
-                        ConnectionCallback connect_callback,
-                        ResultFunction<> result_callback) override;
+  void StartAdvertising(
+      const DeviceAddress& address,
+      const AdvertisingData& data,
+      const AdvertisingData& scan_rsp,
+      const AdvertisingOptions& options,
+      ConnectionCallback connect_callback,
+      ResultFunction<AdvertisementId> result_callback) override;
 
-  void StopAdvertising() override;
+  void StopAdvertising(
+      fit::function<void(Result<>)> result_cb = nullptr) override;
 
-  // If called while a stop request is pending, returns false.
-  // If called while a start request is pending, then cancels the start
-  // request and proceeds with start.
-  // Returns false if called while not advertising.
-  // TODO(fxbug.dev/42127634): Update documentation.
-  void StopAdvertising(const DeviceAddress& address,
-                       bool extended_pdu) override;
+  void StopAdvertising(
+      AdvertisementId advertisement_id,
+      fit::function<void(Result<>)> result_cb = nullptr) override;
 
   void OnIncomingConnection(
       hci_spec::ConnectionHandle handle,
@@ -63,36 +62,41 @@ class LegacyLowEnergyAdvertiser final : public LowEnergyAdvertiser {
 
  private:
   CommandPacket BuildEnablePacket(
-      const DeviceAddress& address,
-      pw::bluetooth::emboss::GenericEnableParam enable,
-      bool extended_pdu) override;
+      AdvertisementId advertisement_id,
+      pw::bluetooth::emboss::GenericEnableParam enable) const override;
 
-  std::optional<CommandPacket> BuildSetAdvertisingParams(
+  std::optional<SetAdvertisingParams> BuildSetAdvertisingParams(
       const DeviceAddress& address,
       const AdvertisingEventProperties& properties,
       pw::bluetooth::emboss::LEOwnAddressType own_address_type,
-      const AdvertisingIntervalRange& interval,
-      bool extended_pdu) override;
+      const AdvertisingIntervalRange& interval) override;
+
+  std::optional<CommandPacket> BuildSetAdvertisingRandomAddr(
+      AdvertisementId advertisement_id) const override;
 
   std::vector<CommandPacket> BuildSetAdvertisingData(
-      const DeviceAddress& address,
+      AdvertisementId advertisement_id,
       const AdvertisingData& data,
-      AdvFlags flags,
-      bool extended_pdu) override;
+      AdvFlags flags) const override;
 
-  CommandPacket BuildUnsetAdvertisingData(const DeviceAddress& address,
-                                          bool extended_pdu) override;
+  CommandPacket BuildUnsetAdvertisingData(
+      AdvertisementId advertisement_id) const override;
 
   std::vector<CommandPacket> BuildSetScanResponse(
-      const DeviceAddress& address,
-      const AdvertisingData& scan_rsp,
-      bool extended_pdu) override;
+      AdvertisementId advertisement_id,
+      const AdvertisingData& scan_rsp) const override;
 
-  CommandPacket BuildUnsetScanResponse(const DeviceAddress& address,
-                                       bool extended_pdu) override;
+  CommandPacket BuildUnsetScanResponse(
+      AdvertisementId advertisement_id) const override;
 
-  CommandPacket BuildRemoveAdvertisingSet(const DeviceAddress& address,
-                                          bool extended_pdu) override;
+  std::optional<CommandPacket> BuildRemoveAdvertisingSet(
+      AdvertisementId) const override {
+    return std::nullopt;
+  }
+
+  void ResetAdvertisingState();
+
+  void OnCurrentOperationComplete() override;
 
   // |starting_| is set to true if a start is pending.
   // |staged_params_| are the parameters that will be advertised.
@@ -102,11 +106,14 @@ class LegacyLowEnergyAdvertiser final : public LowEnergyAdvertiser {
     AdvertisingData scan_rsp;
     AdvertisingOptions options;
     ConnectionCallback connect_callback;
-    ResultFunction<> result_callback;
+    StartAdvertisingInternalCallback result_callback;
   };
   std::optional<StagedParams> staged_params_;
   bool starting_ = false;
   DeviceAddress local_address_;
+  std::optional<AdvertisementId> active_advertisement_id_;
+  AdvertisementId::value_t next_advertisement_id_ = 1;
+  std::queue<fit::closure> op_queue_;
 
   BT_DISALLOW_COPY_AND_ASSIGN_ALLOW_MOVE(LegacyLowEnergyAdvertiser);
 };

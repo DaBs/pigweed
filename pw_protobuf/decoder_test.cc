@@ -16,7 +16,10 @@
 
 #include <cstring>
 
+#include "pw_fuzzer/asan_interface.h"
+#include "pw_fuzzer/fuzztest.h"
 #include "pw_preprocessor/util.h"
+#include "pw_protobuf/wire_format.h"
 #include "pw_unit_test/framework.h"
 
 namespace pw::protobuf {
@@ -124,6 +127,63 @@ TEST(Decoder, Decode) {
   EXPECT_STREQ(buffer, "Hello world");
 
   EXPECT_EQ(decoder.Next(), Status::OutOfRange());
+}
+
+TEST(Decoder, GetFieldKey) {
+  // clang-format off
+  uint8_t encoded_proto[] = {
+    // type=int32, k=1, v=42
+    0x08, 0x2a,
+    // type=fixed32, k=5, v=0xdeadbeef
+    0x2d, 0xef, 0xbe, 0xad, 0xde,
+    // type=string, k=6, v="Hello"
+    0x32, 0x05, 'H', 'e', 'l', 'l', 'o',
+  };
+  // clang-format on
+
+  Decoder decoder(as_bytes(span(encoded_proto)));
+
+  EXPECT_EQ(decoder.Next(), OkStatus());
+  Result<FieldKey> key1 = decoder.GetFieldKey();
+  ASSERT_EQ(key1.status(), OkStatus());
+  EXPECT_EQ(key1.value().field_number(), 1u);
+  EXPECT_EQ(key1.value().wire_type(), WireType::kVarint);
+
+  EXPECT_EQ(decoder.Next(), OkStatus());
+  Result<FieldKey> key2 = decoder.GetFieldKey();
+  ASSERT_EQ(key2.status(), OkStatus());
+  EXPECT_EQ(key2.value().field_number(), 5u);
+  EXPECT_EQ(key2.value().wire_type(), WireType::kFixed32);
+
+  EXPECT_EQ(decoder.Next(), OkStatus());
+  Result<FieldKey> key3 = decoder.GetFieldKey();
+  ASSERT_EQ(key3.status(), OkStatus());
+  EXPECT_EQ(key3.value().field_number(), 6u);
+  EXPECT_EQ(key3.value().wire_type(), WireType::kDelimited);
+}
+
+TEST(Decoder, GetFieldKey_Fixed64) {
+  // clang-format off
+  uint8_t encoded_proto[] = {
+    // type=fixed64, k=2, v=0x0123456789abcdef
+    0x11, 0xef, 0xcd, 0xab, 0x89, 0x67, 0x45, 0x23, 0x01,
+  };
+  // clang-format on
+  Decoder decoder(as_bytes(span(encoded_proto)));
+  EXPECT_EQ(decoder.Next(), OkStatus());
+  Result<FieldKey> key = decoder.GetFieldKey();
+  ASSERT_EQ(key.status(), OkStatus());
+  EXPECT_EQ(key.value().field_number(), 2u);
+  EXPECT_EQ(key.value().wire_type(), WireType::kFixed64);
+}
+
+TEST(Decoder, GetFieldKey_BadData) {
+  // A field key that is too large (invalid varint/key).
+  uint8_t encoded_proto[] = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x01};
+
+  Decoder decoder(as_bytes(span(encoded_proto)));
+  EXPECT_EQ(decoder.Next(), Status::DataLoss());
+  EXPECT_EQ(decoder.GetFieldKey().status(), Status::DataLoss());
 }
 
 TEST(Decoder, Decode_SkipsUnusedFields) {
@@ -363,6 +423,41 @@ TEST(CallbackDecoder, Decode_StopsOnNonOkStatus) {
   EXPECT_EQ(handler.field_one, 42);
   EXPECT_EQ(handler.field_three, 1111);
 }
+
+TEST(Decoder, DelimitedFieldSizeLargerThanRemainingSpan_ReturnsDataLoss) {
+  std::array<std::byte, 4> input = {
+      static_cast<std::byte>(
+          static_cast<uint32_t>(FieldKey(1, WireType::kDelimited))),
+      static_cast<std::byte>(3),  // Length longer than remaining subspan.
+      static_cast<std::byte>(172),
+      static_cast<std::byte>(193)};
+  // clang-format on
+  Decoder decoder(input);
+  EXPECT_EQ(decoder.Next(), Status::DataLoss());
+}
+
+void DoesNotCrash(ConstByteSpan buffer) {
+  // Place the input buffer in the middle of a poisoned memory region to catch
+  // if the decoder attempts to read beyond its bounds in either direction.
+  static std::array<std::byte, 2048> memory_region;
+  constexpr size_t kBufferOffset = 256;
+  ByteSpan input_buffer(memory_region.data() + kBufferOffset, buffer.size());
+
+  ASAN_POISON_MEMORY_REGION(memory_region.data(), memory_region.size());
+  ASAN_UNPOISON_MEMORY_REGION(input_buffer.data(), input_buffer.size());
+
+  std::memcpy(input_buffer.data(), buffer.data(), buffer.size());
+
+  Decoder decoder(input_buffer);
+  for (int i = 0; i < 20; ++i) {
+    decoder.Next().IgnoreError();
+  }
+
+  ASAN_UNPOISON_MEMORY_REGION(memory_region.data(), memory_region.size());
+}
+
+FUZZ_TEST(Decoder, DoesNotCrash)
+    .WithDomains(fuzzer::VectorOf<64>(fuzztest::Arbitrary<std::byte>()));
 
 }  // namespace
 }  // namespace pw::protobuf

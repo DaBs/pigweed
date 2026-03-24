@@ -30,12 +30,13 @@
 namespace pw::grpc {
 
 class PwRpcHandler : public Connection::RequestCallbacks,
-                     public GrpcChannelOutput::StreamCallbacks {
+                     public GrpcChannelOutput::PwRpcHandlerInterface {
  public:
   PwRpcHandler(uint32_t channel_id, rpc::Server& server)
       : channel_id_(channel_id), server_(server) {}
 
-  // GrpcChannelOutput::StreamCallbacks
+  // GrpcChannelOutput::PwRpcHandlerInterface
+  Result<rpc::MethodType> LookupMethodType(uint32_t call_id) override;
   void OnClose(StreamId id) override;
 
   // Connection::RequestCallbacks
@@ -56,12 +57,14 @@ class PwRpcHandler : public Connection::RequestCallbacks,
     // Used for client streaming to determine whether initial request packet has
     // been sent on yet.
     bool sent_request = false;
+    bool half_closed = false;
   };
 
   // Returns copy of stream state so service/method id can be used unlocked.
   Result<Stream> LookupStream(StreamId id);
   void ResetAllStreams();
   void ResetStream(StreamId id);
+  void HalfCloseStream(StreamId id);
   void MarkSentRequest(StreamId id);
   Status CreateStream(StreamId id,
                       uint32_t service_id,

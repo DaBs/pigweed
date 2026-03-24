@@ -49,7 +49,7 @@ following simplified model, ignoring most of their member functions:
 
    namespace std::chrono {
 
-   template<class Rep, class Period = std::ratio<1, 1>>
+   template <class Rep, class Period = std::ratio<1, 1>>
    class duration {
     public:
      using rep = Rep;
@@ -57,9 +57,7 @@ following simplified model, ignoring most of their member functions:
 
      constexpr rep count() const { return tick_count_; }
 
-     static constexpr duration zero() noexcept {
-       return duration(0);
-     }
+     static constexpr duration zero() noexcept { return duration(0); }
 
      // Other member functions...
 
@@ -67,7 +65,7 @@ following simplified model, ignoring most of their member functions:
      rep tick_count_;
    };
 
-   template<class Clock, class Duration = typename Clock::duration>
+   template <class Clock, class Duration = typename Clock::duration>
    class time_point {
     public:
      using duration = Duration;
@@ -131,9 +129,7 @@ As an example you can use these as follows:
 
    #include <chrono>
 
-   void Foo() {
-     Bar(std::chrono::milliseconds(42));
-   }
+   void Foo() { Bar(std::chrono::milliseconds(42)); }
 
 In addition, the inline namespace ``std::literals::chrono_literals`` includes:
 
@@ -151,9 +147,7 @@ As an example you can use these as follows:
    using std::literals::chrono_literals::ms;
    // Or if you want them all: using namespace std::chrono_literals;
 
-   void Foo() {
-     Bar(42ms);
-   }
+   void Foo() { Bar(42ms); }
 
 For these helper duration types to be compatible with API's that take a
 `SystemClock::duration` either an :ref:`implicit<Implicit lossless conversions>`
@@ -180,6 +174,7 @@ a 1kHz RTOS tick period and you would like to express a timeout duration:
    // We can instead use a defined clock and its duration for the kernel and rely
    // on implicit lossless conversions:
    #include <chrono>
+
    #include "pw_chrono/system_clock.h"
    constexpr SystemClock::duration kFooNotificationTimeout =
        std::chrono::milliseconds(42);
@@ -215,8 +210,7 @@ some values like ``0``, ``1000``, etc.
 
    #include <chrono>
 
-   constexpr std::chrono::milliseconds this_compiles =
-       std::chrono::seconds(42);
+   constexpr std::chrono::milliseconds this_compiles = std::chrono::seconds(42);
 
    // This cannot compile, because for some duration values it is lossy even
    // though this particular value can be in theory converted to whole seconds.
@@ -423,11 +417,6 @@ clock may vary due to sleep modes and potential interrupt handling.
 This clock is used for expressing timeout and deadline semantics with the
 scheduler in Pigweed including pw_sync, pw_thread, etc.
 
-C++
----
-.. doxygenstruct:: pw::chrono::SystemClock
-   :members:
-
 Example in C++
 --------------
 .. code-block:: cpp
@@ -449,23 +438,15 @@ Example in C++
 VirtualClock
 ============
 Pigweed also includes a virtual base class for timers,
-:cpp:class:`pw::chrono::VirtualClock`. This class allows for writing
+:cc:`pw::chrono::VirtualClock`. This class allows for writing
 timing-sensitive code that can be tested using simulated clocks such as
-:cpp:class:`pw::chrono::SimulatedSystemClock`.
+:cc:`pw::chrono::SimulatedSystemClock`.
 
 Using simulated clocks in tests allow tests to avoid sleeping or timeouts,
 resulting in faster and more reliable tests.
 
-See also :cpp:class:`pw::async2::TimeProvider` for creating testable
+See also :cc:`pw::async2::TimeProvider` for creating testable
 time-sensitive code using asynchronous timers.
-
-.. doxygenclass:: pw::chrono::VirtualClock
-  :members:
-
-.. doxygenclass:: pw::chrono::SimulatedSystemClock
-  :members:
-
-
 
 Protobuf
 ========
@@ -517,11 +498,6 @@ interrupt, meaning:
 
 C++
 ---
-.. doxygenclass:: pw::chrono::SystemTimer
-   :members:
-
-.. cpp:namespace-push:: pw::chrono::SystemTimer
-
 .. list-table::
    :widths: 70 10 10 10
    :header-rows: 1
@@ -530,28 +506,26 @@ C++
      - Thread
      - Interrupt
      - NMI
-   * - :cpp:func:`pw::chrono::SystemTimer::SystemTimer`
+   * - :cc:`pw::chrono::SystemTimer::SystemTimer`
      - ✔
      -
      -
-   * - :cpp:func:`pw::chrono::SystemTimer::~SystemTimer`
+   * - :cc:`pw::chrono::SystemTimer::~SystemTimer`
      - ✔
      -
      -
-   * - :cpp:func:`InvokeAfter`
+   * - :cc:`pw::chrono::SystemTimer::InvokeAfter`
      - ✔
      -
      -
-   * - :cpp:func:`InvokeAt`
+   * - :cc:`pw::chrono::SystemTimer::InvokeAt`
      - ✔
      -
      -
-   * - :cpp:func:`Cancel`
+   * - :cc:`pw::chrono::SystemTimer::Cancel`
      - ✔
      -
      -
-
-.. cpp:namespace-pop::
 
 Example in C++
 --------------
@@ -612,6 +586,11 @@ Wrap ``gettimeofday`` and ``time`` with an implementation that uses
 determined by the SystemClock backend epoch, which on most embedded systems will
 be time since boot. Use this option if you don't care about the time returned
 being close to actual time, but do care that it increments like a real clock.
+
+-------------
+API reference
+-------------
+Moved: :cc:`pw_chrono`
 
 .. toctree::
    :hidden:

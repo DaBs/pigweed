@@ -79,8 +79,12 @@ bool BrEdrConnection::StartEncryption() {
   if (!hci().is_alive()) {
     return false;
   }
-  return hci()->command_channel()->SendCommand(
-      std::move(cmd), std::move(event_cb), hci_spec::kCommandStatusEventCode);
+  return hci()
+      ->command_channel()
+      ->SendCommand(std::move(cmd),
+                    std::move(event_cb),
+                    hci_spec::kCommandStatusEventCode)
+      .ok();
 }
 
 void BrEdrConnection::HandleEncryptionStatus(Result<bool> result,
@@ -161,7 +165,10 @@ void BrEdrConnection::ValidateEncryptionKeySize(
     }
     valid_cb(result);
   };
-  hci()->command_channel()->SendCommand(std::move(cmd), std::move(event_cb));
+  hci()
+      ->command_channel()
+      ->SendCommand(std::move(cmd), std::move(event_cb))
+      .IgnoreError();
 }
 
 }  // namespace bt::hci

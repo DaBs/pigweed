@@ -22,17 +22,26 @@ outbazel/
 .presubmit/
 docs/_build
 twister-out*/
+twister-template-build/
+
+# TODO: https://pwbug.dev/419060696 - Temporarily exclude /external until we
+# have a better solution for making these Bazel paths visible to clangd.
+/external
 
 # Editors
 .pw_ide/
+.compile_commands/
+tools/bazel
 .vscode/*
 !.vscode/OWNERS
 !.vscode/pw_project_*.json
+*.code-workspace
 .idea/
 .ijwb/
 .project
 .cproject
 # Clangd directories
+.clangd
 .clangd/
 /.cache/clangd/
 # Vim
@@ -54,6 +63,7 @@ twister-out*/
 .mypy_cache/
 __pycache__/
 build/
+!docs/sphinx/build
 dist/
 
 # PyOxidizer
@@ -79,7 +89,7 @@ pw_env_setup/py/oxidizer/build
 # Env Setup
 environment
 .environment
-build_overrides/pigweed_environment.gni
+
 
 # Web Tools
 node_modules
@@ -98,3 +108,10 @@ yarn-error.log
 # Console Logs
 pw_console-logs.txt
 pw_console-device-logs.txt
+
+# AI files
+.aider*
+.gemini/logs.json
+
+# Docs
+docs/sphinx/changelog/*/*/dropped.rst

@@ -24,7 +24,6 @@ pub mod __private {
     use pw_status::Result;
     use pw_stream::{Cursor, Write};
     use pw_tokenizer::MessageWriter;
-
     // Re-export for use by the `pw_logf_backend!` macro.
     pub use pw_tokenizer::{tokenize_core_fmt_to_writer, tokenize_printf_to_writer};
 
@@ -37,13 +36,15 @@ pub mod __private {
         cursor: Cursor<[u8; ENCODE_BUFFER_SIZE]>,
     }
 
-    impl MessageWriter for LogMessageWriter {
-        fn new() -> Self {
+    impl Default for LogMessageWriter {
+        fn default() -> Self {
             Self {
                 cursor: Cursor::new([0u8; ENCODE_BUFFER_SIZE]),
             }
         }
+    }
 
+    impl MessageWriter for LogMessageWriter {
         fn write(&mut self, data: &[u8]) -> Result<()> {
             self.cursor.write_all(data)
         }

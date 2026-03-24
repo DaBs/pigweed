@@ -1,0 +1,125 @@
+# Copyright 2025 The Pigweed Authors
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may not
+# use this file except in compliance with the License. You may obtain a copy of
+# the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations under
+# the License.
+
+import("//build_overrides/pigweed.gni")
+
+import("$dir_pigweed/third_party/emboss/emboss.gni")
+import("$dir_pw_build/target_types.gni")
+import("$dir_pw_thread/backend.gni")
+import("$dir_pw_unit_test/test.gni")
+
+config("public_include_path") {
+  include_dirs = [ "public" ]
+  visibility = [ ":*" ]
+}
+
+# LINT.IfChange
+
+_pw_bluetooth_proxy_gatt_public_deps = [
+  "$dir_pw_assert:check",
+  "$dir_pw_containers:dynamic_vector",
+  "$dir_pw_containers:intrusive_map",
+  dir_pw_allocator,
+  dir_pw_log,
+]
+
+_pw_bluetooth_proxy_gatt_deps = [
+  "$dir_pw_bluetooth:emboss_att",
+  "$dir_pw_bluetooth:emboss_util",
+  "$dir_pw_span:cast",
+]
+
+_pw_bluetooth_proxy_gatt_srcs = [ "gatt.cc" ]
+
+# LINT.ThenChange(Anfroid.bp, gatt.bzl, CMakeLists.txt)
+
+# LINT.IfChange
+
+pw_source_set("gatt") {
+  public = [ "public/pw_bluetooth_proxy/gatt/gatt.h" ]
+  public_configs = [ ":public_include_path" ]
+  public_deps =
+      _pw_bluetooth_proxy_gatt_public_deps + [ "$dir_pw_bluetooth_proxy" ]
+  deps = _pw_bluetooth_proxy_gatt_deps
+  sources = _pw_bluetooth_proxy_gatt_srcs
+}
+
+pw_source_set("gatt_sync") {
+  testonly = pw_unit_test_TESTONLY
+  public = [ "public/pw_bluetooth_proxy/gatt/gatt.h" ]
+  public_configs = [ ":public_include_path" ]
+  public_deps = _pw_bluetooth_proxy_gatt_public_deps +
+                [ "$dir_pw_bluetooth_proxy:pw_bluetooth_proxy_sync" ]
+  deps = _pw_bluetooth_proxy_gatt_deps
+  sources = _pw_bluetooth_proxy_gatt_srcs
+  visibility = [ ":*" ]
+}
+
+pw_source_set("gatt_async") {
+  testonly = pw_unit_test_TESTONLY
+  public = [ "public/pw_bluetooth_proxy/gatt/gatt.h" ]
+  public_configs = [ ":public_include_path" ]
+  public_deps = _pw_bluetooth_proxy_gatt_public_deps +
+                [ "$dir_pw_bluetooth_proxy:pw_bluetooth_proxy_async" ]
+  deps = _pw_bluetooth_proxy_gatt_deps
+  sources = _pw_bluetooth_proxy_gatt_srcs
+  visibility = [ ":*" ]
+}
+
+_pw_bluetooth_proxy_gatt_test_deps = [
+  "$dir_pw_allocator:libc_allocator",
+  "$dir_pw_allocator:synchronized_allocator",
+  "$dir_pw_allocator:testing",
+  "$dir_pw_containers:vector",
+  "$dir_pw_multibuf:simple_allocator",
+  "$dir_pw_span:cast",
+  "$dir_pw_sync:no_lock",
+]
+
+pw_test("gatt_sync_test") {
+  enable_if = dir_pw_third_party_emboss != "" && pw_thread_ID_BACKEND != ""
+  deps = _pw_bluetooth_proxy_gatt_test_deps + [ ":gatt_sync" ]
+  sources = [ "gatt_test.cc" ]
+}
+
+pw_test("gatt_async_test") {
+  enable_if = dir_pw_third_party_emboss != "" && pw_thread_ID_BACKEND != ""
+  deps = _pw_bluetooth_proxy_gatt_test_deps + [ ":gatt_async" ]
+  sources = [ "gatt_test.cc" ]
+}
+
+pw_test("gatt_integration_test") {
+  enable_if =
+      dir_pw_third_party_emboss != "" && pw_thread_THREAD_BACKEND != "" &&
+      pw_thread_TEST_THREAD_CONTEXT_BACKEND != ""
+  sources = [ "gatt_integration_test.cc" ]
+  deps = [
+    ":gatt_async",
+    "$dir_pw_allocator:testing",
+    "$dir_pw_bluetooth_proxy:test_utils_async",
+    "$dir_pw_containers:vector",
+    "$dir_pw_multibuf:from_span",
+    "$dir_pw_span:cast",
+  ]
+}
+
+# LINT.ThenChange(gatt.bzl, CMakeLists.txt)
+
+pw_test_group("tests") {
+  tests = [
+    ":gatt_sync_test",
+    ":gatt_async_test",
+    ":gatt_integration_test",
+  ]
+}

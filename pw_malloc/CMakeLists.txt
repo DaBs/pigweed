@@ -13,10 +13,11 @@
 # the License.
 
 include($ENV{PW_ROOT}/pw_build/pigweed.cmake)
+include($ENV{PW_ROOT}/pw_malloc/backend.cmake)
 
 pw_add_module_config(pw_malloc_CONFIG)
 
-pw_add_facade(pw_malloc INTERFACE
+pw_add_facade(pw_malloc STATIC
   BACKEND
     pw_malloc_BACKEND
   HEADERS
@@ -51,7 +52,7 @@ pw_add_library(pw_malloc.common INTERFACE
     pw_allocator.tracking_allocator
     pw_assert
     pw_bytes
-    pw_preprocessor
+    pw_numeric.checked_arithmetic
   PUBLIC_LINK_OPTIONS
     "-Wl,--wrap=malloc"
     "-Wl,--wrap=free"
@@ -108,10 +109,79 @@ pw_add_library(pw_malloc.worst_fit STATIC
     worst_fit.cc
 )
 
-# TODO(b/343531095): Add unit tests to CMake build whenever the following
-# conditions are met:
+# pw_malloc unit tests require that:
 # * The backend is not set.
 # * The host is not "mac", due to missing linker support.
 # * No sanitizer is configured, due to conflicts with interceptors.
 # * pico_malloc is not in use.
 # * gtest is not in use, since it dynamically allocates before calling SetUp().
+if("${pw_malloc_BACKEND}" STREQUAL "" AND
+   "${pw_unit_test_BACKEND}" STREQUAL "pw_unit_test.light")
+
+pw_add_library(pw_malloc.testing STATIC
+  PUBLIC_INCLUDES
+    public
+  HEADERS
+    public/pw_malloc/config.h
+    public/pw_malloc/internal/testing.h
+  PUBLIC_DEPS
+    pw_malloc.common
+  PUBLIC_DEFINES
+    PW_MALLOC_METRICS_INCLUDE="pw_malloc/internal/testing.h"
+    PW_MALLOC_METRICS_TYPE=::pw::malloc::internal::TestMetrics
+    PW_MALLOC_BLOCK_OFFSET_TYPE=uint16_t
+    PW_MALLOC_MIN_BUCKET_SIZE=64
+    PW_MALLOC_NUM_BUCKETS=4
+  PRIVATE_DEPS
+    pw_tokenizer.decoder
+    pw_unit_test.light
+  SOURCES
+    malloc.cc
+    malloc_test.cc
+)
+
+pw_add_test(pw_malloc.best_fit_test
+  SOURCES
+    best_fit.cc
+  PRIVATE_DEPS
+    pw_allocator.best_fit
+    pw_malloc.testing
+  GROUPS
+    modules
+    pw_malloc
+)
+
+pw_add_test(pw_malloc.bucket_allocator_test
+  SOURCES
+    bucket_allocator.cc
+  PRIVATE_DEPS
+    pw_allocator.bucket_allocator
+    pw_malloc.testing
+  GROUPS
+    modules
+    pw_malloc
+)
+
+pw_add_test(pw_malloc.first_fit_test
+  SOURCES
+    first_fit.cc
+  PRIVATE_DEPS
+    pw_allocator.first_fit
+    pw_malloc.testing
+  GROUPS
+    modules
+    pw_malloc
+)
+
+pw_add_test(pw_malloc.worst_fit_test
+  SOURCES
+    worst_fit.cc
+  PRIVATE_DEPS
+    pw_allocator.worst_fit
+    pw_malloc.testing
+  GROUPS
+    modules
+    pw_malloc
+)
+
+endif()

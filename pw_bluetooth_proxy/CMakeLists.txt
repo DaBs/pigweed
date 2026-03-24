@@ -13,6 +13,10 @@
 # the License.
 
 include($ENV{PW_ROOT}/pw_build/pigweed.cmake)
+include($ENV{PW_ROOT}/pw_thread/backend.cmake)
+include($ENV{PW_ROOT}/third_party/emboss/emboss.cmake)
+
+add_subdirectory(hci)
 
 ###############################################################################
 ##          Everything below here is intended to be emboss only              ##
@@ -23,127 +27,300 @@ if("${dir_pw_third_party_emboss}" STREQUAL "")
   return()
 endif()
 
-pw_add_library(pw_bluetooth_proxy STATIC
+# Module configuration
 
-# LINT.IfChange
+# TODO(b/448714138): Find a better way of creating and testing specific module
+# configurations.
+
+pw_add_module_config(pw_bluetooth_proxy_CONFIG)
+
+pw_add_library(pw_bluetooth_proxy.config INTERFACE
   HEADERS
-    public/pw_bluetooth_proxy/basic_l2cap_channel.h
-    public/pw_bluetooth_proxy/gatt_notify_channel.h
-    public/pw_bluetooth_proxy/h4_packet.h
-    public/pw_bluetooth_proxy/internal/acl_data_channel.h
-    public/pw_bluetooth_proxy/internal/gatt_notify_channel_internal.h
-    public/pw_bluetooth_proxy/internal/h4_storage.h
-    public/pw_bluetooth_proxy/internal/hci_transport.h
-    public/pw_bluetooth_proxy/internal/l2cap_aclu_signaling_channel.h
-    public/pw_bluetooth_proxy/internal/l2cap_channel.h
-    public/pw_bluetooth_proxy/internal/l2cap_channel_manager.h
-    public/pw_bluetooth_proxy/internal/l2cap_coc_internal.h
-    public/pw_bluetooth_proxy/internal/l2cap_signaling_channel.h
-    public/pw_bluetooth_proxy/internal/l2cap_status_tracker.h
-    public/pw_bluetooth_proxy/internal/l2cap_leu_signaling_channel.h
-    public/pw_bluetooth_proxy/internal/logical_transport.h
-    public/pw_bluetooth_proxy/internal/multibuf_writer.h
-    public/pw_bluetooth_proxy/internal/rfcomm_fcs.h
-    public/pw_bluetooth_proxy/l2cap_channel_common.h
-    public/pw_bluetooth_proxy/l2cap_coc.h
-    public/pw_bluetooth_proxy/l2cap_status_delegate.h
-    public/pw_bluetooth_proxy/proxy_host.h
-    public/pw_bluetooth_proxy/rfcomm_channel.h
-# LINT.ThenChange(BUILD.bazel, BUILD.gn)
-
+    public/pw_bluetooth_proxy/config.h
   PUBLIC_INCLUDES
     public
-
-# LINT.IfChange
   PUBLIC_DEPS
-    pw_allocator.best_fit
-    pw_allocator.synchronized_allocator
-    pw_bluetooth.emboss_att
-    pw_bluetooth.emboss_hci_commands
-    pw_bluetooth.emboss_hci_common
-    pw_bluetooth.emboss_hci_data
-    pw_bluetooth.emboss_hci_events
-    pw_bluetooth.emboss_hci_h4
-    pw_bluetooth.emboss_l2cap_frames
-    pw_bluetooth.emboss_rfcomm_frames
-    pw_bluetooth.emboss_util
-    pw_containers
-    pw_function
-    pw_log
-    pw_multibuf
-    pw_multibuf.simple_allocator
-    pw_result
-    pw_span
-    pw_span.cast
-    pw_status
-    pw_sync.lock_annotations
-    pw_sync.mutex
-  SOURCES
-    acl_data_channel.cc
-    basic_l2cap_channel.cc
-    gatt_notify_channel.cc
-    h4_storage.cc
-    l2cap_aclu_signaling_channel.cc
-    l2cap_channel.cc
-    l2cap_channel_manager.cc
-    l2cap_coc.cc
-    l2cap_leu_signaling_channel.cc
-    l2cap_signaling_channel.cc
-    l2cap_status_tracker.cc
-    multibuf_writer.cc
-    proxy_host.cc
-    rfcomm_channel.cc
-    rfcomm_fcs.cc
-# LINT.ThenChange(Android.bp, BUILD.bazel, BUILD.gn)
-
+    ${pw_bluetooth_proxy_CONFIG}
 )
 
-pw_add_library(pw_bluetooth_proxy.test_utils STATIC
+# LINT.IfChange
+set(PW_BLUETOOTH_PROXY_HEADERS
+  public/pw_bluetooth_proxy/basic_l2cap_channel.h
+  public/pw_bluetooth_proxy/connection_handle.h
+  public/pw_bluetooth_proxy/channel_proxy.h
+  public/pw_bluetooth_proxy/direction.h
+  public/pw_bluetooth_proxy/gatt_notify_channel.h
+  public/pw_bluetooth_proxy/h4_packet.h
+  public/pw_bluetooth_proxy/internal/acl_data_channel.h
+  public/pw_bluetooth_proxy/internal/basic_mode_tx_engine.h
+  public/pw_bluetooth_proxy/internal/basic_mode_rx_engine.h
+  public/pw_bluetooth_proxy/internal/channel_proxy_impl.h
+  public/pw_bluetooth_proxy/internal/credit_based_flow_control_tx_engine.h
+  public/pw_bluetooth_proxy/internal/credit_based_flow_control_rx_engine.h
+  public/pw_bluetooth_proxy/internal/gatt_notify_rx_engine.h
+  public/pw_bluetooth_proxy/internal/gatt_notify_tx_engine.h
+  public/pw_bluetooth_proxy/internal/generic_l2cap_channel.h
+  public/pw_bluetooth_proxy/internal/generic_l2cap_channel_sync.h
+  public/pw_bluetooth_proxy/internal/generic_l2cap_channel_async.h
+  public/pw_bluetooth_proxy/internal/hci_transport.h
+  public/pw_bluetooth_proxy/internal/l2cap_channel_manager.h
+  public/pw_bluetooth_proxy/internal/l2cap_channel_manager_sync.h
+  public/pw_bluetooth_proxy/internal/l2cap_channel_manager_async.h
+  public/pw_bluetooth_proxy/internal/l2cap_channel.h
+  public/pw_bluetooth_proxy/internal/l2cap_channel_sync.h
+  public/pw_bluetooth_proxy/internal/l2cap_channel_async.h
+  public/pw_bluetooth_proxy/internal/l2cap_signaling_channel.h
+  public/pw_bluetooth_proxy/internal/l2cap_status_tracker.h
+  public/pw_bluetooth_proxy/internal/l2cap_logical_link.h
+  public/pw_bluetooth_proxy/internal/locked_l2cap_channel.h
+  public/pw_bluetooth_proxy/internal/logical_transport.h
+  public/pw_bluetooth_proxy/internal/mutex.h
+  public/pw_bluetooth_proxy/internal/proxy_host_sync.h
+  public/pw_bluetooth_proxy/internal/proxy_host_async.h
+  public/pw_bluetooth_proxy/internal/recombiner.h
+  public/pw_bluetooth_proxy/internal/rx_engine.h
+  public/pw_bluetooth_proxy/internal/tx_engine.h
+  public/pw_bluetooth_proxy/l2cap_channel_common.h
+  public/pw_bluetooth_proxy/l2cap_channel_manager_interface.h
+  public/pw_bluetooth_proxy/l2cap_coc.h
+  public/pw_bluetooth_proxy/l2cap_coc_config.h
+  public/pw_bluetooth_proxy/l2cap_status_delegate.h
+  public/pw_bluetooth_proxy/proxy_host.h
+  public/pw_bluetooth_proxy/connection_handle.h
+  public/pw_bluetooth_proxy/channel_proxy.h
+  public/pw_bluetooth_proxy/l2cap_channel_manager_interface.h
+)
+# LINT.ThenChange(bt-proxy.bzl, BUILD.gn)
 
 # LINT.IfChange
+set(PW_BLUETOOTH_PROXY_PUBLIC_DEPS
+  pw_allocator
+  pw_allocator.best_fit
+  pw_allocator.synchronized_allocator
+  pw_async2
+  pw_async2.basic_dispatcher
+  pw_async2.channel
+  pw_bluetooth.emboss_hci_data
+  pw_bluetooth.emboss_hci_events
+  pw_bluetooth.emboss_hci_h4
+  pw_bluetooth.emboss_l2cap_frames
+  pw_bytes
+  pw_containers.flat_map
+  pw_containers.inline_queue
+  pw_containers.intrusive_map
+  pw_containers.vector
+  pw_function
+  pw_multibuf
+  pw_multibuf.simple_allocator
+  pw_result
+  pw_span
+  pw_span.cast
+  pw_status
+  pw_sync.lock_annotations
+  pw_sync.mutex
+  pw_sync.thread_notification
+  pw_thread.id
+)
+
+set(PW_BLUETOOTH_PROXY_PRIVATE_DEPS
+  pw_containers.intrusive_map
+  pw_allocator.best_fit
+  pw_allocator.synchronized_allocator
+  pw_bluetooth.emboss_att
+  pw_bluetooth.emboss_hci_commands
+  pw_bluetooth.emboss_util
+  pw_containers.algorithm
+  pw_log
+  pw_span.cast
+)
+
+set(PW_BLUETOOTH_PROXY_SOURCES
+  acl_data_channel.cc
+  basic_l2cap_channel.cc
+  basic_mode_tx_engine.cc
+  basic_mode_rx_engine.cc
+  channel_proxy_impl.cc
+  credit_based_flow_control_tx_engine.cc
+  credit_based_flow_control_rx_engine.cc
+  gatt_notify_channel.cc
+  gatt_notify_tx_engine.cc
+  generic_l2cap_channel_async.cc
+  generic_l2cap_channel_sync.cc
+  generic_l2cap_channel.cc
+  l2cap_channel_manager_async.cc
+  l2cap_channel_manager_sync.cc
+  l2cap_channel_manager.cc
+  l2cap_channel_async.cc
+  l2cap_channel_sync.cc
+  l2cap_channel.cc
+  l2cap_coc.cc
+  l2cap_signaling_channel.cc
+  l2cap_status_tracker.cc
+  l2cap_logical_link.cc
+  proxy_host.cc
+  proxy_host_async.cc
+  proxy_host_sync.cc
+  recombiner.cc
+)
+# LINT.ThenChange(Android.bp, bt-proxy.bzl, BUILD.gn)
+
+# LINT.IfChange
+
+# Libraries
+
+pw_add_library(pw_bluetooth_proxy STATIC
   HEADERS
-    pw_bluetooth_proxy_private/test_utils.h
+    ${PW_BLUETOOTH_PROXY_HEADERS}
+  PUBLIC_INCLUDES
+    public
   PUBLIC_DEPS
-    pw_bluetooth_proxy
-    pw_third_party.fuchsia.stdcompat
-    pw_bluetooth.emboss_hci_commands
-    pw_bluetooth.emboss_hci_common
-    pw_bluetooth.emboss_hci_events
-    pw_bluetooth.emboss_hci_h4
-    pw_multibuf.testing
-    pw_unit_test
+    ${PW_BLUETOOTH_PROXY_PUBLIC_DEPS}
+  PRIVATE_DEPS
+    ${PW_BLUETOOTH_PROXY_PRIVATE_DEPS}
   SOURCES
-    test_utils.cc
-# LINT.ThenChange(Android.bp, BUILD.bazel, BUILD.gn)
-
+    ${PW_BLUETOOTH_PROXY_SOURCES}
 )
 
-pw_add_test(pw_bluetooth_proxy.pw_bluetooth_proxy_test
+pw_add_library(pw_bluetooth_proxy._sync STATIC
+  HEADERS
+    ${PW_BLUETOOTH_PROXY_HEADERS}
+  PUBLIC_INCLUDES
+    public
+  PUBLIC_DEPS
+    ${PW_BLUETOOTH_PROXY_PUBLIC_DEPS}
+  PRIVATE_DEPS
+    ${PW_BLUETOOTH_PROXY_PRIVATE_DEPS}
+  SOURCES
+    ${PW_BLUETOOTH_PROXY_SOURCES}
+
+)
+target_compile_definitions(pw_bluetooth_proxy._sync PUBLIC
+  PW_BLUETOOTH_PROXY_ASYNC=0
+)
+
+pw_add_library(pw_bluetooth_proxy._async STATIC
+  HEADERS
+    ${PW_BLUETOOTH_PROXY_HEADERS}
+  PUBLIC_INCLUDES
+    public
+  PUBLIC_DEPS
+    ${PW_BLUETOOTH_PROXY_PUBLIC_DEPS}
+  PRIVATE_DEPS
+    ${PW_BLUETOOTH_PROXY_PRIVATE_DEPS}
+  SOURCES
+    ${PW_BLUETOOTH_PROXY_SOURCES}
+)
+target_compile_definitions(pw_bluetooth_proxy._async PUBLIC
+  PW_BLUETOOTH_PROXY_ASYNC=1
+)
+# LINT.ThenChange(bt-proxy.bzl, BUILD.gn)
+
+# GATT depends on the above targets, so add_subdirectory() must be called last.
+add_subdirectory(gatt)
+add_subdirectory(rfcomm)
+
+# Tests
+
+# Exit early if missing test requirements.
+if(("${pw_thread.thread_BACKEND}" STREQUAL "") OR
+   ("${pw_thread.test_thread_context_BACKEND}" STREQUAL ""))
+  return()
+endif()
 
 # LINT.IfChange
-  PRIVATE_DEPS
-    pw_bluetooth_proxy
-    pw_bluetooth_proxy.test_utils
-    pw_third_party.fuchsia.stdcompat
-    pw_bluetooth.emboss_att
-    pw_bluetooth.emboss_hci_commands
-    pw_bluetooth.emboss_hci_common
-    pw_bluetooth.emboss_hci_events
-    pw_bluetooth.emboss_hci_h4
-    pw_multibuf
-  SOURCES
-    gatt_notify_test.cc
-    h4_packet_test.cc
-    l2cap_coc_test.cc
-    multibuf_writer_test.cc
-    proxy_host_test.cc
-    rfcomm_fcs_test.cc
-    rfcomm_test.cc
-    utils_test.cc
-# LINT.ThenChange(Android.bp, BUILD.bazel, BUILD.gn)
 
+set(PW_BLUETOOTH_PROXY_TEST_PRIVATE_DEPS
+  pw_allocator.testing
+  pw_assert.check
+  pw_bluetooth.emboss_att
+  pw_bluetooth.emboss_hci_commands
+  pw_multibuf.from_span
+  pw_span.cast
+)
+
+set(PW_BLUETOOTH_PROXY_TEST_SOURCES
+  basic_mode_channel_proxy_test.cc
+  basic_mode_tx_engine_test.cc
+  basic_mode_rx_engine_test.cc
+  channel_proxy_test.cc
+  credit_based_flow_control_channel_proxy_test.cc
+  credit_based_flow_control_tx_engine_test.cc
+  credit_based_flow_control_rx_engine_test.cc
+  gatt_notify_test.cc
+  gatt_notify_tx_engine_test.cc
+  h4_packet_test.cc
+  l2cap_coc_test.cc
+  proxy_host_test.cc
+  recombiner_test.cc
+  utils_test.cc
+)
+
+pw_add_test(pw_bluetooth_proxy.pw_bluetooth_proxy_sync_test
+  PRIVATE_DEPS
+    ${PW_BLUETOOTH_PROXY_TEST_PRIVATE_DEPS}
+    pw_bluetooth_proxy._sync
+    pw_bluetooth_proxy._test_utils_sync
+  SOURCES
+    ${PW_BLUETOOTH_PROXY_TEST_SOURCES}
   GROUPS
     modules
 )
 
+pw_add_test(pw_bluetooth_proxy.pw_bluetooth_proxy_async_test
+  PRIVATE_DEPS
+    ${PW_BLUETOOTH_PROXY_TEST_PRIVATE_DEPS}
+    pw_bluetooth_proxy._async
+    pw_bluetooth_proxy._test_utils_async
+  SOURCES
+    ${PW_BLUETOOTH_PROXY_TEST_SOURCES}
+  GROUPS
+    modules
+)
 
+set(PW_BLUETOOTH_PROXY_TEST_UTILS_PRIVATE_DEPS
+  pw_allocator.testing
+  pw_assert.check
+  pw_bluetooth.emboss_util
+  pw_thread.test_thread_context
+  pw_thread.thread
+  pw_allocator.libc_allocator
+  pw_async2.notified_dispatcher
+)
+
+set(PW_BLUETOOTH_PROXY_TEST_UTILS_PRIVATE_SRCS
+  test_utils.cc
+  test_utils_async.cc
+  test_utils_sync.cc
+)
+
+pw_add_library(pw_bluetooth_proxy._test_utils_sync STATIC
+  HEADERS
+    private/pw_bluetooth_proxy_private/test_utils.h
+  PUBLIC_INCLUDES
+    private
+  PUBLIC_DEPS
+    ${PW_BLUETOOTH_PROXY_TEST_UTILS_PRIVATE_DEPS}
+    pw_bluetooth_proxy._sync
+  SOURCES
+    ${PW_BLUETOOTH_PROXY_TEST_UTILS_PRIVATE_SRCS}
+)
+target_compile_definitions(pw_bluetooth_proxy._test_utils_sync PUBLIC
+  PW_BLUETOOTH_PROXY_ASYNC=0
+)
+
+pw_add_library(pw_bluetooth_proxy._test_utils_async STATIC
+  HEADERS
+    private/pw_bluetooth_proxy_private/test_utils.h
+  PUBLIC_INCLUDES
+    private
+  PUBLIC_DEPS
+    ${PW_BLUETOOTH_PROXY_TEST_UTILS_PRIVATE_DEPS}
+    pw_bluetooth_proxy._async
+  SOURCES
+    ${PW_BLUETOOTH_PROXY_TEST_UTILS_PRIVATE_SRCS}
+)
+target_compile_definitions(pw_bluetooth_proxy._test_utils_async PUBLIC
+  PW_BLUETOOTH_PROXY_ASYNC=1
+)
+
+# LINT.ThenChange(bt-proxy.bzl, BUILD.gn)

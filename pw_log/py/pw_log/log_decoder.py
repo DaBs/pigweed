@@ -113,12 +113,28 @@ class Log:
 
     def __str__(self) -> str:
         level_name = self._LOG_LEVEL_NAMES.get(self.level, '')
-        metadata = ' '.join(map(str, self.metadata_fields.values()))
-        return (
-            f'{level_name} [{self.source_name}] {self.module_name} '
-            f'{self.timestamp} {self.message} {self.file_and_line} '
-            f'{metadata}'
-        ).strip()
+        metadata = ', '.join(
+            f"{key}={value}" for key, value in self.metadata_fields.items()
+        )
+
+        parts: list[str] = []
+
+        def add_if_nonempty(
+            part: str, prefix: str = "", suffix: str = ""
+        ) -> None:
+            nonlocal parts
+            if not part:
+                return
+            parts.append(f"{prefix}{part}{suffix}")
+
+        add_if_nonempty(level_name)
+        add_if_nonempty(self.source_name, "[", "]")
+        add_if_nonempty(self.module_name)
+        add_if_nonempty(self.timestamp)
+        add_if_nonempty(self.message)
+        add_if_nonempty(self.file_and_line)
+        add_if_nonempty(metadata)
+        return " ".join(parts)
 
     @staticmethod
     def pack_line_level(line: int, logging_log_level: int) -> int:
@@ -273,7 +289,8 @@ class LogStreamDecoder:
     Performs log drop detection on the stream of LogEntries proto messages.
 
     Args:
-        decoded_log_handler: Callback called on each decoded log.
+        decoded_log_handler: Callback called on each decoded log. Required if
+          parse_log_entries_proto() is to be called.
         detokenizer: Detokenizes log messages if tokenized when provided.
         source_name: Optional string to identify the logs source.
         timestamp_parser: Optional timestamp parser number to a string.
@@ -287,10 +304,10 @@ class LogStreamDecoder:
 
     def __init__(
         self,
-        decoded_log_handler: Callable[[Log], None],
+        decoded_log_handler: Callable[[Log], None] | None = None,
         detokenizer: Detokenizer | None = None,
         source_name: str = '',
-        timestamp_parser: Callable[[int], str] | None = None,
+        timestamp_parser: Callable[[int], str] = str,
         message_parser: Callable[[str], str] | None = None,
     ):
         self.decoded_log_handler = decoded_log_handler
@@ -305,11 +322,18 @@ class LogStreamDecoder:
     ) -> None:
         """Parses each LogEntry in log_entries_proto.
 
+        Each parsed LogEntry is passed to decoded_log_handler, which must be
+        provided in the constructor.
+
         Args:
             log_entry_proto: A LogEntry message proto.
-        Returns:
-            A Log object with the decoded log_entry_proto.
+
+        Raises:
+            ValueError: If decoded_log_handler was not provided to the
+                constructor.
         """
+        if not self.decoded_log_handler:
+            raise ValueError("decoded_log_handler not set")
         has_received_logs = self._expected_log_sequence_id > 0
         dropped_log_count = self._calculate_dropped_logs(log_entries_proto)
         if dropped_log_count > 0:
@@ -391,10 +415,10 @@ class LogStreamDecoder:
         message = message_and_metadata.message
         if self.message_parser:
             message = self.message_parser(message)
-        if self.timestamp_parser:
+        if log_entry_proto.HasField("timestamp"):
             timestamp = self.timestamp_parser(log_entry_proto.timestamp)
         else:
-            timestamp = str(log_entry_proto.timestamp)
+            timestamp = ""
         log = Log(
             message=message,
             level=line_level_tuple.level,

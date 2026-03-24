@@ -75,6 +75,11 @@ Status PwRpcHandler::OnMessage(StreamId id, ByteSpan message) {
     }
     case pw::rpc::MethodType::kClientStreaming:
     case pw::rpc::MethodType::kBidirectionalStreaming: {
+      if (stream->half_closed) {
+        PW_LOG_INFO(
+            "Handler.OnMessage half closed, ignoring message id=%" PRIu32, id);
+        break;
+      }
       if (!stream->sent_request) {
         auto packet = pw::rpc::internal::Packet(PacketType::kRequest,
                                                 channel_id_,
@@ -122,7 +127,7 @@ void PwRpcHandler::OnHalfClose(StreamId id) {
                                   id,
                                   {},
                                   pw::OkStatus());
-    ResetStream(id);
+    HalfCloseStream(id);
 
     server_.ProcessPacket(packet).IgnoreError();
   }
@@ -145,6 +150,11 @@ void PwRpcHandler::OnCancel(StreamId id) {
   ResetStream(id);
 
   server_.ProcessPacket(packet).IgnoreError();
+}
+
+Result<rpc::MethodType> PwRpcHandler::LookupMethodType(uint32_t call_id) {
+  PW_TRY_ASSIGN(Stream stream, LookupStream(call_id));
+  return stream.method_type;
 }
 
 Result<PwRpcHandler::Stream> PwRpcHandler::LookupStream(StreamId id) {
@@ -177,6 +187,17 @@ void PwRpcHandler::ResetStream(StreamId id) {
   }
 }
 
+void PwRpcHandler::HalfCloseStream(StreamId id) {
+  auto streams_locked = streams_.acquire();
+  for (size_t i = 0; i < streams_locked->size(); ++i) {
+    auto& stream = (*streams_locked)[i];
+    if (stream.id == id) {
+      stream.half_closed = true;
+      break;
+    }
+  }
+}
+
 void PwRpcHandler::MarkSentRequest(StreamId id) {
   auto streams_locked = streams_.acquire();
   for (size_t i = 0; i < streams_locked->size(); ++i) {
@@ -202,6 +223,7 @@ Status PwRpcHandler::CreateStream(StreamId id,
       stream.method_id = method_id;
       stream.method_type = method_type;
       stream.sent_request = false;
+      stream.half_closed = false;
       return OkStatus();
     }
   }

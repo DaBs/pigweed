@@ -18,7 +18,10 @@ package {
 
 cc_library_static {
     name: "pw_rpc_transport.rpc_transport",
-    cpp_std: "c++20",
+    defaults: [
+        "pw_android_common_backends",
+        "pw_android_common_target_support",
+    ],
     export_include_dirs: ["public"],
     static_libs: [
         "pw_bytes",
@@ -30,23 +33,13 @@ cc_library_static {
         "pw_function",
         "pw_status",
     ],
-    host_supported: true,
-    vendor_available: true,
 }
 
 cc_library_static {
     name: "pw_rpc_transport.local_rpc_egress",
-    cpp_std: "c++20",
-    vendor_available: true,
-    host_supported: true,
     defaults: [
         "pw_android_common_backends",
-    ],
-    header_libs: [
-        "pw_log",
-    ],
-    export_header_lib_headers: [
-        "pw_log",
+        "pw_android_common_target_support",
     ],
     static_libs: [
         "pw_containers",
@@ -60,18 +53,49 @@ cc_library_static {
         "pw_result",
         "pw_rpc_transport.rpc_transport",
     ],
+}
+
+// This rule must be instantiated, e.g.
+//
+//   cc_library_static {
+//       name: "<instance_name>",
+//       cflags: [
+//       ],
+//       defaults: [
+//           "pw_rpc_transport.local_rpc_egress_logging_metric_tracker_defaults",
+//       ],
+//   }
+cc_defaults {
+    name: "pw_rpc_transport.local_rpc_egress_logging_metric_tracker_defaults",
+    defaults: [
+        "pw_android_common_backends",
+        "pw_android_common_target_support",
+        "pw_rpc_defaults",
+    ],
+    header_libs: [
+        "pw_log",
+    ],
+    export_header_lib_headers: [
+        "pw_log",
+    ],
+    static_libs: [
+        "pw_metric",
+        "pw_rpc_transport.local_rpc_egress",
+    ],
+    export_static_lib_headers: [
+        "pw_metric",
+        "pw_rpc_transport.local_rpc_egress",
+    ],
     srcs: [
-        "local_rpc_egress.cc",
+        "local_rpc_egress_logging_metric_tracker.cc",
     ],
 }
 
 cc_library_static {
     name: "pw_rpc_transport.simple_framing",
-    cpp_std: "c++20",
-    vendor_available: true,
-    host_supported: true,
     defaults: [
         "pw_android_common_backends",
+        "pw_android_common_target_support",
     ],
     header_libs: [
         "pw_assert",
@@ -82,6 +106,7 @@ cc_library_static {
         "pw_log",
     ],
     static_libs: [
+        "pw_bytes",
         "pw_polyfill",
         "pw_preprocessor",
         "pw_result",
@@ -95,13 +120,6 @@ cc_library_static {
     ],
     srcs: [
         "simple_framing.cc",
-    ],
-}
-
-filegroup {
-    name: "pw_rpc_transport.egress_ingress_src_files",
-    srcs: [
-        "egress_ingress.cc",
     ],
 }
 
@@ -120,7 +138,6 @@ filegroup {
 //   }
 cc_defaults {
     name: "pw_rpc_transport.egress_ingress_defaults",
-    cpp_std: "c++20",
     defaults: [
         "pw_android_common_backends",
         "pw_rpc_defaults",
@@ -128,26 +145,53 @@ cc_defaults {
     header_libs: [
         "pw_assert",
         "pw_chrono",
-        "pw_log",
         "pw_sync",
     ],
     export_header_lib_headers: [
         "pw_assert",
-        "pw_log",
         "pw_sync",
     ],
     static_libs: [
         "pw_hdlc",
-        "pw_metric",
         "pw_rpc_transport.rpc_transport",
         "pw_sync.binary_semaphore_thread_notification",
     ],
     export_static_lib_headers: [
         "pw_hdlc",
-        "pw_metric",
         "pw_rpc_transport.rpc_transport",
     ],
+}
+
+// This rule must be instantiated, e.g.
+//
+//   cc_library_static {
+//       name: "<instance_name>",
+//       cflags: [
+//       ],
+//       defaults: [
+//           "pw_rpc_transport.egress_ingress_logging_metric_tracker_defaults",
+//       ],
+//   }
+cc_defaults {
+    name: "pw_rpc_transport.egress_ingress_logging_metric_tracker_defaults",
+    defaults: [
+        "pw_android_common_backends",
+        "pw_android_common_target_support",
+        "pw_rpc_defaults",
+    ],
+    header_libs: [
+        "pw_log",
+    ],
+    export_header_lib_headers: [
+        "pw_log",
+    ],
+    static_libs: [
+        "pw_metric",
+    ],
+    export_static_lib_headers: [
+        "pw_metric",
+    ],
     srcs: [
-        ":pw_rpc_transport.egress_ingress_src_files",
+        "egress_ingress_logging_metric_tracker.cc",
     ],
 }

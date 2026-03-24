@@ -22,19 +22,19 @@ namespace pw::channel {
 
 template <DataType kDataType, Property... kProperties>
 constexpr bool Channel<kDataType, kProperties...>::is_read_open() const {
-  return readable() && static_cast<const AnyChannel&>(*this).is_read_open();
+  return readable() && static_cast<const AnyChannel*>(this)->is_read_open();
 }
 
 template <DataType kDataType, Property... kProperties>
 constexpr bool Channel<kDataType, kProperties...>::is_write_open() const {
-  return writable() && static_cast<const AnyChannel&>(*this).is_write_open();
+  return writable() && static_cast<const AnyChannel*>(this)->is_write_open();
 }
 
 template <DataType kDataType, Property... kProperties>
-async2::Poll<Result<multibuf::MultiBuf>>
+async2::PollResult<multibuf::MultiBuf>
 Channel<kDataType, kProperties...>::PendRead(async2::Context& cx) {
   static_assert(readable(), "PendRead may only be called on readable channels");
-  return static_cast<AnyChannel&>(*this).PendRead(cx);
+  return static_cast<AnyChannel*>(this)->PendRead(cx);
 }
 
 template <DataType kDataType, Property... kProperties>
@@ -42,36 +42,36 @@ async2::Poll<Status> Channel<kDataType, kProperties...>::PendReadyToWrite(
     pw::async2::Context& cx) {
   static_assert(writable(),
                 "PendReadyToWrite may only be called on writable channels");
-  return static_cast<AnyChannel&>(*this).PendReadyToWrite(cx);
+  return static_cast<AnyChannel*>(this)->PendReadyToWrite(cx);
 }
 template <DataType kDataType, Property... kProperties>
-async2::Poll<std::optional<multibuf::MultiBuf>>
+async2::PollOptional<multibuf::MultiBuf>
 Channel<kDataType, kProperties...>::PendAllocateWriteBuffer(async2::Context& cx,
                                                             size_t min_bytes) {
   static_assert(
       writable(),
       "PendAllocateWriteBuffer may only be called on writable channels");
-  return static_cast<AnyChannel&>(*this).PendAllocateWriteBuffer(cx, min_bytes);
+  return static_cast<AnyChannel*>(this)->PendAllocateWriteBuffer(cx, min_bytes);
 }
 template <DataType kDataType, Property... kProperties>
 Status Channel<kDataType, kProperties...>::StageWrite(
     multibuf::MultiBuf&& data) {
   static_assert(writable(),
                 "StageWrite may only be called on writable channels");
-  return static_cast<AnyChannel&>(*this).StageWrite(std::move(data));
+  return static_cast<AnyChannel*>(this)->StageWrite(std::move(data));
 }
 template <DataType kDataType, Property... kProperties>
 async2::Poll<Status> Channel<kDataType, kProperties...>::PendWrite(
     async2::Context& cx) {
   static_assert(writable(),
                 "PendWrite may only be called on writable channels");
-  return static_cast<AnyChannel&>(*this).PendWrite(cx);
+  return static_cast<AnyChannel*>(this)->PendWrite(cx);
 }
 
 template <DataType kDataType, Property... kProperties>
 async2::Poll<pw::Status> Channel<kDataType, kProperties...>::PendClose(
     async2::Context& cx) {
-  return static_cast<AnyChannel&>(*this).PendClose(cx);
+  return static_cast<AnyChannel*>(this)->PendClose(cx);
 }
 
 namespace internal {
@@ -127,24 +127,23 @@ class BaseChannelImpl : public AnyChannel {
 #define _PW_CHANNEL_READ_WRITE
 
 #define _PW_CHANNEL_WRITE_ONLY                                                 \
-  async2::Poll<Result<multibuf::MultiBuf>> DoPendRead(async2::Context&)        \
-      final {                                                                  \
+  async2::PollResult<multibuf::MultiBuf> DoPendRead(async2::Context&) final {  \
     return async2::Ready(Result<multibuf::MultiBuf>(Status::Unimplemented())); \
   }
 
-#define _PW_CHANNEL_READ_ONLY                                                \
-  async2::Poll<Status> DoPendReadyToWrite(async2::Context&) final {          \
-    return Status::Unimplemented();                                          \
-  }                                                                          \
-  async2::Poll<std::optional<multibuf::MultiBuf>> DoPendAllocateWriteBuffer( \
-      async2::Context&, size_t) final {                                      \
-    PW_ASSERT(false); /* shouldn't be called on non-writeable channels */    \
-  }                                                                          \
-  Status DoStageWrite(multibuf::MultiBuf&&) final {                          \
-    return Status::Unimplemented();                                          \
-  }                                                                          \
-  async2::Poll<Status> DoPendWrite(async2::Context&) final {                 \
-    return async2::Ready(Status::Unimplemented());                           \
+#define _PW_CHANNEL_READ_ONLY                                             \
+  async2::Poll<Status> DoPendReadyToWrite(async2::Context&) final {       \
+    return Status::Unimplemented();                                       \
+  }                                                                       \
+  async2::PollOptional<multibuf::MultiBuf> DoPendAllocateWriteBuffer(     \
+      async2::Context&, size_t) final {                                   \
+    PW_ASSERT(false); /* shouldn't be called on non-writeable channels */ \
+  }                                                                       \
+  Status DoStageWrite(multibuf::MultiBuf&&) final {                       \
+    return Status::Unimplemented();                                       \
+  }                                                                       \
+  async2::Poll<Status> DoPendWrite(async2::Context&) final {              \
+    return async2::Ready(Status::Unimplemented());                        \
   }
 
 // Generate specializations for the supported channel types.

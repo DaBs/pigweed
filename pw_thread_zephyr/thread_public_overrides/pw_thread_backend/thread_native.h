@@ -14,3 +14,10 @@
 #pragma once
 
 #include "pw_thread_zephyr/thread_native.h"
+
+namespace pw::thread::backend {
+
+using NativeThread = ::pw::thread::zephyr::Thread;
+using NativeThreadHandle = ::pw::thread::zephyr::ThreadHandle;
+
+}  // namespace pw::thread::backend

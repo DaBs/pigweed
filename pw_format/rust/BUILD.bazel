@@ -20,6 +20,7 @@ rust_library(
     srcs = [
         "pw_format_core.rs",
     ],
+    edition = "2024",
     visibility = ["//visibility:public"],
     deps = [
         "//pw_status/rust:pw_status",
@@ -37,10 +38,7 @@ rust_library(
         "pw_format/tests/mod.rs",
         "pw_format/tests/printf.rs",
     ],
-    crate_features = select({
-        "@rules_rust//rust/toolchain/channel:nightly": ["nightly_tait"],
-        "//conditions:default": [],
-    }),
+    edition = "2024",
     visibility = ["//visibility:public"],
     deps = [
         ":pw_format_core",
@@ -55,10 +53,7 @@ rust_library(
 rust_test(
     name = "pw_format_test",
     crate = ":pw_format",
-    crate_features = select({
-        "@rules_rust//rust/toolchain/channel:nightly": ["nightly"],
-        "//conditions:default": [],
-    }),
+    edition = "2024",
     # TODO: b/343726867 - support on-device rust tests
     target_compatible_with = incompatible_with_mcu(),
 )
@@ -80,6 +75,7 @@ rust_proc_macro(
     srcs = [
         "pw_format_example_macro.rs",
     ],
+    edition = "2024",
     visibility = ["//visibility:public"],
     deps = [
         ":pw_format",
@@ -95,6 +91,7 @@ rust_library(
     srcs = [
         "pw_format_example_macro_test.rs",
     ],
+    edition = "2024",
     proc_macro_deps = [
         ":pw_format_example_macro",
     ],
@@ -105,10 +102,7 @@ rust_library(
 rust_test(
     name = "pw_format_example_macro_test_test",
     crate = ":pw_format_example_macro_test",
-    crate_features = select({
-        "@rules_rust//rust/toolchain/channel:nightly": ["nightly"],
-        "//conditions:default": [],
-    }),
+    edition = "2024",
     # TODO: b/343726867 - support on-device rust tests
     target_compatible_with = incompatible_with_mcu(),
 )
@@ -118,6 +112,7 @@ rust_proc_macro(
     srcs = [
         "pw_format_test_macros.rs",
     ],
+    edition = "2024",
     visibility = ["//visibility:public"],
     deps = [
         ":pw_format",
@@ -133,6 +128,7 @@ rust_library(
     srcs = [
         "pw_format_test_macros_printf_test.rs",
     ],
+    edition = "2024",
     proc_macro_deps = [
         ":pw_format_test_macros",
     ],
@@ -152,6 +148,7 @@ rust_test(
         "@rules_rust//rust/toolchain/channel:nightly": ["nightly"],
         "//conditions:default": [],
     }),
+    edition = "2024",
     target_compatible_with = incompatible_with_mcu(),
 )
 
@@ -160,6 +157,7 @@ rust_library(
     srcs = [
         "pw_format_test_macros_core_fmt_test.rs",
     ],
+    edition = "2024",
     proc_macro_deps = [
         ":pw_format_test_macros",
     ],
@@ -174,10 +172,7 @@ rust_library(
 rust_test(
     name = "pw_format_test_macros_core_fmt_test_test",
     crate = ":pw_format_test_macros_core_fmt_test",
-    crate_features = select({
-        "@rules_rust//rust/toolchain/channel:nightly": ["nightly"],
-        "//conditions:default": [],
-    }),
+    edition = "2024",
     # TODO: b/343726867 - support on-device rust tests
     target_compatible_with = incompatible_with_mcu(),
 )

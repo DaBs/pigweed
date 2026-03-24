@@ -17,6 +17,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 
+#include "pw_assert/check.h"
 #include "pw_log/log.h"
 #include "pw_status/try.h"
 
@@ -30,10 +31,10 @@ void EpollChannel::Register() {
     return;
   }
 
-  if (!dispatcher_->native()
-           .NativeRegisterFileDescriptor(channel_fd_,
-                                         async2::backend::NativeDispatcher::
-                                             FileDescriptorType::kReadWrite)
+  if (!dispatcher_
+           ->NativeRegisterFileDescriptor(
+               channel_fd_,
+               async2::EpollDispatcher::FileDescriptorType::kReadWrite)
            .ok()) {
     set_closed();
     return;
@@ -42,11 +43,11 @@ void EpollChannel::Register() {
   ready_to_write_ = true;
 }
 
-async2::Poll<Result<multibuf::MultiBuf>> EpollChannel::DoPendRead(
+async2::PollResult<multibuf::MultiBuf> EpollChannel::DoPendRead(
     async2::Context& cx) {
   write_alloc_future_.SetDesiredSizes(
-      kMinimumReadSize, kDesiredReadSize, pw::multibuf::kNeedsContiguous);
-  async2::Poll<std::optional<multibuf::MultiBuf>> maybe_multibuf =
+      kMinimumReadSize, kDesiredReadSize, pw::multibuf::v1::kNeedsContiguous);
+  async2::PollOptional<multibuf::MultiBuf> maybe_multibuf =
       write_alloc_future_.Pend(cx);
   if (maybe_multibuf.IsPending()) {
     return async2::Pending();
@@ -58,7 +59,7 @@ async2::Poll<Result<multibuf::MultiBuf>> EpollChannel::DoPendRead(
   }
 
   multibuf::MultiBuf buf = std::move(**maybe_multibuf);
-  multibuf::Chunk& chunk = *buf.Chunks().begin();
+  multibuf::v1::Chunk& chunk = *buf.Chunks().begin();
 
   int bytes_read = read(channel_fd_, chunk.data(), chunk.size());
   if (bytes_read >= 0) {
@@ -72,8 +73,7 @@ async2::Poll<Result<multibuf::MultiBuf>> EpollChannel::DoPendRead(
     // descriptor is active.
     PW_ASYNC_STORE_WAKER(
         cx,
-        cx.dispatcher().native().NativeAddReadWakerForFileDescriptor(
-            channel_fd_),
+        dispatcher_->NativeAddReadWakerForFileDescriptor(channel_fd_),
         "EpollChannel is waiting on a file descriptor read");
     return async2::Pending();
   }
@@ -88,16 +88,16 @@ async2::Poll<Status> EpollChannel::DoPendReadyToWrite(async2::Context& cx) {
   // The previous write operation failed. Block the task until the dispatcher
   // receives a notification for the channel's file descriptor.
   ready_to_write_ = true;
+
   PW_ASYNC_STORE_WAKER(
       cx,
-      cx.dispatcher().native().NativeAddWriteWakerForFileDescriptor(
-          channel_fd_),
+      dispatcher_->NativeAddWriteWakerForFileDescriptor(channel_fd_),
       "EpollChannel is waiting on a file descriptor write");
   return async2::Pending();
 }
 
 Status EpollChannel::DoStageWrite(multibuf::MultiBuf&& data) {
-  for (multibuf::Chunk& chunk : data.Chunks()) {
+  for (multibuf::v1::Chunk& chunk : data.Chunks()) {
     if (write(channel_fd_, chunk.data(), chunk.size()) < 0) {
       if (errno == EAGAIN || errno == EWOULDBLOCK) {
         // The file descriptor is not currently available. The next call to
@@ -117,9 +117,7 @@ Status EpollChannel::DoStageWrite(multibuf::MultiBuf&& data) {
 
 void EpollChannel::Cleanup() {
   if (is_read_or_write_open()) {
-    dispatcher_->native()
-        .NativeUnregisterFileDescriptor(channel_fd_)
-        .IgnoreError();
+    dispatcher_->NativeUnregisterFileDescriptor(channel_fd_).IgnoreError();
     set_closed();
   }
   close(channel_fd_);

@@ -952,7 +952,7 @@ def _add_to_module_metadata(
     languages: Iterable[str] | None = None,
 ) -> None:
     """Update sphinx module metadata."""
-    module_metadata_file = project_root / 'docs/module_metadata.json'
+    module_metadata_file = project_root / 'docs/sphinx/module_metadata.json'
     metadata_dict = json.loads(module_metadata_file.read_text())
 
     language_tags = []
@@ -961,12 +961,16 @@ def _add_to_module_metadata(
             if lang == 'cc':
                 language_tags.append('C++')
 
-    # Add the new entry if it doesn't exist
-    if module_name.full not in metadata_dict:
-        metadata_dict[module_name.full] = dict(
-            status='experimental',
-            languages=language_tags,
-        )
+    # Stop if the module metadata already exists
+    if module_name.full in metadata_dict:
+        _report_unchanged_file(module_metadata_file)
+        return
+
+    # Add the new entry
+    metadata_dict[module_name.full] = dict(
+        status='experimental',
+        languages=language_tags,
+    )
 
     # Sort by module name.
     sorted_metadata = dict(
@@ -975,10 +979,80 @@ def _add_to_module_metadata(
     output_text = json.dumps(sorted_metadata, sort_keys=False, indent=2)
     output_text += '\n'
 
-    # Write the file.
-    if _prompt_overwrite(module_metadata_file, new_contents=output_text):
-        _report_write_file(module_metadata_file)
-        module_metadata_file.write_text(output_text)
+    module_metadata_file.write_text(output_text)
+    _report_edited_file(module_metadata_file)
+
+
+def _add_to_sphinx_index(
+    project_root: Path,
+    module_name: _ModuleName,
+) -> None:
+    """Update the modules index page on the Sphinx site."""
+    modules_index_file = project_root / 'docs/sphinx/modules.rst'
+    modules_index_list = modules_index_file.read_text().splitlines()
+
+    new_content = '   {}/docs'.format(module_name.full)
+
+    # Stop if the module is already listed in the index
+    if new_content in modules_index_list:
+        _report_unchanged_file(modules_index_file)
+        return
+
+    # Find the correct insertion location in the index. The list of modules
+    # begins after `module_structure`.
+    start = modules_index_list.index('   module_structure') + 1
+    end = len(modules_index_list) - 1
+    target_index = None
+    for i in range(start, end):
+        line = modules_index_list[i]
+        if line < new_content:
+            continue
+        target_index = i
+        break
+    target_index = end if target_index is None else target_index
+
+    # Insert the module into the index
+    modules_index_list.insert(target_index, new_content)
+    output_text = '\n'.join(modules_index_list)
+    output_text += '\n'
+    modules_index_file.write_text(output_text)
+    _report_edited_file(modules_index_file)
+
+
+def _add_to_docs_build(
+    project_root: Path,
+    module_name: _ModuleName,
+) -> None:
+    """Add the new module's docs to the docs build."""
+    build_file = project_root / 'docs/sphinx/BUILD.bazel'
+    build_list = build_file.read_text().splitlines()
+
+    new_content = '        "//{}:docs",'.format(module_name.full)
+
+    # Stop if the module is already listed in the build
+    if new_content in build_list:
+        _report_unchanged_file(build_file)
+        return
+
+    # Find the correct insertion location
+    sentinel = '        # start (sentinel for pw module create)'
+    start = build_list.index(sentinel) + 1
+    end = build_list.index('        # end (sentinel for pw module create)')
+    target_index = None
+    for i in range(start, end):
+        line = build_list[i]
+        if line < new_content:
+            continue
+        target_index = i
+        break
+    target_index = end if target_index is None else target_index
+
+    # Insert the module into the build file
+    build_list.insert(target_index, new_content)
+    output_text = '\n'.join(build_list)
+    output_text += '\n'
+    build_file.write_text(output_text)
+    _report_edited_file(build_file)
 
 
 def _add_to_pigweed_modules_file(
@@ -1165,6 +1239,8 @@ def _create_module(
     if is_upstream:
         _add_to_pigweed_modules_file(project_root, module_name)
         _add_to_module_metadata(project_root, module_name, languages)
+        _add_to_sphinx_index(project_root, module_name)
+        _add_to_docs_build(project_root, module_name)
         if 'cmake' in build_systems:
             _add_to_root_cmakelists(project_root, module_name)
 
@@ -1197,7 +1273,7 @@ def register_subcommand(parser: argparse.ArgumentParser) -> None:
             f'Options: {", ".join(_BUILD_FILES.keys())}'
         ),
         default=_BUILD_FILES.keys(),
-        type=functools.partial(csv_with_choices, _BUILD_FILES.keys()),
+        type=functools.partial(csv_with_choices, list(_BUILD_FILES.keys())),
     )
     parser.add_argument(
         '--languages',
@@ -1206,7 +1282,9 @@ def register_subcommand(parser: argparse.ArgumentParser) -> None:
             f'Options: {", ".join(_LANGUAGE_GENERATORS.keys())}'
         ),
         default=[],
-        type=functools.partial(csv_with_choices, _LANGUAGE_GENERATORS.keys()),
+        type=functools.partial(
+            csv_with_choices, list(_LANGUAGE_GENERATORS.keys())
+        ),
     )
     if _is_upstream():
         parser.add_argument(

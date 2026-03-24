@@ -131,6 +131,33 @@ cc_args(
     ],
 )
 
+filegroup(
+    name = "extra_builtins",
+    srcs = ["extra_builtins.h"],
+)
+
+# TODO: https://pwbug.dev/434778918 - Workaround for missing builtins.
+cc_args(
+    name = "restore_missing_builtins",
+    actions = [
+        "@rules_cc//cc/toolchains/actions:c_compile_actions",
+        "@rules_cc//cc/toolchains/actions:cpp_compile_actions",
+    ],
+    args = [
+        "-include",
+        "{extra_builtins}",
+    ],
+    data = [
+        ":extra_builtins",
+    ],
+    format = {
+        "extra_builtins": ":extra_builtins",
+    },
+    # This prevents the -include from happening during linker script
+    # preprocessing.
+    requires_not_none = "@rules_cc//cc/toolchains/variables:source_file",
+)
+
 cc_args(
     name = "cortex_common",
     actions = [
@@ -202,6 +229,19 @@ cc_args(
 )
 
 cc_args(
+    name = "cortex-m55",
+    actions = [
+        "@rules_cc//cc/toolchains/actions:assembly_actions",
+        "@rules_cc//cc/toolchains/actions:c_compile_actions",
+        "@rules_cc//cc/toolchains/actions:cpp_compile_actions",
+        "@rules_cc//cc/toolchains/actions:link_actions",
+    ],
+    args = [
+        "-mcpu=cortex-m55",
+    ],
+)
+
+cc_args(
     name = "cortex-m3",
     actions = [
         "@rules_cc//cc/toolchains/actions:assembly_actions",
@@ -219,7 +259,8 @@ cc_toolchain(
     name = "arm_clang_toolchain_cortex-m",
     args = [
         ":cxx_compiler_flags",
-        "@llvm_toolchain_device//:llvm-libc_args",
+        ":restore_missing_builtins",
+        "@llvm_toolchain//:llvm-libc_args",
         ":thumb_abi",
         ":cortex_common",
         ":cortex_common_link",
@@ -229,10 +270,12 @@ cc_toolchain(
         "//pw_toolchain/cc/args:reduced_size",
         "//pw_toolchain/cc/args:no_canonical_prefixes",
         "//pw_toolchain/cc/args:no_rtti",
+        "//pw_toolchain/cc/args:thread_safety_warnings",
         "//pw_toolchain/cc/args:wno_register",
         "//pw_toolchain/cc/args:wnon_virtual_dtor",
         "//pw_toolchain/cc/args:common_warnings",
         "//pw_toolchain/cc/args:color_diagnostics",
+        "//pw_toolchain/cc/args:warning_suppression_allowlist",
     ] + select({
         "//pw_build/constraints/arm:cortex-m0": [
             ":cortex-m0",
@@ -250,9 +293,18 @@ cc_toolchain(
             ":cortex-m33",
             ":armv8m.main-none-eabi",
         ],
+        "//pw_build/constraints/arm:cortex-m55": [
+            ":cortex-m55",
+            ":armv8m.main-none-eabi",
+        ],
         "//pw_build/constraints/arm:none": [],
-    }),
+    }) + [
+        # This should always go last so users can override previous choices.
+        "//pw_toolchain/cc/args:extra_toolchain_args",
+    ],
     enabled_features = [
+        "//pw_toolchain/cc/feature:rules_go_unsupported_feature",
+        "//pw_toolchain/cc/feature:rules_rust_unsupported_feature",
         "@rules_cc//cc/toolchains/args:experimental_replace_legacy_action_config_features",
         "//pw_toolchain/cc/capability:compiler_is_clang",
         "//pw_toolchain/cc/capability:linker_is_clang",
@@ -263,15 +315,19 @@ cc_toolchain(
         "//pw_toolchain/cc:c++20_enabled": ["//pw_toolchain/cc/args:c++20_feature"],
         "//conditions:default": [],
     }),
+    known_features = [
+        "//pw_toolchain/cc/capability:known_toolchain_types",
+    ],
     tags = ["manual"],  # Don't try to build this in wildcard builds.
     target_compatible_with = select({
         "//pw_build/constraints/arm:cortex-m0": [],
         "//pw_build/constraints/arm:cortex-m0plus": [],
         "//pw_build/constraints/arm:cortex-m3": [],
         "//pw_build/constraints/arm:cortex-m33": [],
+        "//pw_build/constraints/arm:cortex-m55": [],
         "//pw_build/constraints/arm:none": ["@platforms//:incompatible"],
     }),
-    tool_map = "@llvm_toolchain_device//:all_tools",
+    tool_map = "@llvm_toolchain//:all_tools",
     visibility = ["//pw_toolchain:__pkg__"],
 )
 
@@ -302,11 +358,20 @@ toolchain(
     toolchain_type = "@bazel_tools//tools/cpp:toolchain_type",
 )
 
+toolchain(
+    name = "arm_clang_cc_toolchain_cortex-m55",
+    target_compatible_with = [
+        "//pw_build/constraints/arm:cortex-m55",
+    ],
+    toolchain = ":arm_clang_toolchain_cortex-m",
+    toolchain_type = "@bazel_tools//tools/cpp:toolchain_type",
+)
+
 cc_toolchain(
     name = "arm_clang_toolchain_cortex-a",
     args = [
         ":cxx_compiler_flags",
-        "@llvm_toolchain_device//:llvm-libc_args",
+        "@llvm_toolchain//:llvm-libc_args",
         ":cortex_common",
         ":cortex_common_link",
         ":warnings",
@@ -319,6 +384,7 @@ cc_toolchain(
         "//pw_toolchain/cc/args:wnon_virtual_dtor",
         "//pw_toolchain/cc/args:common_warnings",
         "//pw_toolchain/cc/args:color_diagnostics",
+        "//pw_toolchain/cc/args:warning_suppression_allowlist",
     ] + select({
         "//pw_build/constraints/arm:cortex-a35": [
             ":cortex-a35",
@@ -328,6 +394,8 @@ cc_toolchain(
         "//pw_build/constraints/arm:none": [],
     }),
     enabled_features = [
+        "//pw_toolchain/cc/feature:rules_go_unsupported_feature",
+        "//pw_toolchain/cc/feature:rules_rust_unsupported_feature",
         "@rules_cc//cc/toolchains/args:experimental_replace_legacy_action_config_features",
         "//pw_toolchain/cc/capability:compiler_is_clang",
         "//pw_toolchain/cc/capability:linker_is_clang",
@@ -338,12 +406,15 @@ cc_toolchain(
         "//pw_toolchain/cc:c++20_enabled": ["//pw_toolchain/cc/args:c++20_feature"],
         "//conditions:default": [],
     }),
+    known_features = [
+        "//pw_toolchain/cc/capability:known_toolchain_types",
+    ],
     tags = ["manual"],  # Don't try to build this in wildcard builds.
     target_compatible_with = select({
         "//pw_build/constraints/arm:cortex-a35": [],
         "//pw_build/constraints/arm:none": ["@platforms//:incompatible"],
     }),
-    tool_map = "@llvm_toolchain_device//:all_tools",
+    tool_map = "@llvm_toolchain//:all_tools",
     visibility = ["//pw_toolchain:__pkg__"],
 )
 

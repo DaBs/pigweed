@@ -17,7 +17,6 @@ import("//build_overrides/pigweed.gni")
 import("$dir_pw_build/error.gni")
 import("$dir_pw_build/target_types.gni")
 import("$dir_pw_chrono/backend.gni")
-import("$dir_pw_docgen/docs.gni")
 import("$dir_pw_sync/backend.gni")
 import("$dir_pw_thread/backend.gni")
 import("$dir_pw_unit_test/test.gni")
@@ -147,8 +146,8 @@ pw_source_set("interrupt_spin_lock") {
     "public_overrides/pw_sync_backend/interrupt_spin_lock_native.h",
   ]
   public_deps = [
+    "$dir_pw_assert",
     "$dir_pw_sync:interrupt_spin_lock.facade",
-    "$dir_pw_sync:yield_core",
   ]
 }
 
@@ -176,10 +175,6 @@ pw_test("condition_variable_test") {
     "$dir_pw_sync:condition_variable_test",
     "$dir_pw_thread_stl:non_portable_test_thread_options",
   ]
-}
-
-pw_doc_group("docs") {
-  sources = [ "docs.rst" ]
 }
 
 pw_test_group("tests") {

@@ -60,14 +60,15 @@ class ClangFormatFormatter(FileFormatter):
         """
         proc = self.run_tool(
             'clang-format',
-            self.clang_format_flags + [file_path],
+            self.clang_format_flags + [f'--assume-filename={file_path}'],
+            input=file_contents,
         )
         return FormattedFileContents(
             ok=proc.returncode == 0,
             formatted_file_contents=proc.stdout,
-            error_message=proc.stderr.decode()
-            if proc.returncode != 0
-            else None,
+            error_message=(
+                proc.stderr.decode() if proc.returncode != 0 else None
+            ),
         )
 
     def format_file(self, file_path: Path) -> FormatFixStatus:

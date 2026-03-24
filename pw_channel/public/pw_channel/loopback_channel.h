@@ -20,12 +20,14 @@
 #include "pw_async2/poll.h"
 #include "pw_channel/channel.h"
 #include "pw_multibuf/allocator.h"
-#include "pw_multibuf/allocator_async.h"
 #include "pw_multibuf/multibuf.h"
+#include "pw_multibuf/v1/allocator_async.h"
 
 namespace pw::channel {
 
-/// @defgroup pw_channel_loopback
+/// @module{pw_channel}
+
+/// @defgroup pw_channel_loopback Loopback
 /// @{
 
 // Channel implementation which will read its own writes.
@@ -53,12 +55,12 @@ class LoopbackChannel<DataType::kDatagram>
   LoopbackChannel& operator=(LoopbackChannel&&) = default;
 
  private:
-  async2::Poll<Result<multibuf::MultiBuf>> DoPendRead(
+  async2::PollResult<multibuf::MultiBuf> DoPendRead(
       async2::Context& cx) override;
 
   async2::Poll<Status> DoPendReadyToWrite(async2::Context& cx) final;
 
-  async2::Poll<std::optional<multibuf::MultiBuf>> DoPendAllocateWriteBuffer(
+  async2::PollOptional<multibuf::MultiBuf> DoPendAllocateWriteBuffer(
       async2::Context& cx, size_t min_bytes) final {
     write_alloc_future_.SetDesiredSize(min_bytes);
     return write_alloc_future_.Pend(cx);
@@ -70,7 +72,7 @@ class LoopbackChannel<DataType::kDatagram>
 
   async2::Poll<Status> DoPendClose(async2::Context&) final;
 
-  multibuf::MultiBufAllocationFuture write_alloc_future_;
+  multibuf::v1::MultiBufAllocationFuture write_alloc_future_;
   std::optional<multibuf::MultiBuf> queue_;
 
   async2::Waker waker_;
@@ -89,14 +91,14 @@ class LoopbackChannel<DataType::kByte>
   LoopbackChannel& operator=(LoopbackChannel&&) = default;
 
  private:
-  async2::Poll<Result<multibuf::MultiBuf>> DoPendRead(
+  async2::PollResult<multibuf::MultiBuf> DoPendRead(
       async2::Context& cx) override;
 
   async2::Poll<Status> DoPendReadyToWrite(async2::Context&) final {
     return async2::Ready(OkStatus());
   }
 
-  async2::Poll<std::optional<multibuf::MultiBuf>> DoPendAllocateWriteBuffer(
+  async2::PollOptional<multibuf::MultiBuf> DoPendAllocateWriteBuffer(
       async2::Context& cx, size_t min_bytes) final {
     write_alloc_future_.SetDesiredSize(min_bytes);
     return write_alloc_future_.Pend(cx);
@@ -108,7 +110,7 @@ class LoopbackChannel<DataType::kByte>
 
   async2::Poll<Status> DoPendClose(async2::Context&) final;
 
-  multibuf::MultiBufAllocationFuture write_alloc_future_;
+  multibuf::v1::MultiBufAllocationFuture write_alloc_future_;
   multibuf::MultiBuf queue_;
 
   async2::Waker read_waker_;

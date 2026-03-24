@@ -26,9 +26,12 @@ import pw_env_setup.virtualenv_setup
 import pw_package.git_repo
 import pw_package.package_manager
 
-# Main branch, this commit is close to the v3.6 RC3 tag which contains some
-# bug fixes for Twister and support for GTEST_SKIP()
-_ZEPHYR_COMMIT_SHA = 'f9778472105d756fff7d1e5b54353421d356ed43'
+# BEGIN-ZEPHYR-ROLL-METADATA
+# ROLL: Warning: this variable is automatically updated.
+# ROLL: Last updated 2025-10-20.
+# ROLL: By https://cr-buildbucket.appspot.com/build/8700500463417867425.
+_ZEPHYR_COMMIT_SHA = '169fd6a4a98eafcee0212242b0ad5ee533bbb883'
+# END-ZEPHYR-ROLL-METADATA
 
 
 class Zephyr(pw_package.git_repo.GitRepo):
@@ -122,8 +125,10 @@ class Zephyr(pw_package.git_repo.GitRepo):
         super().install(path)
 
         self.__populate_download_cache_from_cipd(path)
-        with importlib.resources.path(
-            pw_env_setup.virtualenv_setup, 'constraint.list'
+        with importlib.resources.as_file(
+            importlib.resources.files(pw_env_setup.virtualenv_setup).joinpath(
+                'constraint.list'
+            )
         ) as constraint:
             subprocess.check_call(
                 [

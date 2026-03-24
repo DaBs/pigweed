@@ -17,7 +17,7 @@
 
 namespace pw::sync::backend {
 
-using NativeInterruptSpinLock = std::atomic_flag;
-using NativeInterruptSpinLockHandle = std::atomic_flag&;
+using NativeInterruptSpinLock = std::atomic<bool>;
+using NativeInterruptSpinLockHandle = std::atomic<bool>&;
 
 }  // namespace pw::sync::backend

@@ -20,6 +20,8 @@
 
 namespace pw::spi {
 
+/// @module{pw_spi}
+
 /// Configuration data used to determine how the Chip Select signal is
 /// controlled throughout a transaction.
 ///
@@ -53,42 +55,26 @@ class ChipSelector {
   /// activate the chip-select signal, and `false` will deactivate the
   /// chip-select signal.
   ///
-  /// @returns @rst
-  ///
-  /// .. pw-status-codes::
-  ///
-  ///    OK: Success.
-  ///
-  /// Returns other implementation-specific values on failure.
-  ///
-  /// @endrst
+  /// @returns
+  /// * @OK: The state of the chip-select signal was set.
+  /// * Returns other implementation-specific values on failure.
   virtual Status SetActive(bool active) = 0;
 
   /// Helper method to activate the chip-select signal.
   ///
-  /// @returns @rst
-  ///
-  /// .. pw-status-codes::
-  ///
-  ///    OK: Success.
-  ///
-  /// Returns other implementation-specific values on failure.
-  ///
-  /// @endrst
+  /// @returns
+  /// * @OK: The chip-select signal was activated.
+  /// * Returns other implementation-specific values on failure.
   Status Activate() { return SetActive(true); }
 
   /// Helper method to deactivate the chip-select signal.
   ///
-  /// @returns @rst
-  ///
-  /// .. pw-status-codes::
-  ///
-  ///    OK: Success.
-  ///
-  /// Returns other implementation-specific values on failure.
-  ///
-  /// @endrst
+  /// @returns
+  /// * @OK: The chip-select signal was deactivated.
+  /// * Returns other implementation-specific values on failure.
   Status Deactivate() { return SetActive(false); }
 };
+
+/// @}
 
 }  // namespace pw::spi

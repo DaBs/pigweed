@@ -18,6 +18,8 @@
 
 namespace pw::i2c {
 
+/// @module{pw_i2c}
+
 /// Provides the `MOCK_METHOD` implementation for
 /// [gMock](https://google.github.io/googletest/gmock_for_dummies.html)
 /// compatibility.
@@ -28,6 +30,12 @@ class GmockInitiator : public Initiator {
               (Address device_address,
                ConstByteSpan tx_buffer,
                ByteSpan rx_buffer,
+               chrono::SystemClock::duration timeout),
+              (override));
+
+  MOCK_METHOD(Status,
+              DoTransferFor,
+              (span<const Message> messages,
                chrono::SystemClock::duration timeout),
               (override));
 };

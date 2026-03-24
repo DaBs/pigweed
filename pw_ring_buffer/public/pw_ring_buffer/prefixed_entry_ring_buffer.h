@@ -16,13 +16,18 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <utility>
 
+#include "pw_assert/check.h"
 #include "pw_containers/intrusive_list.h"
+#include "pw_function/function.h"
 #include "pw_result/result.h"
 #include "pw_span/span.h"
 #include "pw_status/status.h"
+#include "pw_status/status_with_size.h"
 
 namespace pw {
+/// Ring buffer libraries
 namespace ring_buffer {
 
 // A circular ring buffer for arbitrary length data entries. Each PushBack()
@@ -42,7 +47,7 @@ namespace ring_buffer {
 // around as needed.
 class PrefixedEntryRingBufferMulti {
  public:
-  typedef Status (*ReadOutput)(span<const std::byte>);
+  using ReadOutput = pw::Function<Status(span<const std::byte>)>;
 
   // A reader that provides a single-reader interface into the multi-reader ring
   // buffer it has been attached to via AttachReader(). Readers maintain their
@@ -89,8 +94,8 @@ class PrefixedEntryRingBufferMulti {
       return buffer_->InternalPeekFront(*this, data, bytes_read_out);
     }
 
-    Status PeekFront(ReadOutput output) const {
-      return buffer_->InternalPeekFront(*this, output);
+    Status PeekFront(ReadOutput&& output) const {
+      return buffer_->InternalPeekFront(*this, std::move(output));
     }
 
     // Peek the front entry's preamble only to avoid copying data unnecessarily.
@@ -116,8 +121,8 @@ class PrefixedEntryRingBufferMulti {
           *this, data, bytes_read_out);
     }
 
-    Status PeekFrontWithPreamble(ReadOutput output) const {
-      return buffer_->InternalPeekFrontWithPreamble(*this, output);
+    Status PeekFrontWithPreamble(ReadOutput&& output) const {
+      return buffer_->InternalPeekFrontWithPreamble(*this, std::move(output));
     }
 
     // Pop and discard the oldest stored data chunk of data from the ring
@@ -181,8 +186,10 @@ class PrefixedEntryRingBufferMulti {
 
   // An entry returned by the iterator containing the byte span of the entry
   // and preamble data (if the ring buffer was configured with a preamble).
+  template <bool kIsConst>
   struct Entry {
-    span<const std::byte> buffer;
+    using byte_type = std::conditional_t<kIsConst, const std::byte, std::byte>;
+    span<byte_type> buffer;
     uint32_t preamble;
   };
 
@@ -190,10 +197,11 @@ class PrefixedEntryRingBufferMulti {
   // Reader position, without mutating the underlying buffer. This is useful in
   // crash contexts where all available entries in the buffer must be acquired,
   // even those that have already been consumed by all attached readers.
-  class iterator {
+  template <bool kIsConst>
+  class BasicIterator {
    public:
-    iterator() : ring_buffer_(nullptr), read_idx_(0), entry_count_(0) {}
-    iterator(Reader& reader)
+    BasicIterator() : ring_buffer_(nullptr), read_idx_(0), entry_count_(0) {}
+    BasicIterator(Reader& reader)
         : ring_buffer_(reader.buffer_),
           read_idx_(0),
           entry_count_(reader.entry_count_) {
@@ -201,30 +209,137 @@ class PrefixedEntryRingBufferMulti {
       PW_DASSERT(dering_result.ok());
     }
 
-    iterator& operator++();
-    iterator operator++(int) {
-      iterator original = *this;
+    // Allow copy constructor when:
+    // mutable => const
+    // mutable => mutable
+    // const => const
+    template <
+        bool kOtherIsConst,
+        typename std::enable_if<(kIsConst || !kOtherIsConst), int>::type = 0>
+    BasicIterator(const BasicIterator<kOtherIsConst>& other)
+        : ring_buffer_(other.ring_buffer_),
+          read_idx_(other.read_idx_),
+          entry_count_(other.entry_count_) {}
+
+    // Allow copy assignment when:
+    // mutable => const
+    // mutable => mutable
+    // const => const
+    template <
+        bool kOtherIsConst,
+        typename std::enable_if<(kIsConst || !kOtherIsConst), int>::type = 0>
+    BasicIterator& operator=(const BasicIterator<kOtherIsConst>& other) {
+      if (this != &other) {
+        ring_buffer_ = other.ring_buffer_;
+        read_idx_ = other.read_idx_;
+        entry_count_ = other.entry_count_;
+      }
+      return *this;
+    }
+
+    BasicIterator& operator++() {
+      PW_DCHECK_OK(iteration_status_);
+      PW_DCHECK_INT_NE(entry_count_, 0);
+
+      Result<EntryInfo> info = ring_buffer_->RawFrontEntryInfo(read_idx_);
+      if (!info.status().ok()) {
+        SkipToEnd(info.status());
+        return *this;
+      }
+
+      // It is guaranteed that the buffer is deringed at this point.
+      read_idx_ += info.value().preamble_bytes + info.value().data_bytes;
+      entry_count_--;
+
+      if (entry_count_ == 0) {
+        SkipToEnd(OkStatus());
+        return *this;
+      }
+
+      if (read_idx_ >= ring_buffer_->TotalUsedBytes()) {
+        SkipToEnd(Status::DataLoss());
+        return *this;
+      }
+
+      info = ring_buffer_->RawFrontEntryInfo(read_idx_);
+      if (!info.status().ok()) {
+        SkipToEnd(info.status());
+        return *this;
+      }
+      return *this;
+    }
+    BasicIterator operator++(int) {
+      BasicIterator original = *this;
       ++*this;
       return original;
     }
 
-    iterator& operator--();
-    iterator operator--(int) {
-      iterator original = *this;
+    BasicIterator& operator--() {
+      PW_DCHECK_OK(iteration_status_);
+      PW_DCHECK_INT_NE(entry_count_, 0);
+
+      Result<EntryInfo> info = ring_buffer_->RawFrontEntryInfo(read_idx_);
+      if (!info.status().ok()) {
+        SkipToEnd(info.status());
+        return *this;
+      }
+
+      // It is guaranteed that the buffer is deringed at this point.
+      read_idx_ -= info.value().preamble_bytes + info.value().data_bytes;
+      entry_count_++;
+
+      // If read_idx_ is larger that the total bytes, it's wrapped
+      // as the iterator has decremented past the last element.
+      if (read_idx_ > ring_buffer_->TotalSizeBytes()) {
+        SkipToEnd(Status::DataLoss());
+        return *this;
+      }
+
+      info = ring_buffer_->RawFrontEntryInfo(read_idx_);
+      if (!info.status().ok()) {
+        SkipToEnd(info.status());
+        return *this;
+      }
+      return *this;
+    }
+    BasicIterator operator--(int) {
+      BasicIterator original = *this;
       --*this;
       return original;
     }
 
     // Returns entry at current position.
-    const Entry& operator*() const;
-    const Entry* operator->() const { return &operator*(); }
+    const Entry<kIsConst>& operator*() const {
+      PW_DCHECK_OK(iteration_status_);
+      PW_DCHECK_INT_NE(entry_count_, 0);
 
-    constexpr bool operator==(const iterator& rhs) const {
-      return entry_count_ == rhs.entry_count_;
+      Result<EntryInfo> info = ring_buffer_->RawFrontEntryInfo(read_idx_);
+      PW_DCHECK_OK(info.status());
+
+      entry_ = {
+          .buffer = pw::span<std::byte>(
+              ring_buffer_->buffer_ + read_idx_ + info.value().preamble_bytes,
+              info.value().data_bytes),
+          .preamble = info.value().user_preamble,
+      };
+      return entry_;
+    }
+    const Entry<kIsConst>* operator->() const { return &operator*(); }
+
+    template <bool kOtherIsConst>
+    constexpr bool operator==(const BasicIterator<kOtherIsConst>& rhs) const {
+      // If both iterators are at the end, they're considered equal
+      if (entry_count_ == 0 && rhs.entry_count_ == 0) {
+        return true;
+      }
+      // Otherwise they must be at the same position of the same buffer
+      return ring_buffer_ == rhs.ring_buffer_ &&
+             entry_count_ == rhs.entry_count_;
     }
 
-    constexpr bool operator!=(const iterator& rhs) const {
-      return entry_count_ != rhs.entry_count_;
+    template <bool kOtherIsConst>
+    constexpr bool operator!=(const BasicIterator<kOtherIsConst>& rhs) const {
+      return !(*this == rhs);
     }
 
     // Returns the status of the last iteration operation. If the iterator
@@ -233,8 +348,8 @@ class PrefixedEntryRingBufferMulti {
     Status status() const { return iteration_status_; }
 
    private:
-    static constexpr Entry kEndEntry = {
-        .buffer = span<const std::byte>(),
+    static constexpr Entry<kIsConst> kEndEntry = {
+        .buffer = span<std::byte>(),
         .preamble = 0,
     };
 
@@ -248,20 +363,19 @@ class PrefixedEntryRingBufferMulti {
     size_t read_idx_;
     size_t entry_count_;
 
-    mutable Entry entry_;
+    mutable Entry<kIsConst> entry_;
     Status iteration_status_;
+    // Allow the opposite iterator friend access for comparitor operators
+    friend class BasicIterator<!kIsConst>;
   };
 
-  using element_type = const Entry;
-  using value_type = std::remove_cv_t<const Entry>;
-  using pointer = const Entry;
-  using reference = const Entry&;
-  using const_iterator = iterator;  // Standard alias for iterable types.
+  using iterator = BasicIterator<false>;
+  using const_iterator = BasicIterator<true>;
 
   iterator begin() { return iterator(GetSlowestReaderWritable()); }
   iterator end() { return iterator(); }
-  const_iterator cbegin() { return begin(); }
-  const_iterator cend() { return end(); }
+  const_iterator cbegin() { return const_iterator(GetSlowestReaderWritable()); }
+  const_iterator cend() { return const_iterator(); }
 
   // TODO: b/235351861 - Consider changing bool to an enum, to explicitly
   // enumerate what this variable means in clients.
@@ -310,6 +424,13 @@ class PrefixedEntryRingBufferMulti {
 
   // Removes all data from the ring buffer.
   void Clear();
+
+  // Removes num_entries from the back of the buffer.
+  //
+  // Return values:
+  // OK - Successfully removed num_entries from the all readers
+  // OUT_OF_RANGE - At least 1 reader doesn't have enough entries
+  pw::Status PopBack(size_t num_entries);
 
   // Write a chunk of data to the ring buffer. If available space is less than
   // size of data chunk to be written then silently pop and discard oldest
@@ -395,7 +516,7 @@ class PrefixedEntryRingBufferMulti {
   Status InternalPeekFront(const Reader& reader,
                            span<std::byte> data,
                            size_t* bytes_read_out) const;
-  Status InternalPeekFront(const Reader& reader, ReadOutput output) const;
+  Status InternalPeekFront(const Reader& reader, ReadOutput&& output) const;
 
   Status InternalPeekFrontPreamble(const Reader& reader,
                                    uint32_t& user_preamble_out) const;
@@ -405,7 +526,7 @@ class PrefixedEntryRingBufferMulti {
                                        span<std::byte> data,
                                        size_t* bytes_read_out) const;
   Status InternalPeekFrontWithPreamble(const Reader& reader,
-                                       ReadOutput output) const;
+                                       ReadOutput&& output) const;
 
   // Pop and discard the oldest stored data chunk of data from the ring buffer.
   //
@@ -426,11 +547,9 @@ class PrefixedEntryRingBufferMulti {
   // chunk, to be read.
   size_t InternalFrontEntryTotalSizeBytes(const Reader& reader) const;
 
-  // Internal version of Read used by all the public interface versions. T
-  // should be of type ReadOutput.
-  template <typename T>
+  // Internal version of Read used by all the public interface versions.
   Status InternalRead(const Reader& reader,
-                      T read_output,
+                      ReadOutput&& read_output,
                       bool include_preamble_in_output,
                       uint32_t* user_preamble_out = nullptr) const;
 

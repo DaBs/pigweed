@@ -170,15 +170,15 @@ thread and registered with the system's RPC server.
    // link.
    constexpr size_t kDefaultMaxBytesToReceive = 16384;
 
-   pw::transfer::TransferService transfer_service(
-       GetSystemTransferThread(), kDefaultMaxBytesToReceive);
+   pw::transfer::TransferService transfer_service(GetSystemTransferThread(),
+                                                  kDefaultMaxBytesToReceive);
 
    // Instantiate a handler for the data to be transferred. The resource ID will
    // be used by the transfer client and server to identify the handler.
    constexpr uint32_t kMagicBufferResourceId = 1;
-   char magic_buffer_to_transfer[256] = { /* ... */ };
-   SimpleBufferReadHandler magic_buffer_handler(
-       kMagicBufferResourceId, magic_buffer_to_transfer);
+   char magic_buffer_to_transfer[256] = {/* ... */};
+   SimpleBufferReadHandler magic_buffer_handler(kMagicBufferResourceId,
+                                                magic_buffer_to_transfer);
 
    }  // namespace
 
@@ -187,6 +187,60 @@ thread and registered with the system's RPC server.
      // with an RPC server.
      bool success = transfer_service.RegisterHandler(magic_buffer_handler);
      GetSystemRpcServer().RegisterService(transfer_service);
+   }
+
+Dynamic handler allocation
+^^^^^^^^^^^^^^^^^^^^^^^^^^
+For ephemeral resources, ``pw_transfer`` provides a ``TransferHandlerAllocator``
+class to simplify the management of dynamic transfer handlers. This class
+allocates handlers from a ``pw::Allocator``, assigns them a unique resource ID,
+and registers them with the transfer service.
+
+When a handler is allocated, a ``TransferResource`` is returned. This is a RAII
+handle that automatically unregisters and deallocates the handler when it goes
+out of scope, ensuring proper cleanup of resources.
+
+**Example of dynamic handler allocation**
+
+.. code-block:: cpp
+
+   #include "pw_allocator/best_fit.h"
+   #include "pw_allocator/block/small_block.h"
+   #include "pw_stream/memory_stream.h"
+   #include "pw_transfer/handler_allocator.h"
+
+   namespace {
+
+   // A transfer service would be defined elsewhere in the system.
+   pw::transfer::TransferService& GetSystemTransferService();
+
+   // Size allocator for kMaxHandlers support
+   constexpr size_t kMaxHandlers = 4;
+   std::array<std::byte,
+              pw::transfer::TransferHandlerAllocator::GetAllocatorSize(
+                  kMaxHandlers, pw::allocator::SmallBlock::kBlockOverhead)>
+       memory_pool_;
+   pw::allocator::BestFitAllocator<pw::allocator::SmallBlock> allocator;
+
+   pw::transfer::TransferHandlerAllocator handler_allocator(
+       GetSystemTransferService(), allocator);
+
+   }  // namespace
+
+   void TransferEphemeralResource() {
+     pw::stream::MemoryReader reader(...);
+
+     // Allocate a handler for the reader. The handler is automatically
+     // registered with the transfer service.
+     pw::Result<pw::transfer::TransferResource> resource =
+         handler_allocator.AllocateReader(reader);
+     ASSERT_TRUE(resource.ok());
+
+     // The resource can now be accessed by a client using the assigned
+     // resource->resource_id().
+
+     // When 'resource' goes out of scope, the handler is automatically
+     // unregistered and the memory is freed.
    }
 
 Transfer client
@@ -271,9 +325,7 @@ is used to manage the transfer. These handles support the following operations:
      } transfer_state;
 
      Result<pw::transfer::Client::Handle> handle = transfer_client.Read(
-         kMagicBufferResourceId,
-         writer,
-         [&transfer_state](pw::Status status) {
+         kMagicBufferResourceId, writer, [&transfer_state](pw::Status status) {
            transfer_state.status = status;
            transfer_state.notification.release();
          });
@@ -323,9 +375,7 @@ be sent.
     public:
      Status PrepareRead() final;
 
-     virtual size_t ResourceSize() const final {
-       return kMyResourceSize;
-     }
+     virtual size_t ResourceSize() const final { return kMyResourceSize; }
 
   };
 
@@ -677,11 +727,11 @@ retries is hit.
 
 Server to client transfer (read)
 ================================
-.. image:: https://storage.googleapis.com/pigweed-media/pw_transfer/read.svg
+.. image:: https://www.gstatic.com/pigweed/pw_transfer/read.svg
 
 Client to server transfer (write)
 =================================
-.. image:: https://storage.googleapis.com/pigweed-media/pw_transfer/write.svg
+.. image:: https://www.gstatic.com/pigweed/pw_transfer/write.svg
 
 Protocol buffer definition
 ==========================
@@ -696,8 +746,6 @@ Protocol errors
 ---------------
 The following table describes the meaning of each status code when sent by the
 sender or the receiver (see `Transfer roles`_).
-
-.. cpp:namespace-push:: pw::stream
 
 +-------------------------+-------------------------+-------------------------+
 | Status                  | Sent by sender          | Sent by receiver        |
@@ -715,17 +763,18 @@ sender or the receiver (see `Transfer roles`_).
 +-------------------------+-------------------------+-------------------------+
 | ``DATA_LOSS``           | Failed to read the data | Failed to write the     |
 |                         | to send. The            | received data. The      |
-|                         | :cpp:class:`Reader`     | :cpp:class:`Writer`     |
+|                         | :cc:`Reader             | :cc:`Writer             |
+|                         | <pw::stream::Reader>`   | <pw::stream::Writer>`   |
 |                         | returned an error.      | returned an error.      |
 +-------------------------+-------------------------+-------------------------+
 | ``FAILED_PRECONDITION`` | Received chunk for transfer that is not active.   |
-+-------------------------+-------------------------+-------------------------+
++-------------------------+---------------------------------------------------+
 | ``INVALID_ARGUMENT``    | Received a malformed packet.                      |
-+-------------------------+-------------------------+-------------------------+
++-------------------------+---------------------------------------------------+
 | ``INTERNAL``            | An assumption of the protocol was violated.       |
 |                         | Encountering ``INTERNAL`` indicates that there is |
 |                         | a bug in the service or client implementation.    |
-+-------------------------+-------------------------+-------------------------+
++-------------------------+---------------------------------------------------+
 | ``PERMISSION_DENIED``   | The transfer does not support the requested       |
 |                         | operation (either reading or writing).            |
 +-------------------------+-------------------------+-------------------------+
@@ -742,9 +791,6 @@ sender or the receiver (see `Transfer roles`_).
 |                         | requested, but seeking  |                         |
 |                         | is not supported.       |                         |
 +-------------------------+-------------------------+-------------------------+
-
-.. cpp:namespace-pop::
-
 
 Transfer roles
 ==============
@@ -939,8 +985,3 @@ to the tests depending on the OS. But this is not supported, `gh#2971
 We don't want to tag the tests ``"exclusive"`` by default because that will
 prevent *different* tests from running in parallel, significantly slowing them
 down.
-
-.. toctree::
-   :hidden:
-
-   API reference <api>

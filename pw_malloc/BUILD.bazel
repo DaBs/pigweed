@@ -20,7 +20,10 @@ load("//pw_unit_test:pw_cc_test.bzl", "pw_cc_test")
 
 package(
     default_visibility = ["//visibility:public"],
-    features = ["-layering_check"],
+    features = [
+        "-layering_check",
+        "-ctad_warnings",
+    ],
 )
 
 licenses(["notice"])
@@ -55,7 +58,7 @@ cc_library(
         "//pw_allocator:synchronized_allocator",
         "//pw_allocator:tracking_allocator",
         "//pw_bytes",
-        "//pw_preprocessor",
+        "//pw_numeric:checked_arithmetic",
     ],
 )
 
@@ -168,6 +171,7 @@ alias(
 cc_library(
     name = "best_fit",
     srcs = ["best_fit.cc"],
+    features = ["-conversion_warnings"],
     deps = [
         ":pw_malloc.facade",
         "//pw_allocator:best_fit",
@@ -177,12 +181,14 @@ cc_library(
 # TODO(b/376730645): Remove deprecated backends.
 cc_library(
     name = "best_fit_block_allocator",
+    features = ["-conversion_warnings"],
     deps = [":best_fit"],
 )
 
 cc_library(
     name = "bucket_allocator",
     srcs = ["bucket_allocator.cc"],
+    features = ["-conversion_warnings"],
     deps = [
         "//pw_allocator:bucket_allocator",
         "//pw_malloc:facade",
@@ -192,12 +198,14 @@ cc_library(
 # TODO(b/376730645): Remove deprecated backends.
 cc_library(
     name = "bucket_block_allocator",
+    features = ["-conversion_warnings"],
     deps = [":bucket_allocator"],
 )
 
 cc_library(
     name = "first_fit",
     srcs = ["first_fit.cc"],
+    features = ["-conversion_warnings"],
     deps = [
         "//pw_allocator:first_fit",
         "//pw_malloc:facade",
@@ -207,24 +215,28 @@ cc_library(
 # TODO(b/376730645): Remove deprecated backends.
 cc_library(
     name = "dual_first_fit_block_allocator",
+    features = ["-conversion_warnings"],
     deps = [":first_fit"],
 )
 
 # TODO(b/376730645): Remove deprecated backends.
 cc_library(
     name = "first_fit_block_allocator",
+    features = ["-conversion_warnings"],
     deps = [":first_fit"],
 )
 
 # TODO(b/376730645): Remove deprecated backends.
 cc_library(
     name = "last_fit_block_allocator",
+    features = ["-conversion_warnings"],
     deps = [":first_fit"],
 )
 
 cc_library(
     name = "worst_fit",
     srcs = ["worst_fit.cc"],
+    features = ["-conversion_warnings"],
     deps = [
         "//pw_allocator:worst_fit",
         "//pw_malloc:facade",
@@ -247,6 +259,7 @@ cc_library(
         "PW_MALLOC_MIN_BUCKET_SIZE=64",
         "PW_MALLOC_NUM_BUCKETS=4",
     ],
+    features = ["-conversion_warnings"],
     implementation_deps = [
         "//pw_assert:check",
         "//pw_tokenizer:decoder",
@@ -277,7 +290,7 @@ cc_library(
                              # Only run using the light framework, since gtest allocates objects before
                              # the test fixture initializes the heap.
                              select({
-                                 "//pw_unit_test:light_setting": [],
+                                 "//pw_unit_test:backend_is_light": [],
                                  "//conditions:default": ["@platforms//:incompatible"],
                              }) +
 

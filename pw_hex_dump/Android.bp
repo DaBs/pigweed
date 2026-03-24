@@ -18,9 +18,10 @@ package {
 
 cc_library_static {
     name: "pw_hex_dump",
-    cpp_std: "c++20",
-    vendor_available: true,
-    host_supported: true,
+    defaults: [
+        "pw_android_common_backends",
+        "pw_android_common_target_support",
+    ],
     srcs: [
         "hex_dump.cc",
     ],
@@ -37,9 +38,15 @@ cc_library_static {
         "pw_status",
         "pw_string",
     ],
+    header_libs: [
+        "pw_log",
+    ],
     export_static_lib_headers: [
         "pw_bytes",
         "pw_span",
         "pw_status",
     ],
+    export_header_lib_headers: [
+        "pw_log",
+    ]
 }

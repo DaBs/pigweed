@@ -269,6 +269,42 @@ TEST(IntrusiveListTest, ListBack) {
 
 // Iterator unit tests
 
+TEST(IntrusiveListTest, IteratorIsDefaultConstructible) {
+  List list;
+  List::iterator iter;
+  EXPECT_NE(iter, list.begin());
+  EXPECT_NE(iter, list.begin());
+  EXPECT_EQ(iter, List::iterator());
+}
+
+TEST(IntrusiveListTest, IteratorIsCopyConstructible) {
+  List list;
+  List::iterator iter1 = list.begin();
+  List::iterator iter2(iter1);
+  EXPECT_EQ(iter2, list.begin());
+}
+
+TEST(IntrusiveListTest, IteratorCopyAssignable) {
+  List list;
+  List::iterator iter1 = list.begin();
+  List::iterator iter2 = iter1;
+  EXPECT_EQ(iter2, list.begin());
+}
+
+TEST(IntrusiveListTest, IteratorisMoveConstructible) {
+  List list;
+  List::iterator iter1 = list.begin();
+  List::iterator iter2(std::move(iter1));
+  EXPECT_EQ(iter2, list.begin());
+}
+
+TEST(IntrusiveListTest, IteratorMoveAssignable) {
+  List list;
+  List::iterator iter1 = list.begin();
+  List::iterator iter2 = std::move(iter1);
+  EXPECT_EQ(iter2, list.begin());
+}
+
 TEST(IntrusiveListTest, IteratorIncrement) {
   Item item_array[20];
   List list;

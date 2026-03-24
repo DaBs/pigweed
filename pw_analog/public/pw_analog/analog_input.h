@@ -16,7 +16,10 @@
 #include "pw_chrono/system_clock.h"
 #include "pw_result/result.h"
 
+/// Analog-to-digital converter (ADC) library
 namespace pw::analog {
+
+/// @module{pw_analog}
 
 /// Base interface for getting analog-to-digital (ADC) samples from one ADC
 /// channel in a thread-safe manner.
@@ -46,19 +49,10 @@ class AnalogInput {
   ///
   /// This method is thread safe.
   ///
-  /// @returns @rst
-  ///
-  /// .. pw-status-codes::
-  ///
-  ///    OK: Returns a sample.
-  ///
-  ///    RESOURCE_EXHAUSTED: ADC peripheral in use.
-  ///
-  ///    DEADLINE_EXCEEDED: Timed out waiting for a sample.
-  ///
-  /// Other statuses left up to the implementer.
-  ///
-  /// @endrst
+  /// @returns @Result{a sample}
+  /// * @RESOURCE_EXHAUSTED: ADC peripheral in use.
+  /// * @DEADLINE_EXCEEDED: Timed out waiting for a sample.
+  /// * Other statuses left up to the implementer.
   Result<int32_t> TryReadFor(chrono::SystemClock::duration timeout) {
     return TryReadUntil(chrono::SystemClock::TimePointAfterAtLeast(timeout));
   }
@@ -68,19 +62,10 @@ class AnalogInput {
   ///
   /// This method is thread safe.
   ///
-  /// @returns @rst
-  ///
-  /// .. pw-status-codes::
-  ///
-  ///    OK: Returns a sample on success.
-  ///
-  ///    RESOURCE_EXHAUSTED: ADC peripheral in use.
-  ///
-  ///    DEADLINE_EXCEEDED: Timed out waiting for a sample.
-  ///
-  /// Other statuses left up to the implementer.
-  ///
-  /// @endrst
+  /// @returns @Result{a sample}
+  /// * @RESOURCE_EXHAUSTED: ADC peripheral in use.
+  /// * @DEADLINE_EXCEEDED: Timed out waiting for a sample.
+  /// * Other statuses left up to the implementer.
   virtual Result<int32_t> TryReadUntil(
       chrono::SystemClock::time_point deadline) = 0;
 

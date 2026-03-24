@@ -20,6 +20,8 @@
 
 namespace pw::tokenizer {
 
+/// @submodule{pw_tokenizer,database}
+
 /// Reads entries from a v0 binary token string database. This class does not
 /// copy or modify the contents of the database.
 ///
@@ -42,7 +44,7 @@ namespace pw::tokenizer {
 /// (`0xFF` or `0xFFFF`) if they are unset. With this format, dates may be
 /// compared naturally as unsigned integers.
 ///
-/// @rst
+/// @code{.unparsed}
 ///   ======  ====  =========================
 ///   Header (16 bytes)
 ///   ---------------------------------------
@@ -64,7 +66,7 @@ namespace pw::tokenizer {
 ///        5     1  Removal month (1-12, 255 if unset)
 ///        6     2  Removal year (65535 if unset)
 ///   ======  ====  ==================================
-/// @endrst
+/// @endcode
 ///
 /// Entries are sorted by token. A string table with a null-terminated string
 /// for each entry in order follows the entries.
@@ -86,10 +88,10 @@ class TokenDatabase {
 
   template <typename T>
   static constexpr uint32_t ReadUint32(const T* bytes) {
-    return static_cast<uint8_t>(bytes[0]) |
-           static_cast<uint8_t>(bytes[1]) << 8 |
-           static_cast<uint8_t>(bytes[2]) << 16 |
-           static_cast<uint8_t>(bytes[3]) << 24;
+    return static_cast<uint32_t>(static_cast<uint8_t>(bytes[0]) |
+                                 static_cast<uint8_t>(bytes[1]) << 8 |
+                                 static_cast<uint8_t>(bytes[2]) << 16 |
+                                 static_cast<uint8_t>(bytes[3]) << 24);
   }
 
  public:
@@ -152,7 +154,7 @@ class TokenDatabase {
     constexpr const Entry* operator->() const { return &entry_; }
 
     constexpr difference_type operator-(const iterator& rhs) const {
-      return (raw_ - rhs.raw_) / sizeof(RawEntry);
+      return (raw_ - rhs.raw_) / static_cast<difference_type>(sizeof(RawEntry));
     }
 
    private:
@@ -196,7 +198,9 @@ class TokenDatabase {
         : begin_(begin), end_(end) {}
 
     // The number of entries in this list.
-    constexpr size_type size() const { return end_ - begin_; }
+    constexpr size_type size() const {
+      return static_cast<size_type>(end_ - begin_);
+    }
 
     // True of the list is empty.
     constexpr bool empty() const { return begin_ == end_; }
@@ -265,7 +269,7 @@ class TokenDatabase {
 
   /// Returns the total number of entries (unique token-string pairs).
   constexpr size_type size() const {
-    return (end_.data - begin_.data) / sizeof(RawEntry);
+    return static_cast<size_type>(end_.data - begin_.data) / sizeof(RawEntry);
   }
 
   /// True if this database was constructed with valid data. The database might
@@ -317,7 +321,9 @@ class TokenDatabase {
 
     // Count the strings in the string table.
     size_type string_count = 0;
-    for (auto i = std::begin(bytes) + StringTable(entries); i < std::end(bytes);
+    for (auto i =
+             std::begin(bytes) + static_cast<ptrdiff_t>(StringTable(entries));
+         i < std::end(bytes);
          ++i) {
       string_count += (*i == '\0') ? 1 : 0;
     }
@@ -372,5 +378,7 @@ class TokenDatabase {
     const signed char* signed_data;
   } begin_, end_;
 };
+
+/// @}
 
 }  // namespace pw::tokenizer

@@ -20,7 +20,6 @@ load("//pw_unit_test:pw_cc_test.bzl", "pw_cc_test")
 
 package(
     default_visibility = ["//visibility:public"],
-    features = ["-layering_check"],
 )
 
 licenses(["notice"])
@@ -29,6 +28,7 @@ cc_library(
     name = "pw_spi_linux",
     srcs = ["spi.cc"],
     hdrs = ["public/pw_spi_linux/spi.h"],
+    features = ["-conversion_warnings"],
     strip_include_prefix = "public",
     target_compatible_with = [
         "@platforms//os:linux",
@@ -47,6 +47,7 @@ cc_binary(
     srcs = [
         "cli.cc",
     ],
+    features = ["-conversion_warnings"],
     target_compatible_with = [
         "@platforms//os:linux",
     ],
@@ -56,6 +57,7 @@ cc_binary(
         "//pw_log",
         "//pw_preprocessor",
         "//pw_result",
+        "//pw_status",
     ],
 )
 
@@ -64,10 +66,15 @@ pw_cc_test(
     srcs = [
         "spi_test.cc",
     ],
+    features = ["-conversion_warnings"],
     target_compatible_with = [
         "@platforms//os:linux",
     ],
-    deps = [":pw_spi_linux"],
+    deps = [
+        ":pw_spi_linux",
+        "//pw_bytes",
+        "//pw_span",
+    ],
 )
 
 sphinx_docs_library(

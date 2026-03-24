@@ -126,7 +126,7 @@ is a search modal. By "search modal" we mean the ability to see search results
 immediately after typing something into the search box. ``pigweed.dev`` has
 this feature now but we had to implement it ourselves:
 
-.. figure:: https://storage.googleapis.com/pigweed-media/seeds/theme/current_search_modal.png
+.. figure:: https://www.gstatic.com/pigweed/seeds/theme/current_search_modal.png
 
    The current search modal on ``pigweed.dev``
 
@@ -145,10 +145,9 @@ Implementing a search modal from scratch is a lot of work to maintain:
    analytics data shows that ``/search.html`` is our second-most-visited page,
    meaning that people use in-site search a lot.
 
-.. _a5038af: https://cs.opensource.google/pigweed/pigweed/+/a5038affded6feab2522a7dcc781c21c4f16cc1e
-
 A breadcrumbs component is another key UI element missing from the current
-theme. We implemented our own custom breadcrumbs element in `a5038af`_.
+theme. We implemented our own custom breadcrumbs element in :cs:`a5038af
+<a5038affded6feab2522a7dcc781c21c4f16cc1e>`.
 Admittedly, this was not much work to create, but we really shouldn't need
 to implement core navigational elements like this ourselves.
 
@@ -187,21 +186,21 @@ sites that are widely renowned for being helpful and easy to use: `MDN`_ and
 To unpack the layout problem we need to look at color-coded diagrams of where
 Stripe, MDN, and Pigweed place key UI elements:
 
-.. _typical Stripe doc: https://storage.googleapis.com/pigweed-media/seeds/theme/stripe2.png
+.. _typical Stripe doc: https://www.gstatic.com/pigweed/seeds/theme/stripe2.png
 
-.. _typical MDN doc: https://storage.googleapis.com/pigweed-media/seeds/theme/mdn2.png
+.. _typical MDN doc: https://www.gstatic.com/pigweed/seeds/theme/mdn2.png
 
-.. _typical Pigweed doc: https://storage.googleapis.com/pigweed-media/seeds/theme/pigweed.png
+.. _typical Pigweed doc: https://www.gstatic.com/pigweed/seeds/theme/pigweed.png
 
-.. figure:: https://storage.googleapis.com/pigweed-media/seeds/theme/stripe-layout.png
+.. figure:: https://www.gstatic.com/pigweed/seeds/theme/stripe-layout.png
 
    Layout of a `typical Stripe doc`_
 
-.. figure:: https://storage.googleapis.com/pigweed-media/seeds/theme/mdn-layout.png
+.. figure:: https://www.gstatic.com/pigweed/seeds/theme/mdn-layout.png
 
    Layout of a `typical MDN doc`_
 
-.. figure:: https://storage.googleapis.com/pigweed-media/seeds/theme/pigweed_layout_2.png
+.. figure:: https://www.gstatic.com/pigweed/seeds/theme/pigweed_layout_2.png
 
    Layout of a `typical Pigweed doc`_
 
@@ -235,7 +234,7 @@ and section nav into a global nav.
 Over time, this global nav gradually builds up and becomes an overwhelmingly
 long list of links:
 
-.. figure:: https://storage.googleapis.com/pigweed-media/seeds/theme/old_global_nav_2.png
+.. figure:: https://www.gstatic.com/pigweed/seeds/theme/old_global_nav_2.png
 
    Global nav circa Q1 2024
 
@@ -244,7 +243,7 @@ little more tidy, but will probably grow and become messy again.
 
 Accessing some links requires navigating through 5 or more layers of nesting:
 
-.. figure:: https://storage.googleapis.com/pigweed-media/seeds/theme/global_nav_2.png
+.. figure:: https://www.gstatic.com/pigweed/seeds/theme/global_nav_2.png
 
    The ``pw_assert`` docs are an example of 5 levels of nesting in the
    current global nav
@@ -291,7 +290,7 @@ User interface elements
 =======================
 ``pydata`` provides a built-in search modal:
 
-.. figure:: https://storage.googleapis.com/pigweed-media/seeds/pydata-sphinx-theme/search_modal.png
+.. figure:: https://www.gstatic.com/pigweed/seeds/pydata-sphinx-theme/search_modal.png
 
 .. _Change #226172: https://pwrev.dev/226172
 
@@ -299,7 +298,7 @@ User interface elements
 I.e. after typing text in the search modal, you do not immediately see
 search results. You have to press :kbd:`Enter` to view the search
 results page. `Change #226172`_ introduces custom logic
-in ``//docs/_static/js/pigweed.js`` and ``//docs/_static/css/pigweed.css``
+in ``//docs/sphinx/_static/js/pigweed.js`` and ``//docs/sphinx/_static/css/pigweed.css``
 to enable an inline search experience. We will attempt to contribute this
 inline search feature to the upstream ``pydata`` repo. The existing custom
 search features at ``//pw_docgen/py/pw_docgen/sphinx/inlinesearch`` will be
@@ -312,19 +311,19 @@ Layout
 The layout of the ``pydata`` theme is much closer to the MDN and Stripe
 layouts than the current Pigweed theme:
 
-.. _typical Pigweed doc when using pydata: https://storage.googleapis.com/pigweed-media/seeds/theme/pigweed_pydata.png
+.. _typical Pigweed doc when using pydata: https://www.gstatic.com/pigweed/seeds/theme/pigweed_pydata.png
 
-.. figure:: https://storage.googleapis.com/pigweed-media/seeds/theme/pydata-layout.png
+.. figure:: https://www.gstatic.com/pigweed/seeds/theme/pydata-layout.png
 
    Layout of a `typical Pigweed doc when using pydata`_
 
 Here are the Stripe and MDN layouts again for comparison:
 
-.. figure:: https://storage.googleapis.com/pigweed-media/seeds/theme/stripe-layout.png
+.. figure:: https://www.gstatic.com/pigweed/seeds/theme/stripe-layout.png
 
    Layout of a `typical Stripe doc`_
 
-.. figure:: https://storage.googleapis.com/pigweed-media/seeds/theme/mdn-layout.png
+.. figure:: https://www.gstatic.com/pigweed/seeds/theme/mdn-layout.png
 
    Layout of a `typical MDN doc`_
 
@@ -337,7 +336,7 @@ top-level nav and section nav, very similar to the layouts of MDN and Stripe.
 First-level links in the current global nav move to the top-level nav in
 the header:
 
-.. figure:: https://storage.googleapis.com/pigweed-media/seeds/theme/nav_changes.png
+.. figure:: https://www.gstatic.com/pigweed/seeds/theme/nav_changes.png
 
    The box on the left is the old global nav. The box on the right is the new
    top-level nav. The first-level links in the global nav become the links in
@@ -347,7 +346,7 @@ the header:
 After clicking a top-level link like ``Modules`` the section nav shows
 all the links related to that section:
 
-.. figure:: https://storage.googleapis.com/pigweed-media/seeds/theme/modules.png
+.. figure:: https://www.gstatic.com/pigweed/seeds/theme/modules.png
 
    After clicking the ``Modules`` link in the header, the list of modules
    appear as first-level links in the section nav
@@ -355,7 +354,7 @@ all the links related to that section:
 In other words, second-level links in the global nav (next screenshot) get
 promoted to top-level links in the new section nav:
 
-.. figure:: https://storage.googleapis.com/pigweed-media/seeds/theme/modules_old.png
+.. figure:: https://www.gstatic.com/pigweed/seeds/theme/modules_old.png
 
    Second-level links like ``Module Structure``, ``pw_alignment``, etc. become
    first-level links in the new section nav

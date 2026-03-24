@@ -3,7 +3,7 @@
 ==========
 Abseil C++
 ==========
-The ``$dir_pw_third_party/abseil-cpp/`` module provides build files to allow
+The ``$pw_external_abseil_cpp/`` module provides build files to allow
 optionally including upstream Abseil C++.
 
 .. _module-pw_third_party_abseil_cpp-using_upstream:
@@ -42,11 +42,3 @@ modules:
 
 The GN build files for Abseil-C++ will be updated when the build files for those
 modules are updated. See those modules for instructions on updating.
-
-.. DO NOT EDIT BELOW THIS LINE. Generated section.
-
-Version
-=======
-The update script was last run for revision `e9ca8d1c`_.
-
-.. _e9ca8d1c: https://github.com/abseil/abseil-cpp/tree/e9ca8d1ca225ef94fd20890b5440b22f490a410a

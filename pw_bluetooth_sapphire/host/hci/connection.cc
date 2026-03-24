@@ -32,13 +32,9 @@
 namespace bt::hci {
 
 Connection::Connection(hci_spec::ConnectionHandle handle,
-                       const DeviceAddress& local_address,
-                       const DeviceAddress& peer_address,
                        Transport::WeakPtr hci,
                        fit::callback<void()> on_disconnection_complete)
     : handle_(handle),
-      local_address_(local_address),
-      peer_address_(peer_address),
       conn_state_(State::kConnected),
       hci_(std::move(hci)),
       weak_self_(this) {
@@ -65,10 +61,8 @@ Connection::~Connection() {
 }
 
 std::string Connection::ToString() const {
-  return bt_lib_cpp_string::StringPrintf(
-      "[HCI connection (handle: %#.4x, address: %s)]",
-      handle_,
-      bt_str(peer_address_));
+  return bt_lib_cpp_string::StringPrintf("[HCI connection (handle: %#.4x)]",
+                                         handle_);
 }
 
 CommandChannel::EventCallbackResult Connection::OnDisconnectionComplete(
@@ -144,9 +138,11 @@ void Connection::Disconnect(pw::bluetooth::emboss::StatusCode reason) {
          static_cast<unsigned char>(reason));
 
   // Send HCI Disconnect.
-  hci_->command_channel()->SendCommand(std::move(disconn),
-                                       std::move(status_cb),
-                                       hci_spec::kCommandStatusEventCode);
+  hci_->command_channel()
+      ->SendCommand(std::move(disconn),
+                    std::move(status_cb),
+                    hci_spec::kCommandStatusEventCode)
+      .IgnoreError();
 }
 
 }  // namespace bt::hci

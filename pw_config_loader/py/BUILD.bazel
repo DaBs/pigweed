@@ -12,24 +12,23 @@
 # License for the specific language governing permissions and limitations under
 # the License.
 
-load("@rules_python//python:defs.bzl", "py_library")
-load("//pw_build:python.bzl", "pw_py_test")
+load("//pw_build:python.bzl", "pw_py_library", "pw_py_test")
 
 package(default_visibility = ["//visibility:public"])
 
 licenses(["notice"])
 
-py_library(
+pw_py_library(
     name = "pw_config_loader",
     srcs = [
         "pw_config_loader/__init__.py",
+        "pw_config_loader/find_config.py",
         "pw_config_loader/json_config_loader_mixin.py",
-        "pw_config_loader/toml_config_loader_mixin.py",
         "pw_config_loader/yaml_config_loader_mixin.py",
     ],
     imports = ["."],
     deps = [
-        "@python_packages//pyyaml",
+        "@pigweed_python_packages//pyyaml",
     ],
 )
 
@@ -41,5 +40,18 @@ pw_py_test(
     ],
     deps = [
         ":pw_config_loader",
+        "@pigweed_python_packages//pyyaml",
+    ],
+)
+
+pw_py_test(
+    name = "find_config_test",
+    size = "small",
+    srcs = [
+        "find_config_test.py",
+    ],
+    deps = [
+        ":pw_config_loader",
+        "@pigweed_python_packages//pyfakefs",
     ],
 )

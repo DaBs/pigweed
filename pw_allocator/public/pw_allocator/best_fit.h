@@ -24,6 +24,8 @@
 
 namespace pw::allocator {
 
+/// @submodule{pw_allocator,concrete_block}
+
 /// Alias for a default block type that is compatible with `FirstFitAllocator`.
 template <typename OffsetType>
 using BestFitBlock = DetailedBlock<OffsetType, GenericFastSortedItem>;
@@ -39,6 +41,10 @@ using BestFitBlock = DetailedBlock<OffsetType, GenericFastSortedItem>;
 /// fragments are more likely to be too small to be useful to other requests.
 template <typename BlockType = BestFitBlock<uintptr_t>>
 class BestFitAllocator : public BlockAllocator<BlockType> {
+ private:
+  using SmallBucket = ForwardSortedBucket<BlockType>;
+  using LargeBucket = FastSortedBucket<BlockType>;
+
  public:
   using Base = BlockAllocator<BlockType>;
 
@@ -53,11 +59,19 @@ class BestFitAllocator : public BlockAllocator<BlockType> {
   BestFitAllocator(ByteSpan region) { Base::Init(region); }
 
  private:
+  /// @copydoc BlockAllocator::GetMaxAllocatable
+  size_t DoGetMaxAllocatable() override {
+    const BlockType* largest = large_bucket_.empty()
+                                   ? small_bucket_.FindLargest()
+                                   : large_bucket_.FindLargest();
+    return largest == nullptr ? 0 : largest->InnerSize();
+  }
+
   /// @copydoc BlockAllocator::ChooseBlock
   BlockResult<BlockType> ChooseBlock(Layout layout) override {
     // The small bucket is slower; skip it if we can.
     BlockType* block = nullptr;
-    if (layout.size() <= sizeof(SortedItem)) {
+    if (layout.size() < sizeof(typename LargeBucket::ItemType)) {
       block = small_bucket_.RemoveCompatible(layout);
       if (block != nullptr) {
         return BlockType::AllocFirst(std::move(block), layout);
@@ -80,15 +94,17 @@ class BestFitAllocator : public BlockAllocator<BlockType> {
 
   /// @copydoc BlockAllocator::RecycleBlock
   void RecycleBlock(BlockType& block) override {
-    if (block.InnerSize() <= sizeof(SortedItem)) {
+    if (block.InnerSize() < sizeof(typename LargeBucket::ItemType)) {
       std::ignore = small_bucket_.Add(block);
     } else {
       std::ignore = large_bucket_.Add(block);
     }
   }
 
-  ForwardSortedBucket<BlockType> small_bucket_;
-  FastSortedBucket<BlockType> large_bucket_;
+  SmallBucket small_bucket_;
+  LargeBucket large_bucket_;
 };
+
+/// @}
 
 }  // namespace pw::allocator

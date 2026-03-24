@@ -14,8 +14,7 @@
 
 import("//build_overrides/pigweed.gni")
 
-import("$dir_pw_docgen/docs.gni")
-import("$dir_pw_third_party/fuzztest/fuzztest.gni")
+import("$pw_external_fuzztest/fuzztest.gni")
 
 config("fuzztest_public_config") {
   cflags = [
@@ -31,8 +30,4 @@ config("fuzztest_public_config") {
   if (dir_pw_third_party_fuzztest != "") {
     include_dirs = [ "$dir_pw_third_party_fuzztest" ]
   }
-}
-
-pw_doc_group("docs") {
-  sources = [ "docs.rst" ]
 }

@@ -25,6 +25,8 @@
 
 namespace pw::allocator::internal {
 
+/// @submodule{pw_allocator,bucket}
+
 /// A container of free blocks.
 ///
 /// Allocators can use buckets to manage their free blocks. This may include
@@ -74,7 +76,9 @@ class BucketBase {
   ///
   /// This can only be called when the bucket is empty.
   constexpr void set_max_inner_size(size_t max_inner_size) {
-    PW_ASSERT(empty());
+    if constexpr (Hardening::kIncludesDebugChecks) {
+      PW_ASSERT(empty());
+    }
     max_inner_size_ = max_inner_size;
   }
 
@@ -92,6 +96,12 @@ class BucketBase {
     }
     derived()->DoAdd(block);
     return true;
+  }
+
+  /// Returns the block of the largest inner size in the bucket, or null if the
+  /// bucket is empty.
+  const BlockType* FindLargest() const {
+    return empty() ? nullptr : derived()->DoFindLargest();
   }
 
   /// Removes and returns a block if the bucket is not empty; otherwise returns
@@ -123,11 +133,13 @@ class BucketBase {
   /// Removes all blocks from this bucket.
   void Clear() { derived()->items_.clear(); }
 
+ protected:
   /// Returns an iterator the first element in a range whose successor satisfies
   /// a given `predicate`.
   ///
-  /// The returned iterator will be in the range (`before_first`, `last`),
-  /// and will be the element before `last` element satisfies the predicate.
+  /// The returned iterator will be in the range [`before_first`, `last`),
+  /// and will be the element **before** the first element that satisfies the
+  /// predicate.
   ///
   /// This is intended to act similar to `std::find_if` in order to return
   /// iterators that can be used with sorted forward lists like
@@ -161,21 +173,29 @@ class BucketBase {
     };
   }
 
+  /// Returns whether the first item represents a block with a smaller inner
+  /// size than the block represented by the second item.
+  static bool Compare(const ItemType& item1, const ItemType& item2) {
+    const BlockType* block1 = BlockType::FromUsableSpace(&item1);
+    const BlockType* block2 = BlockType::FromUsableSpace(&item2);
+    return block1->InnerSize() < block2->InnerSize();
+  }
+
   /// Returns the block storing the item pointed to by the provided `iter`, or
   /// null if the iterator is the `last` iterator.
   template <typename Iterator>
-  constexpr BlockType* GetBlockFromIterator(Iterator iter, Iterator last) {
+  constexpr static BlockType* GetBlockFromIterator(Iterator iter,
+                                                   Iterator last) {
     return iter != last ? BlockType::FromUsableSpace(&(*iter)) : nullptr;
   }
 
   /// Returns the block storing the item after the provided `prev` iterator, or
   /// null if the iterator points to the element before the `last` iterator.
   template <typename Iterator>
-  constexpr BlockType* GetBlockFromPrev(Iterator prev, Iterator last) {
+  constexpr static BlockType* GetBlockFromPrev(Iterator prev, Iterator last) {
     return GetBlockFromIterator(++prev, last);
   }
 
- protected:
   /// Returns an existing item stored in a free block's usable space.
   ///
   /// The item is created when adding a block to a bucket, that is, in the
@@ -195,5 +215,25 @@ class BucketBase {
   /// The maximum inner size of blocks in this bucket.
   size_t max_inner_size_ = std::numeric_limits<size_t>::max();
 };
+
+/// Like cpp20:countr_zero, but returns an unsigned type.
+///
+/// Useful for managing the bitmaps that several allocators use to track empty
+/// buckets.
+template <typename T, typename U = size_t>
+constexpr U CountRZero(T t) {
+  return static_cast<U>(cpp20::countr_zero(t));
+}
+
+/// Like cpp20:countl_zero, but returns an unsigned type.
+///
+/// Useful for managing the bitmaps that several allocators use to track empty
+/// buckets.
+template <typename T, typename U = size_t>
+constexpr U CountLZero(T t) {
+  return static_cast<U>(cpp20::countl_zero(t));
+}
+
+/// @}
 
 }  // namespace pw::allocator::internal

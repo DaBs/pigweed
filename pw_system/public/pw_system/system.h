@@ -16,11 +16,16 @@
 #include <tuple>
 
 #include "pw_allocator/allocator.h"
+#include "pw_async2/dispatcher.h"
 #include "pw_channel/channel.h"
 #include "pw_function/function.h"
 #include "pw_rpc/server.h"
 
 namespace pw {
+
+/// @module{pw_system}
+
+/// Opinionated system framework
 namespace system {
 
 class AsyncCore;  // Forward declaration for function declaration.
@@ -32,11 +37,40 @@ class AsyncCore;  // Forward declaration for function declaration.
 /// and a RPC server.
 system::AsyncCore& System();
 
-/// Starts running `pw_system:async` with the provided IO channel. This function
-/// never returns.
-[[noreturn]] void SystemStart(channel::ByteReaderWriter& io_channel);
+/// @copydoc pw::system::StartAndClobberTheStack
+/// @deprecated Use pw::system::StartAndClobberTheStack() for more visibility
+/// at the call site. The two functions are otherwise the same.
+[[deprecated("Use pw::system::StartAndClobberTheStack()")]] [[noreturn]] void
+SystemStart(channel::ByteReaderWriter& io_channel);
 
 namespace system {
+
+/// Starts running `pw_system:async` with the provided IO channel. This function
+/// never returns, and depending on the backend it may completely clobber the
+/// callers stack so that the scheduled threads can use all of that memory.
+///
+/// @note Do not call this function if you constructed anything on the
+/// stack which must remain intact, such as an RPC service derived from
+/// pw::rpc::Service. You should instead either declare those as static or
+/// allocate them from the heap to prevent them from being randomly overwritten
+/// by this call.
+///
+/// @par
+/// To minimize trouble, we recommend you structure your code to perform all
+/// initialization in a function that then returns to main(). Then main() can
+/// call StartAndClobberTheStack() with "nothing" on the stack. Even then, the
+/// C/C++ runtime initialization may have put values on the stack in order to
+/// call main(), and those would be trashed as well.
+///
+/// @code{.cpp}
+///  void main() {
+///    Initialization();
+///    pw::system::StartAndClobberTheStack();
+///  }
+/// @endcode
+///
+[[noreturn]] void StartAndClobberTheStack(
+    channel::ByteReaderWriter& io_channel);
 
 /// The global `pw::System()` instance. This object is safe to access, whether
 /// `pw::SystemStart` has been called or not.
@@ -60,7 +94,7 @@ class AsyncCore {
 
  private:
   friend AsyncCore& pw::System();
-  friend void pw::SystemStart(channel::ByteReaderWriter&);
+  friend void pw::system::StartAndClobberTheStack(channel::ByteReaderWriter&);
 
   explicit _PW_RPC_CONSTEXPR AsyncCore()
       : rpc_channels_{}, rpc_server_(rpc_channels_) {}

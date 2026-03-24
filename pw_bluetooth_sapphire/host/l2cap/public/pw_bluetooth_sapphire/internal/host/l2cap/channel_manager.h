@@ -57,11 +57,14 @@ class ChannelManager {
   };
 
   // Create a ChannelManager. FakeL2cap can be used instead in tests.
+  // |wake_lease_provider| will be used to acquire wake leases, and must outlive
+  // the returned ChannelManager.
   static std::unique_ptr<ChannelManager> Create(
       hci::AclDataChannel* acl_data_channel,
       hci::CommandChannel* cmd_channel,
       bool random_channel_ids,
-      pw::async::Dispatcher& dispatcher);
+      pw::async::Dispatcher& dispatcher,
+      pw::bluetooth_sapphire::LeaseProvider& wake_lease_provider);
 
   virtual ~ChannelManager() = default;
 
@@ -193,6 +196,13 @@ class ChannelManager {
   // link.
   virtual WeakSelf<internal::LogicalLink>::WeakPtr LogicalLinkForTesting(
       hci_spec::ConnectionHandle handle) = 0;
+
+  // Suppresses autosniff on the given connection |handle|. Returns an RAII
+  // object that, upon destruction, will notify the autosniff manager that this
+  // particular suppression is now gone. The |reason| is used for logging only
+  // and must be a static-life C-string.
+  virtual std::optional<std::unique_ptr<AutosniffSuppressInterface>>
+  SuppressAutosniff(hci_spec::ConnectionHandle handle, const char* reason) = 0;
 };
 
 }  // namespace bt::l2cap

@@ -49,21 +49,24 @@ pw_add_library(pw_transfer STATIC
     pw_transfer.proto.pwpb
 )
 
-pw_add_library(pw_transfer.client STATIC
+pw_add_library(pw_transfer.handler_allocator STATIC
   HEADERS
-    public/pw_transfer/client.h
+    public/pw_transfer/handler_allocator.h
   PUBLIC_INCLUDES
     public
   SOURCES
-    client.cc
+    handler_allocator.cc
   PUBLIC_DEPS
     pw_assert
-    pw_function
-    pw_stream
+    pw_allocator
+    pw_containers.dynamic_vector
+    pw_sync.mutex
     pw_transfer.core
-    pw_transfer.proto.raw_rpc
-  PRIVATE_DEPS
-    pw_log
+)
+
+pw_add_library(pw_transfer.client INTERFACE
+  PUBLIC_DEPS
+    pw_transfer.core
 )
 
 pw_add_library(pw_transfer.core STATIC
@@ -71,6 +74,7 @@ pw_add_library(pw_transfer.core STATIC
     pw_bytes
     pw_chrono.system_clock
     pw_containers.intrusive_list
+    pw_function
     pw_result
     pw_rpc.client
     pw_rpc.raw.client_api
@@ -82,7 +86,9 @@ pw_add_library(pw_transfer.core STATIC
     pw_thread.thread_core
     pw_transfer.config
     pw_transfer.proto.pwpb
+    pw_transfer.proto.raw_rpc
   HEADERS
+    public/pw_transfer/client.h
     public/pw_transfer/handler.h
     public/pw_transfer/internal/chunk.h
     public/pw_transfer/internal/client_context.h
@@ -96,6 +102,7 @@ pw_add_library(pw_transfer.core STATIC
     public
   SOURCES
     chunk.cc
+    client.cc
     client_context.cc
     context.cc
     rate_estimate.cc

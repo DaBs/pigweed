@@ -12,9 +12,7 @@ FakeDispatcher.
 ---
 API
 ---
-.. doxygenclass:: pw::async::BasicDispatcher
-   :members:
-   :protected-members:
+Moved: :cc:`pw_async_basic`
 
 -----
 Usage
@@ -45,9 +43,7 @@ Next, construct and use a ``BasicDispatcher``.
    #include "pw_async_basic/dispatcher.h"
 
    void DelayedPrint(pw::async::Dispatcher& dispatcher) {
-     dispatcher.PostAfter([](auto&){
-        printf("hello world\n");
-     }, 5s);
+     dispatcher.PostAfter([](auto&) { printf("hello world\n"); }, 5s);
    }
 
    int main() {
@@ -60,6 +56,4 @@ Next, construct and use a ``BasicDispatcher``.
 -----------
 Size Report
 -----------
-.. TODO: b/388905812 - Re-enable the size report.
-.. .. include:: docs_size_report
-.. include:: ../size_report_notice
+.. include:: docs_size_report

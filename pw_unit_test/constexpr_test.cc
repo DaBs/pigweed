@@ -121,4 +121,34 @@ PW_CONSTEXPR_TEST(PwConstexprTest, FailingTest, {
 });
 #endif  // PW_NC_TEST
 
+#if PW_NC_TEST(NonConstexprFailsToCompileWithClang)
+PW_NC_EXPECT_CLANG("non-constexpr function");
+PW_NC_EXPECT_GCC("never defined");
+
+#if defined(__clang__)
+bool UsingClang() { return true; }
+#elif defined(__GNUC__)
+constexpr bool UsingClang();
+#endif  // defined(__clang__)
+
+PW_CONSTEXPR_TEST_IF_CLANG(PwConstexprTest, FailsToCompileWithClang, {
+  PW_TEST_EXPECT_TRUE(UsingClang());
+});
+#endif  // PW_NC_TEST
+
+#if PW_NC_TEST(NonConstexprFailsToCompileWithGCC)
+PW_NC_EXPECT_CLANG("not defined");
+PW_NC_EXPECT_GCC("non-constant condition");
+
+#if defined(__clang__)
+constexpr bool UsingGcc();
+#elif defined(__GNUC__)
+bool UsingGcc() { return true; }
+#endif  // defined(__clang__)
+
+PW_CONSTEXPR_TEST_IF_GCC(PwConstexprTest, FailsToCompileWithGCC, {
+  PW_TEST_EXPECT_TRUE(UsingGcc());
+});
+#endif  // PW_NC_TEST
+
 }  // namespace

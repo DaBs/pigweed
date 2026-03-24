@@ -15,152 +15,374 @@
 include($ENV{PW_ROOT}/pw_build/pigweed.cmake)
 include($ENV{PW_ROOT}/pw_async2/backend.cmake)
 
-pw_add_library(pw_async2.poll INTERFACE
+pw_add_module_config(pw_async2_CONFIG)
+
+pw_add_library(pw_async2.config INTERFACE
   HEADERS
-    public/pw_async2/poll.h
-    public/pw_async2/internal/poll_internal.h
-  PUBLIC_DEPS
-    pw_polyfill
-    pw_string.to_string
-    pw_third_party.fuchsia.stdcompat
+    public/pw_async2/internal/config.h
   PUBLIC_INCLUDES
     public
+  PUBLIC_DEPS
+    ${pw_async2_CONFIG}
+)
+
+# TODO: b/481069684 - Remove deprecated alias.
+pw_add_library(pw_async2.poll INTERFACE
+  PUBLIC_DEPS
+    pw_async2
 )
 
 pw_add_test(pw_async2.poll_test
   SOURCES
     poll_test.cc
   PRIVATE_DEPS
-    pw_async2.poll
+    pw_async2
+    pw_async2.testing
 )
 
-pw_add_library(pw_async2.dispatcher_base STATIC
+pw_add_library(pw_async2 STATIC
   HEADERS
-    public/pw_async2/dispatcher_base.h
+    public/pw_async2/await.h
+    public/pw_async2/context.h
+    public/pw_async2/dispatcher.h
+    public/pw_async2/future.h
+    public/pw_async2/future_task.h
+    public/pw_async2/internal/lock.h
+    public/pw_async2/internal/logging.h
+    public/pw_async2/runnable_dispatcher.h
+    public/pw_async2/task.h
+    public/pw_async2/waker.h
+    public/pw_async2/poll.h
+    public/pw_async2/internal/poll_internal.h
+    public/pw_async2/try.h
+    public/pw_async2/func_task.h
   PUBLIC_INCLUDES
     public
   PUBLIC_DEPS
     pw_assert.assert
-    pw_assert.check
-    pw_async2.poll
+    pw_async2.config
+    pw_allocator
     pw_chrono.system_clock
+    pw_containers.intrusive_forward_list
+    pw_containers.intrusive_queue
+    pw_containers.intrusive_list
+    pw_containers.optional
+    pw_function
+    pw_log
+    pw_log.args
+    pw_memory
+    pw_polyfill
+    pw_preprocessor
+    pw_string.to_string
     pw_sync.interrupt_spin_lock
     pw_sync.lock_annotations
-    pw_sync.mutex
+    pw_tokenizer
     pw_toolchain.no_destructor
+    pw_third_party.fuchsia.stdcompat
+  PRIVATE_DEPS
+    pw_assert.check
+    pw_async2._yield
+    pw_thread.sleep
   SOURCES
-    dispatcher_base.cc
+    context.cc
+    dispatcher.cc
+    future.cc
+    runnable_dispatcher.cc
+    task.cc
+    waker.cc
 )
 
-pw_add_facade(pw_async2.dispatcher INTERFACE
-  BACKEND
-    pw_async2.dispatcher_BACKEND
+pw_add_library(pw_async2._yield INTERFACE
   HEADERS
-    public/pw_async2/dispatcher.h
+    private/pw_async2_private/yield.h
+  PUBLIC_INCLUDES
+    private
+  PUBLIC_DEPS
+    pw_chrono.system_clock
+    pw_thread.sleep
+)
+
+pw_add_library(pw_async2.dispatcher INTERFACE
+  PUBLIC_DEPS
+    pw_async2
+)
+
+pw_add_library(pw_async2.testing STATIC
+  HEADERS
+    public/pw_async2/dispatcher_for_test.h
+  PUBLIC_DEPS
+    pw_async2
+    ${pw_async2.dispatcher_for_test_BACKEND}
   PUBLIC_INCLUDES
     public
-  PUBLIC_DEPS
-    pw_async2.dispatcher_base
+  SOURCES
+    dispatcher_for_test.cc
 )
 
 pw_add_test(pw_async2.dispatcher_test
   SOURCES
     dispatcher_test.cc
   PRIVATE_DEPS
-    pw_async2.dispatcher
+    pw_async2
+    pw_async2.testing
     pw_containers.vector
 )
 
-pw_add_test(pw_async2.dispatcher_thread_test
+pw_add_library(pw_async2.basic_dispatcher INTERFACE
+  HEADERS
+    public/pw_async2/basic_dispatcher.h
+  PUBLIC_DEPS
+    pw_async2
+    pw_sync.thread_notification
+  PUBLIC_INCLUDES
+    public
+)
+
+pw_add_library(pw_async2.notified_dispatcher INTERFACE
+  HEADERS
+    public/pw_async2/notified_dispatcher.h
+  PUBLIC_DEPS
+    pw_async2
+    pw_sync.thread_notification
+  PUBLIC_INCLUDES
+    public
+)
+
+pw_add_library(pw_async2.basic_dispatcher_for_test INTERFACE
+  HEADERS
+    dispatcher_for_test_public_overrides/pw_async2_backend/native_dispatcher_for_test.h
+  PUBLIC_DEPS
+    pw_async2.basic_dispatcher
+  PUBLIC_INCLUDES
+    dispatcher_for_test_public_overrides
+)
+
+pw_add_library(pw_async2.epoll_dispatcher STATIC
+  HEADERS
+    public/pw_async2/epoll_dispatcher.h
   SOURCES
-    dispatcher_thread_test.cc
+    epoll_dispatcher.cc
+  PUBLIC_INCLUDES
+    public
+  PUBLIC_DEPS
+    pw_assert
+    pw_async2
+    pw_status
   PRIVATE_DEPS
-    pw_async2.dispatcher
+    pw_log
+)
+
+pw_add_library(pw_async2.epoll_dispatcher_for_test INTERFACE
+  HEADERS
+    epoll_dispatcher_for_test_public_overrides/pw_async2_backend/native_dispatcher_for_test.h
+  PUBLIC_DEPS
+    pw_async2.epoll_dispatcher
+  PUBLIC_INCLUDES
+    epoll_dispatcher_for_test_public_overrides
+)
+
+pw_add_test(pw_async2.future_test
+  SOURCES
+    future_test.cc
+  PRIVATE_DEPS
+    pw_async2
+    pw_async2.select
+    pw_async2.testing
+    pw_compilation_testing._pigweed_only_negative_compilation
+)
+
+pw_add_test(pw_async2.future_task_test
+  SOURCES
+    future_task_test.cc
+  PRIVATE_DEPS
+    pw_async2
+    pw_async2.testing
+    pw_async2.value_future
+)
+
+pw_add_library(pw_async2.future_timeout INTERFACE
+  HEADERS
+    public/pw_async2/future_timeout.h
+  PUBLIC_DEPS
+    pw_assert.assert
+    pw_async2.channel
+    pw_async2
+    pw_async2.system_time_provider
+    pw_async2.time_provider
+    pw_async2.value_future
+    pw_chrono.system_clock
     pw_function
+    pw_preprocessor
+    pw_status
+    pw_third_party.fuchsia.stdcompat
+  PUBLIC_INCLUDES
+    public
+)
+
+pw_add_test(pw_async2.future_timeout_test
+  SOURCES
+    future_timeout_test.cc
+  PRIVATE_DEPS
+    pw_async2.channel
+    pw_async2
+    pw_async2.future_timeout
+    pw_async2.simulated_time_provider
+    pw_async2.testing
+    pw_async2.value_future
+    pw_chrono.system_clock
+    pw_compilation_testing._pigweed_only_negative_compilation
+)
+
+pw_add_library(pw_async2.value_future STATIC
+  SOURCES
+    value_future.cc
+  HEADERS
+    public/pw_async2/value_future.h
+  PUBLIC_INCLUDES
+    public
+  PUBLIC_DEPS
+    pw_async2
+  PRIVATE_DEPS
+    pw_assert.assert
+    pw_assert.check
+    pw_polyfill
+    pw_sync.interrupt_spin_lock
+)
+
+pw_add_test(pw_async2.value_future_test
+  SOURCES
+    value_future_test.cc
+  PRIVATE_DEPS
+    pw_async2
+    pw_async2.testing
+    pw_async2.value_future
+)
+
+pw_add_test(pw_async2.value_future_thread_test
+  SOURCES
+    value_future_thread_test.cc
+  PRIVATE_DEPS
+    pw_async2
+    pw_async2.callback_task
+    pw_async2.testing
+    pw_async2.value_future
     pw_thread.sleep
+    pw_thread.test_thread_context
     pw_thread.thread
 )
 
-pw_add_library(pw_async2.pend_func_task INTERFACE
+pw_add_library(pw_async2.box INTERFACE
   HEADERS
-    public/pw_async2/pend_func_task.h
+    public/pw_async2/box.h
   PUBLIC_DEPS
-    pw_async2.dispatcher
+    pw_allocator.allocator
+    pw_async2
+  PUBLIC_INCLUDES
+    public
+)
+
+pw_add_test(pw_async2.box_test
+  SOURCES
+    box_test.cc
+  PRIVATE_DEPS
+    pw_async2
+    pw_async2.box
+    pw_async2.select
+    pw_async2.testing
+    pw_async2.value_future
+    pw_allocator.testing
+)
+
+# TODO: b/481069684 - Remove deprecated alias.
+pw_add_library(pw_async2.func_task INTERFACE
+  PUBLIC_DEPS
+    pw_async2
+)
+
+pw_add_library(pw_async2.pend_func_task INTERFACE
+  PUBLIC_DEPS
+    pw_async2
+)
+
+pw_add_test(pw_async2.func_task_test
+  SOURCES
+    func_task_test.cc
+  PRIVATE_DEPS
+    pw_async2
+    pw_async2.testing
+)
+
+pw_add_library(pw_async2.callback_task INTERFACE
+  HEADERS
+    public/pw_async2/callback_task.h
+  PUBLIC_DEPS
+    pw_async2
     pw_function
   PUBLIC_INCLUDES
     public
 )
 
-pw_add_test(pw_async2.pend_func_task_test
+pw_add_test(pw_async2.callback_task_test
   SOURCES
-    pend_func_task_test.cc
+    callback_task_test.cc
   PRIVATE_DEPS
-    pw_async2.pend_func_task
+    pw_async2.callback_task
+    pw_async2.testing
+    pw_async2.value_future
+    pw_function
 )
 
-pw_add_library(pw_async2.pendable_as_task INTERFACE
-  HEADERS
-    public/pw_async2/pendable_as_task.h
-  PUBLIC_DEPS
-    pw_async2.dispatcher
-  PUBLIC_INCLUDES
-    public
-)
 
-pw_add_test(pw_async2.pendable_as_task_test
-  SOURCES
-    pendable_as_task_test.cc
-  PRIVATE_DEPS
-    pw_async2.pendable_as_task
-)
-
-pw_add_library(pw_async2.allocate_task INTERFACE
-  HEADERS
-    public/pw_async2/allocate_task.h
-  PUBLIC_DEPS
-    pw_async2.dispatcher
-    pw_allocator.allocator
-  PUBLIC_INCLUDES
-    public
-)
 
 pw_add_test(pw_async2.allocate_task_test
   SOURCES
     allocate_task_test.cc
   PRIVATE_DEPS
-    pw_async2.allocate_task
+    pw_async2
+    pw_async2.testing
+    pw_async2.value_future
     pw_allocator.testing
+    pw_function
+    pw_status
 )
 
-pw_add_library(pw_async2.once_sender INTERFACE
+
+
+pw_add_library(pw_async2.notification INTERFACE
   HEADERS
-    public/pw_async2/once_sender.h
+    public/pw_async2/notification.h
   PUBLIC_DEPS
-    pw_async2.dispatcher
-    pw_function
+    pw_async2.value_future
   PUBLIC_INCLUDES
     public
 )
 
-pw_add_test(pw_async2.once_sender_test
+pw_add_test(pw_async2.notification_test
   SOURCES
-    once_sender_test.cc
+    notification_test.cc
   PRIVATE_DEPS
-    pw_async2.once_sender
-    pw_containers.vector
+    pw_async2.notification
+    pw_async2.testing
+    pw_async2
 )
 
 if("cxx_std_20" IN_LIST CMAKE_CXX_COMPILE_FEATURES)
   pw_add_library(pw_async2.coro STATIC
     HEADERS
       public/pw_async2/coro.h
+      public/pw_async2/coro_task.h
+      public/pw_async2/fallible_coro_task.h
     SOURCES
       coro.cc
+      coro_task.cc
     PRIVATE_DEPS
+      pw_assert.check
       pw_log
     PUBLIC_DEPS
       pw_allocator.allocator
-      pw_async2.dispatcher
+      pw_assert.assert
+      pw_async2
+      pw_containers.optional
       pw_function
     PUBLIC_INCLUDES
       public
@@ -173,55 +395,47 @@ if("cxx_std_20" IN_LIST CMAKE_CXX_COMPILE_FEATURES)
       pw_allocator.null_allocator
       pw_allocator.testing
       pw_async2.coro
+      pw_async2.testing
+      pw_containers._test_helpers
+      pw_status
+      pw_compilation_testing._pigweed_only_negative_compilation
   )
 
-  pw_add_library(pw_async2.coro_or_else_task INTERFACE
-    HEADERS
-      public/pw_async2/coro.h
-    PUBLIC_DEPS
-      pw_async2.coro
-      pw_async2.dispatcher
-      pw_function
-    PUBLIC_INCLUDES
-      public
-  )
-
-  pw_add_test(pw_async2.coro_or_else_task_test
+  pw_add_test(pw_async2.fallible_coro_task_test
     SOURCES
-      coro_or_else_task_test.cc
+      fallible_coro_task_test.cc
     PRIVATE_DEPS
-      pw_async2.coro
-      pw_async2.coro_or_else_task
-      pw_async2.dispatcher
       pw_allocator.null_allocator
       pw_allocator.testing
+      pw_async2
+      pw_async2.coro
+      pw_async2.testing
+      pw_async2.value_future
+      pw_containers._test_helpers
+      pw_status
   )
 
-  pw_add_library(pw_async2.pend_func_awaitable INTERFACE
-    HEADERS
-      public/pw_async2/pend_func_task.h
-    PUBLIC_DEPS
-      pw_async2.dispatcher
-      pw_async2.poll
-      pw_function
-    PUBLIC_INCLUDES
-      public
-  )
-
-  pw_add_test(pw_async2.pend_func_awaitable_test
+  pw_add_test(pw_async2.coro_task_test
     SOURCES
-      pend_func_awaitable_test.cc
+      coro_task_test.cc
     PRIVATE_DEPS
       pw_async2.coro
-      pw_async2.coro_or_else_task
-      pw_async2.dispatcher
-      pw_async2.pend_func_awaitable
-      pw_async2.poll
+      pw_async2
+      pw_async2.testing
       pw_allocator.testing
-      pw_function
+      pw_status
+  )
+
+  pw_add_test(pw_async2.allocate_task_coro_test
+    SOURCES
+      allocate_task_coro_test.cc
+    PRIVATE_DEPS
+      pw_async2.coro
+      pw_async2
+      pw_async2.testing
+      pw_allocator.testing
   )
 endif()
-
 
 pw_add_library(pw_async2.time_provider STATIC
   HEADERS
@@ -229,9 +443,13 @@ pw_add_library(pw_async2.time_provider STATIC
   SOURCES
     time_provider.cc
   PUBLIC_DEPS
-    pw_async2.dispatcher
+    pw_async2
+    pw_chrono.virtual_clock
     pw_containers.intrusive_list
+    pw_function
+    pw_memory
     pw_sync.interrupt_spin_lock
+    pw_toolchain.no_destructor
   PUBLIC_INCLUDES
     public
 )
@@ -252,12 +470,13 @@ pw_add_library(pw_async2.system_time_provider STATIC
 )
 
 if((NOT "${pw_chrono.system_clock_BACKEND}" STREQUAL "") AND
-   (NOT "${pw_sync.interrupt_spin_lock_BACKEND}" STREQUAL ""))
+  (NOT "${pw_sync.interrupt_spin_lock_BACKEND}" STREQUAL ""))
   pw_add_test(pw_async2.system_time_provider_test
     SOURCES
       system_time_provider_test.cc
     PRIVATE_DEPS
       pw_async2.system_time_provider
+      pw_async2.testing
       pw_chrono.system_clock
     GROUPS
       modules
@@ -274,12 +493,13 @@ pw_add_library(pw_async2.simulated_time_provider INTERFACE
 )
 
 if((NOT "${pw_chrono.system_clock_BACKEND}" STREQUAL "") AND
-   (NOT "${pw_sync.interrupt_spin_lock_BACKEND}" STREQUAL ""))
+  (NOT "${pw_sync.interrupt_spin_lock_BACKEND}" STREQUAL ""))
   pw_add_test(pw_async2.simulated_time_provider_test
     SOURCES
       simulated_time_provider_test.cc
     PRIVATE_DEPS
       pw_async2.simulated_time_provider
+      pw_async2.testing
       pw_chrono.system_clock
     GROUPS
       modules
@@ -287,40 +507,177 @@ if((NOT "${pw_chrono.system_clock_BACKEND}" STREQUAL "") AND
   )
 endif()
 
-pw_add_library(pw_async2.enqueue_heap_func INTERFACE
-  HEADERS
-    public/pw_async2/enqueue_heap_func.h
-  PUBLIC_DEPS
-    pw_async2.dispatcher
-)
-
-pw_add_test(pw_async2.enqueue_heap_func_test
-  SOURCES
-    enqueue_heap_func_test.cc
-  PRIVATE_DEPS
-    pw_async2.dispatcher
-    pw_async2.enqueue_heap_func
-  GROUPS
-    modules
-    pw_async2
-)
-
 pw_add_library(pw_async2.join INTERFACE
   HEADERS
     public/pw_async2/join.h
   PUBLIC_DEPS
-    pw_async2.dispatcher
+    pw_async2
 )
 
 pw_add_test(pw_async2.join_test
   SOURCES
     join_test.cc
   PRIVATE_DEPS
-    pw_async2.dispatcher
+    pw_async2
     pw_async2.join
+    pw_async2.testing
+    pw_async2.value_future
+    pw_compilation_testing._pigweed_only_negative_compilation
   GROUPS
     modules
     pw_async2
 )
 
-add_subdirectory(examples)
+pw_add_library(pw_async2.select INTERFACE
+  HEADERS
+    public/pw_async2/select.h
+  PUBLIC_DEPS
+    pw_async2
+    pw_containers.optional_tuple
+)
+
+pw_add_test(pw_async2.select_test
+  SOURCES
+    select_test.cc
+  PRIVATE_DEPS
+    pw_async2
+    pw_async2.select
+    pw_async2.testing
+    pw_async2.value_future
+    pw_unit_test.constexpr
+  GROUPS
+    modules
+    pw_async2
+)
+
+pw_add_library(pw_async2.cancellable_task INTERFACE
+  HEADERS
+    public/pw_async2/cancellable_task.h
+  PUBLIC_DEPS
+    pw_async2
+  PUBLIC_INCLUDES
+    public
+)
+
+pw_add_test(pw_async2.cancellable_task_test
+  SOURCES
+    cancellable_task_test.cc
+  PRIVATE_DEPS
+    pw_async2
+    pw_async2.cancellable_task
+    pw_async2.testing
+    pw_function
+)
+
+pw_add_library(pw_async2.channel STATIC
+  HEADERS
+    public/pw_async2/channel.h
+  SOURCES
+    channel.cc
+  PUBLIC_DEPS
+    pw_assert
+    pw_async2
+    pw_async2.callback_task
+    pw_allocator
+    pw_containers.deque
+    pw_numeric.checked_arithmetic
+    pw_sync.interrupt_spin_lock
+    pw_sync.timed_thread_notification
+  PUBLIC_INCLUDES
+    public
+)
+
+pw_add_test(pw_async2.channel_test
+  SOURCES
+    channel_test.cc
+  PRIVATE_DEPS
+    pw_async2
+    pw_async2.channel
+    pw_async2.testing
+    pw_allocator.testing
+    pw_containers.vector
+)
+
+pw_add_test(pw_async2.channel_thread_test
+  SOURCES
+    channel_thread_test.cc
+  PRIVATE_DEPS
+    pw_async2.channel
+    pw_async2
+    pw_async2.testing
+    pw_containers.vector
+    pw_thread.test_thread_context
+    pw_thread.thread
+)
+
+if((NOT "${pw_unit_test_BACKEND}" STREQUAL "") AND
+   (NOT "${pw_unit_test_BACKEND}" STREQUAL "pw_unit_test:light"))
+pw_add_test(pw_async2.channel_typed_test
+  SOURCES
+    channel_typed_test.cc
+  PRIVATE_DEPS
+    pw_async2
+    pw_async2.channel
+    pw_async2.testing
+    pw_allocator.testing
+    pw_containers.vector
+)
+endif()
+
+pw_add_test(pw_async2.task_test
+  SOURCES
+    task_test.cc
+  PRIVATE_DEPS
+    pw_async2
+    pw_async2.testing
+    pw_sync.binary_semaphore
+    pw_sync.mutex
+    pw_thread.sleep
+    pw_thread.test_thread_context
+    pw_thread.thread
+)
+
+pw_add_test(pw_async2.dispatcher_thread_test
+  SOURCES
+    dispatcher_thread_test.cc
+  PRIVATE_DEPS
+    pw_async2
+    pw_async2.testing
+    pw_sync.thread_notification
+    pw_thread.sleep
+    pw_thread.test_thread_context
+    pw_thread.thread
+)
+
+pw_add_test(pw_async2.dispatcher_stress_test
+  SOURCES
+    dispatcher_stress_test.cc
+  PRIVATE_DEPS
+    pw_assert
+    pw_async2
+    pw_async2.notified_dispatcher
+    pw_allocator.libc_allocator
+    pw_containers.dynamic_queue
+    pw_containers.dynamic_vector
+    pw_log
+    pw_sync.lock_annotations
+    pw_sync.mutex
+    pw_sync.thread_notification
+    pw_thread.test_thread_context
+    pw_thread.thread
+    pw_thread.yield
+)
+
+if("cxx_std_20" IN_LIST CMAKE_CXX_COMPILE_FEATURES)
+  pw_add_test(pw_async2.channel_coro_test
+    SOURCES
+      channel_coro_test.cc
+    PRIVATE_DEPS
+      pw_async2.channel
+      pw_async2.coro
+      pw_async2
+      pw_async2.testing
+      pw_allocator.testing
+      pw_containers.vector
+  )
+endif()

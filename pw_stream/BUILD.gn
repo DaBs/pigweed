@@ -16,7 +16,6 @@ import("//build_overrides/pigweed.gni")
 
 import("$dir_pw_build/target_types.gni")
 import("$dir_pw_chrono/backend.gni")
-import("$dir_pw_docgen/docs.gni")
 import("$dir_pw_fuzzer/fuzzer.gni")
 import("$dir_pw_thread/backend.gni")
 import("$dir_pw_toolchain/generate_toolchain.gni")
@@ -37,7 +36,7 @@ pw_source_set("pw_stream") {
   ]
   sources = [ "memory_stream.cc" ]
   public_deps = [
-    "$dir_pw_toolchain:sibling_cast",
+    "$dir_pw_memory:sibling_cast",
     dir_pw_assert,
     dir_pw_bytes,
     dir_pw_polyfill,
@@ -68,6 +67,7 @@ pw_source_set("socket_stream") {
 pw_source_set("sys_io_stream") {
   public_configs = [ ":public_include_path" ]
   public_deps = [
+    "$dir_pw_bytes",
     "$dir_pw_stream",
     "$dir_pw_sys_io",
   ]
@@ -93,6 +93,15 @@ pw_source_set("interval_reader") {
   sources = [ "interval_reader.cc" ]
 }
 
+pw_source_set("limited_stream") {
+  public_configs = [ ":public_include_path" ]
+  public_deps = [
+    ":pw_stream",
+    dir_pw_status,
+  ]
+  public = [ "public/pw_stream/limited_stream.h" ]
+}
+
 pw_source_set("mpsc_stream") {
   public_configs = [ ":public_include_path" ]
   public_deps = [
@@ -109,15 +118,6 @@ pw_source_set("mpsc_stream") {
   ]
   public = [ "public/pw_stream/mpsc_stream.h" ]
   sources = [ "mpsc_stream.cc" ]
-}
-
-pw_doc_group("docs") {
-  inputs = [ "Kconfig" ]
-  sources = [
-    "backends.rst",
-    "docs.rst",
-  ]
-  group_deps = [ "py:docs" ]
 }
 
 pw_test_group("tests") {
@@ -139,6 +139,16 @@ pw_test_group("tests") {
       tests += [ ":socket_stream_test" ]
     }
   }
+}
+
+pw_test("limited_stream_test") {
+  sources = [ "limited_stream_test.cc" ]
+  deps = [
+    ":limited_stream",
+    ":pw_stream",
+    dir_pw_bytes,
+    dir_pw_status,
+  ]
 }
 
 pw_test("memory_stream_test") {

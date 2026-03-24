@@ -229,6 +229,16 @@ class Context:
        context = console_tools.Context(
            clients, default_client, protos, help_header=WELCOME_MESSAGE)
        IPython.start_ipython(argv=[], user_ns=dict(**context.variables()))
+
+    Or with ptpython:
+
+    .. code-block:: python
+
+       from ptpython.repl import embed
+
+       context = console_tools.Context(
+           clients, default_client, protos, help_header=WELCOME_MESSAGE)
+       embed(globals(), dict(**context.variables()))
     """
 
     def __init__(
@@ -274,9 +284,9 @@ class Context:
 
         # Make the proto package hierarchy directly available in the console.
         for package in self.protos.packages:
-            self._variables[
-                package._package
-            ] = package  # pylint: disable=protected-access
+            self._variables[package._package] = (
+                package  # pylint: disable=protected-access
+            )
 
         # Monkey patch the message types to use an improved repr function.
         for message_type in self.protos.messages():

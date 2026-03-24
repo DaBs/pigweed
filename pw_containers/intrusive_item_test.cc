@@ -200,7 +200,10 @@ TEST(IntrusiveItemTest, AddToEachContainerSimultaneousy) {
 PW_NC_EXPECT_CLANG(
     "member 'ItemType' found in multiple base classes of different types");
 PW_NC_EXPECT_GCC("lookup of 'ItemType' in '{anonymous}::Derived' is ambiguous");
-[[maybe_unused]] IntrusiveForwardList<Derived> bad_fwd_list;
+[[maybe_unused]] void MultipleBases() {
+  IntrusiveForwardList<Derived> bad_fwd_list;
+  (void)bad_fwd_list.front();
+}
 
 #elif PW_NC_TEST(ListValueTypeHasMultipleBases)
 PW_NC_EXPECT_CLANG(

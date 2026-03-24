@@ -21,15 +21,24 @@ package(default_visibility = ["//visibility:public"])
 
 licenses(["notice"])
 
+label_flag(
+    name = "config_override",
+    build_setting_default = "//pw_build:default_module_config",
+)
+
 cc_library(
     name = "pw_i2c_mcuxpresso",
     srcs = ["initiator.cc"],
     hdrs = ["public/pw_i2c_mcuxpresso/initiator.h"],
+    implementation_deps = ["//pw_assert:check"],
     strip_include_prefix = "public",
     deps = [
         "//pw_chrono:system_clock",
+        "//pw_clock_tree",
+        "//pw_function:scope_guard",
         "//pw_i2c:address",
         "//pw_i2c:initiator",
+        "//pw_log",
         "//pw_status",
         "//pw_sync:interrupt_spin_lock",
         "//pw_sync:lock_annotations",
@@ -46,6 +55,59 @@ pw_cc_test(
 )
 
 cc_library(
+    name = "flexio_i2c_initiator",
+    srcs = ["flexio_initiator.cc"],
+    hdrs = ["public/pw_i2c_mcuxpresso/flexio_initiator.h"],
+    implementation_deps = ["//pw_assert:check"],
+    strip_include_prefix = "public",
+    deps = [
+        "//pw_chrono:system_clock",
+        "//pw_clock_tree",
+        "//pw_function:scope_guard",
+        "//pw_i2c:address",
+        "//pw_i2c:initiator",
+        "//pw_log",
+        "//pw_status",
+        "//pw_sync:interrupt_spin_lock",
+        "//pw_sync:lock_annotations",
+        "//pw_sync:mutex",
+        "//pw_sync:timed_thread_notification",
+        "//targets:mcuxpresso_sdk",
+    ],
+)
+
+pw_cc_test(
+    name = "flexio_initiator_test",
+    srcs = ["flexio_initiator_test.cc"],
+    tags = ["manual"],
+    deps = [":flexio_i2c_initiator"],
+)
+
+cc_library(
+    name = "dma_initiator",
+    srcs = ["dma_initiator.cc"],
+    hdrs = ["public/pw_i2c_mcuxpresso/dma_initiator.h"],
+    implementation_deps = ["//pw_assert:check"],
+    strip_include_prefix = "public",
+    deps = [
+        "//pw_chrono:system_clock",
+        "//pw_clock_tree",
+        "//pw_dma_mcuxpresso",
+        "//pw_function",
+        "//pw_function:scope_guard",
+        "//pw_i2c:address",
+        "//pw_i2c:initiator",
+        "//pw_log",
+        "//pw_status",
+        "//pw_sync:interrupt_spin_lock",
+        "//pw_sync:lock_annotations",
+        "//pw_sync:mutex",
+        "//pw_sync:timed_thread_notification",
+        "//targets:mcuxpresso_sdk",
+    ],
+)
+
+cc_library(
     name = "i3c_ccc",
     hdrs = [
         "public/pw_i2c_mcuxpresso/i3c_ccc.h",
@@ -57,19 +119,27 @@ cc_library(
     name = "i3c_initiator",
     srcs = ["i3c_initiator.cc"],
     hdrs = [
+        "public/pw_i2c_mcuxpresso/config.h",
         "public/pw_i2c_mcuxpresso/i3c_initiator.h",
     ],
+    implementation_deps = ["//pw_assert:check"],
     strip_include_prefix = "public",
     deps = [
+        ":config_override",
         ":i3c_ccc",
         "//pw_bytes",
         "//pw_chrono:system_clock",
+        "//pw_clock_tree",
         "//pw_containers:vector",
+        "//pw_dma_mcuxpresso",
+        "//pw_function:scope_guard",
         "//pw_i2c:address",
         "//pw_i2c:initiator",
         "//pw_log",
+        "//pw_result",
         "//pw_status",
         "//pw_sync:mutex",
+        "//pw_sync:timed_thread_notification",
         "//targets:mcuxpresso_sdk",
         "//third_party/fuchsia:stdcompat",
     ],

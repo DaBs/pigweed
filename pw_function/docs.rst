@@ -32,7 +32,7 @@ pw_function
 
    add(5, 6);
    add = nullptr;  // pw::Function and pw::Callback are nullable
-   add(7, 2);  // CRASH
+   add(7, 2);      // CRASH
 
    square(4);
 
@@ -41,7 +41,6 @@ pw_function
    } else {
      // ┬─┬ノ( º _ ºノ)
    }
-
 
 .. _module-pw_function-start:
 
@@ -64,10 +63,6 @@ Get started
              # ...
            ]
          }
-
-      This assumes that your Bazel ``WORKSPACE`` has a `repository
-      <https://bazel.build/concepts/build-ref#repositories>`_ named ``@pigweed``
-      that points to the upstream Pigweed repository.
 
    .. tab-item:: GN
 
@@ -183,7 +178,7 @@ constructors and in ``constinit`` expressions.
    class MyClass {
     public:
      // Default construction of a pw::Function is constexpr.
-     constexpr MyClass() { ... }
+     constexpr MyClass() { /* ... */ }
 
      pw::Function<void(int)> my_function;
    };
@@ -221,9 +216,7 @@ should be passed as an rvalue reference and moved into a
 
    // This function calls a pw::Function but doesn't store it, so it takes a
    // const reference.
-   void CallTheCallback(const pw::Function<void(int)>& callback) {
-     callback(123);
-   }
+   void CallTheCallback(const pw::Function<void(int)>& callback) { callback(123); }
 
    // This function move-assigns a pw::Function to another variable, so it takes
    // an rvalue reference.
@@ -369,25 +362,7 @@ layer for a :cpp:class:`pw::Function` automatically.
 -------------
 API reference
 -------------
-.. doxygengroup:: pw_function
-   :content-only:
-
-``pw::function::GetFunctionPointer()``
-======================================
-.. doxygenfile:: pw_function/pointer.h
-   :sections: detaileddescription
-.. doxygenfunction:: GetFunctionPointer()
-.. doxygenfunction:: GetFunctionPointer(const FunctionType&)
-
-``pw::function::GetFunctionPointerContextFirst()``
-==================================================
-.. doxygenfunction:: GetFunctionPointerContextFirst()
-.. doxygenfunction:: GetFunctionPointerContextFirst(const FunctionType&)
-
-``pw::ScopeGuard``
-==================
-.. doxygenclass:: pw::ScopeGuard
-   :members:
+Moved: :cc:`pw_function`
 
 .. _module-pw_function-design:
 
@@ -398,7 +373,7 @@ Design
 ``pw::Callback`` is an alias of Fuchsia's ``fit::callback_impl``. See the
 following links for more information about Fuchsia's implementations:
 
-* `//third_party/fuchsia/repo/sdk/lib/fit/include/lib/fit/function.h <https://cs.opensource.google/pigweed/pigweed/+/main:third_party/fuchsia/repo/sdk/lib/fit/include/lib/fit/function.h>`_
+* :cs:`third_party/fuchsia/repo/sdk/lib/fit/include/lib/fit/function.h`
 * `fit::function <https://fuchsia.googlesource.com/fuchsia/+/HEAD/sdk/lib/fit/#fit_function>`_
 
 .. _module-pw_function-non-literal:
@@ -425,9 +400,7 @@ Comparing ``pw::Function`` to a traditional function pointer
 The following size report compares an API using a :cpp:type:`pw::Function` to a
 traditional function pointer.
 
-.. TODO: b/388905812 - Re-enable the size report.
-.. .. include:: function_size
-.. include:: ../size_report_notice
+.. include:: function_size
 
 Typical sizes of various callable types
 =======================================

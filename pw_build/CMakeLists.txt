@@ -18,6 +18,9 @@
 include("$ENV{PW_ROOT}/pw_build/cc_blob_library.cmake")
 include("$ENV{PW_ROOT}/pw_build/pigweed.cmake")
 
+option(pw_ENABLE_CC_SANDBOX
+    "Whether to sandbox C++ sources and headers, Bazel-style" OFF)
+
 # Target that specifies the standard Pigweed build options.
 pw_add_library_generic(pw_build INTERFACE
   PUBLIC_COMPILE_OPTIONS
@@ -49,6 +52,7 @@ pw_add_library_generic(pw_build.reduced_size INTERFACE
     $<$<COMPILE_LANGUAGE:CXX>:-fno-rtti>
 )
 
+# LINT.IfChange(strict_warnings)
 # Define the standard Pigweed compile options.
 #
 # The pw_build.warnings library is used by upstream Pigweed targets to add
@@ -97,14 +101,18 @@ if(NOT ZEPHYR_PIGWEED_MODULE_DIR)
   # Only include these flags if we're not building with Zephyr.
   set(extra_strict_warnings_cond "-Wredundant-decls")
 endif()
+# LINT.ThenChange(//pw_toolchain/cc/args/BUILD.bazel:strict_warnings,//pw_toolchain/cc/args/BUILD.gn:strict_warnings)
 
+# LINT.IfChange(extra_strict_warnings)
 pw_add_library_generic(pw_build.extra_strict_warnings INTERFACE
   PUBLIC_COMPILE_OPTIONS
     "-Wshadow"
     ${extra_strict_warnings_cond}
     $<$<COMPILE_LANGUAGE:C>:-Wstrict-prototypes>
 )
+# LINT.ThenChange(//pw_toolchain/cc/args/BUILD.bazel:extra_strict_warnings,//pw_toolchain/cc/args/BUILD.gn:extra_strict_warnings)
 
+# LINT.IfChange(internal_strict_warnings)
 pw_add_library_generic(pw_build.pedantic_warnings INTERFACE
   PUBLIC_COMPILE_OPTIONS
     # Enable -Wpedantic, but disable a few warnings.
@@ -113,6 +121,10 @@ pw_add_library_generic(pw_build.pedantic_warnings INTERFACE
     # Allow designated initializers, which were added in C++20 but widely
     # supported prior and permitted by the Google style guide.
     "-Wno-c++20-designator"
+
+    # __COUNTER__ is a GCC extension until C++26. Using it results in
+    # -Wc2y-extensions warnings, which must be disabled.
+    "-Wno-c2y-extensions"
 
     # Allow empty ... arguments in macros, which are permitted in C++20 but
     # widely supported prior.
@@ -131,10 +143,8 @@ pw_add_library_generic(pw_build.pedantic_warnings INTERFACE
     # warning introduced by Clang produces warnings in third party code.
     # Remove this warning suppression after addressing the root cause.
     "-Wno-missing-template-arg-list-after-template-kw"
-
-    # TODO: b/356689444 - Remove no-unknown-warning-option after Clang roll.
-    "-Wno-unknown-warning-option"
 )
+# LINT.ThenChange(//pw_toolchain/cc/args/BUILD.bazel:internal_strict_warnings,//pw_toolchain/cc/args/BUILD.gn:internal_strict_warnings)
 
 pw_add_library_generic(pw_build.cpp17 INTERFACE
   PUBLIC_COMPILE_OPTIONS
@@ -176,4 +186,74 @@ pw_add_library(pw_build.must_place INTERFACE
     public/pw_build/must_place.ld.h
   PUBLIC_INCLUDES
     public
+)
+
+# DOCSTAG[pw_build-cmake-sandbox-example]
+pw_add_library(pw_build._sandbox_test_visible_header_sandbox_on INTERFACE
+  HEADERS
+    public/pw_build/internal/test_header_with_dep.h
+  PUBLIC_INCLUDES
+    public
+  SANDBOX ON
+)
+# DOCSTAG[pw_build-cmake-sandbox-example]
+
+pw_add_library(pw_build._sandbox_test_visible_header_sandbox_off INTERFACE
+  HEADERS
+    public/pw_build/internal/test_header_with_dep.h
+  PUBLIC_INCLUDES
+    public
+  SANDBOX OFF
+)
+
+pw_add_library(pw_build._sandbox_test_invisible_header INTERFACE
+  HEADERS
+    public/pw_build/internal/test_header_without_dep.h
+  PUBLIC_INCLUDES
+    public
+  SANDBOX OFF
+)
+
+pw_add_test(pw_build.sandbox_enabled_test
+  SOURCES
+    sandbox_test.cc
+  PRIVATE_DEFINES
+    SANDBOX_ENABLED=1
+  PRIVATE_DEPS
+    pw_build._sandbox_test_visible_header_sandbox_on
+  GROUPS
+    modules
+    pw_build
+)
+
+set(absolute_test_header public/pw_build/internal/test_header_with_dep.h)
+cmake_path(ABSOLUTE_PATH absolute_test_header)
+
+set(absolute_test_source absolute_path_source_file.cc)
+cmake_path(ABSOLUTE_PATH absolute_test_source)
+
+set(absolute_public_include public)
+cmake_path(ABSOLUTE_PATH absolute_public_include)
+
+pw_add_library(pw_build._sandbox_test_absolute_path STATIC
+  HEADERS
+    "${absolute_test_header}"
+  SOURCES
+    "${absolute_test_source}"
+  PUBLIC_INCLUDES
+    "${absolute_public_include}"
+  SANDBOX ON
+)
+
+pw_add_test(pw_build.sandbox_absolute_path_test
+  SOURCES
+    sandbox_test.cc
+    sandbox_absolute_source_test.cc
+  PRIVATE_DEFINES
+    SANDBOX_ENABLED=1
+  PRIVATE_DEPS
+    pw_build._sandbox_test_absolute_path
+  GROUPS
+    modules
+    pw_build
 )

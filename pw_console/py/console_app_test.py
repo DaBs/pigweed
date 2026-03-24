@@ -35,7 +35,7 @@ class TestConsoleApp(unittest.TestCase):
             prefs = ConsolePrefs(
                 project_file=False, project_user_file=False, user_file=False
             )
-            prefs.set_code_theme('default')
+            prefs.code_theme = 'default'
             console_app = ConsoleApp(
                 color_depth=ColorDepth.DEPTH_8_BIT, prefs=prefs
             )
@@ -49,7 +49,7 @@ class TestConsoleApp(unittest.TestCase):
             prefs = ConsolePrefs(
                 project_file=False, project_user_file=False, user_file=False
             )
-            prefs.set_code_theme('default')
+            prefs.code_theme = 'default'
             console_app = ConsoleApp(
                 color_depth=ColorDepth.DEPTH_8_BIT, prefs=prefs
             )

@@ -41,8 +41,7 @@ void TraceService::GetTraceData(
     const pw_trace_Empty&, ServerWriter<pw_trace_TraceDataMessage>& writer) {
   pw_trace_TraceDataMessage buffer = pw_trace_TraceDataMessage_init_default;
   size_t size = 0;
-  pw::ring_buffer::PrefixedEntryRingBuffer* trace_buffer =
-      pw::trace::GetBuffer();
+  pw::trace::TraceBuffer* trace_buffer = pw::trace::GetBuffer();
 
   while (trace_buffer->PeekFront(as_writable_bytes(span(buffer.data.bytes)),
                                  &size) != pw::Status::OutOfRange()) {

@@ -14,9 +14,8 @@
 
 import("//build_overrides/pigweed.gni")
 
-import("$dir_pw_async2/backend.gni")
+import("$dir_pw_build/module_config.gni")
 import("$dir_pw_build/target_types.gni")
-import("$dir_pw_docgen/docs.gni")
 import("$dir_pw_unit_test/test.gni")
 
 config("public_include_path") {
@@ -24,224 +23,160 @@ config("public_include_path") {
   visibility = [ ":*" ]
 }
 
-pw_source_set("chunk") {
+config("private_include_path") {
+  include_dirs = [ "private" ]
+  visibility = [ ":*" ]
+}
+
+# LINT.IfChange
+pw_source_set("pw_multibuf") {
   public_configs = [ ":public_include_path" ]
-  public = [ "public/pw_multibuf/chunk.h" ]
-  sources = [ "chunk.cc" ]
-  public_deps = [
-    "$dir_pw_sync:mutex",
-    dir_pw_assert,
-    dir_pw_bytes,
-    dir_pw_preprocessor,
-    dir_pw_span,
+  public = [
+    "public/pw_multibuf/multibuf.h",
+    "public/pw_multibuf/observer.h",
   ]
-  deps = [ "$dir_pw_assert:check" ]
+  public_deps = [
+    ":chunk",
+    ":config",
+    "v1:multibuf",
+    "v1_adapter:multibuf",
+    "v2:multibuf",
+  ]
+}
+
+# LINT.ThenChange(BUILD.bazel, CMakeLists.txt)
+
+### Module configuration
+
+declare_args() {
+  # The build target that overrides the default configuration options for this
+  # module. This should point to a source set that provides defines through a
+  # public config (which may -include a file or add defines directly).
+  pw_multibuf_CONFIG = pw_build_DEFAULT_MODULE_CONFIG
+}
+
+# LINT.IfChange
+pw_source_set("config") {
+  public = [ "public/pw_multibuf/config.h" ]
+  public_configs = [ ":public_include_path" ]
+  public_deps = [ pw_multibuf_CONFIG ]
+  visibility = [ "./*" ]
+}
+
+### V1 Libraries
+
+pw_source_set("chunk") {
+  public = [ "public/pw_multibuf/chunk.h" ]
+  public_configs = [ ":public_include_path" ]
+  public_deps = [
+    ":config",
+    "v1:chunk",
+    "v1_adapter:chunk",
+  ]
 }
 
 pw_source_set("header_chunk_region_tracker") {
-  public_configs = [ ":public_include_path" ]
   public = [ "public/pw_multibuf/header_chunk_region_tracker.h" ]
+  public_configs = [ ":public_include_path" ]
   public_deps = [
     ":chunk",
-    dir_pw_allocator,
-    dir_pw_bytes,
+    ":config",
+    "$dir_pw_multibuf/v1:header_chunk_region_tracker",
   ]
-}
-
-pw_test("header_chunk_region_tracker_test") {
-  deps = [
-    ":chunk",
-    ":header_chunk_region_tracker",
-    "$dir_pw_allocator:testing",
-    dir_pw_status,
-  ]
-  sources = [ "header_chunk_region_tracker_test.cc" ]
 }
 
 pw_source_set("single_chunk_region_tracker") {
-  public_configs = [ ":public_include_path" ]
   public = [ "public/pw_multibuf/single_chunk_region_tracker.h" ]
-  public_deps = [
-    ":chunk",
-    dir_pw_assert,
-    dir_pw_bytes,
-  ]
-}
-
-pw_test("single_chunk_region_tracker_test") {
-  deps = [
-    ":chunk",
-    ":single_chunk_region_tracker",
-  ]
-  sources = [ "single_chunk_region_tracker_test.cc" ]
-
-  # TODO: b/260624583 - Fix this for //targets/rp2040
-  enable_if = pw_build_EXECUTABLE_TARGET_TYPE != "pico_executable"
-}
-
-pw_test("chunk_test") {
-  deps = [
-    ":chunk",
-    ":header_chunk_region_tracker",
-    "$dir_pw_allocator:testing",
-  ]
-  sources = [ "chunk_test.cc" ]
-}
-
-pw_source_set("pw_multibuf") {
   public_configs = [ ":public_include_path" ]
-  public = [ "public/pw_multibuf/multibuf.h" ]
-  sources = [ "multibuf.cc" ]
   public_deps = [
     ":chunk",
-    dir_pw_preprocessor,
-    dir_pw_status,
+    ":config",
+    "v1:single_chunk_region_tracker",
+    "v1_adapter:single_chunk_region_tracker",
   ]
-}
-
-pw_test("multibuf_test") {
-  deps = [
-    ":internal_test_utils",
-    ":pw_multibuf",
-    dir_pw_bytes,
-  ]
-  sources = [ "multibuf_test.cc" ]
 }
 
 pw_source_set("allocator") {
-  public_configs = [ ":public_include_path" ]
   public = [ "public/pw_multibuf/allocator.h" ]
-  sources = [ "allocator.cc" ]
+  public_configs = [ ":public_include_path" ]
   public_deps = [
+    ":config",
     ":pw_multibuf",
-    "$dir_pw_containers:intrusive_forward_list",
-    "$dir_pw_result",
-    "$dir_pw_sync:interrupt_spin_lock",
+    "v1:allocator",
+    "v1_adapter:allocator",
   ]
 }
 
 pw_source_set("allocator_async") {
-  public_configs = [ ":public_include_path" ]
   public = [ "public/pw_multibuf/allocator_async.h" ]
-  sources = [ "allocator_async.cc" ]
-  public_deps = [
-    ":allocator",
-    "$dir_pw_async2:dispatcher",
-    "$dir_pw_async2:poll",
-  ]
-}
-
-# TODO: https://pwbug.dev/384583239 - Split async into its own test.
-pw_test("allocator_test") {
-  enable_if = pw_async2_DISPATCHER_BACKEND != ""
-  deps = [
-    ":allocator",
-    ":allocator_async",
-    "$dir_pw_async2:dispatcher",
-    "$dir_pw_async2:poll",
-  ]
-  sources = [ "allocator_test.cc" ]
-}
-
-pw_source_set("simple_allocator") {
   public_configs = [ ":public_include_path" ]
-  public = [ "public/pw_multibuf/simple_allocator.h" ]
-  sources = [ "simple_allocator.cc" ]
   public_deps = [
     ":allocator",
-    ":pw_multibuf",
-    "$dir_pw_allocator:allocator",
-    "$dir_pw_containers:intrusive_list",
+    ":config",
+    "v1:allocator_async",
   ]
-  deps = [ "$dir_pw_bytes:alignment" ]
-}
-
-pw_test("simple_allocator_test") {
-  enable_if = pw_async2_DISPATCHER_BACKEND != ""
-  deps = [
-    ":simple_allocator",
-    "$dir_pw_allocator:null_allocator",
-    "$dir_pw_allocator:testing",
-  ]
-  sources = [ "simple_allocator_test.cc" ]
-}
-
-pw_source_set("stream") {
-  public_configs = [ ":public_include_path" ]
-  public = [ "public/pw_multibuf/stream.h" ]
-  public_deps = [
-    ":pw_multibuf",
-    dir_pw_status,
-    dir_pw_stream,
-  ]
-  sources = [ "stream.cc" ]
-}
-
-pw_test("stream_test") {
-  enable_if = pw_async2_DISPATCHER_BACKEND != ""
-  deps = [
-    ":internal_test_utils",
-    ":stream",
-  ]
-  sources = [ "stream_test.cc" ]
 }
 
 pw_source_set("from_span") {
-  public_configs = [ ":public_include_path" ]
   public = [ "public/pw_multibuf/from_span.h" ]
+  public_configs = [ ":public_include_path" ]
   public_deps = [
+    ":config",
     ":pw_multibuf",
-    dir_pw_allocator,
-    dir_pw_function,
+    "v1:from_span",
+    "v1_adapter:from_span",
   ]
-  sources = [ "from_span.cc" ]
 }
 
-pw_test("from_span_test") {
-  deps = [
-    ":from_span",
-    "$dir_pw_allocator:testing",
+pw_source_set("simple_allocator") {
+  public = [ "public/pw_multibuf/simple_allocator.h" ]
+  public_configs = [ ":public_include_path" ]
+  public_deps = [
+    ":allocator",
+    ":config",
+    ":pw_multibuf",
+    "v1:simple_allocator",
+    "v1_adapter:simple_allocator",
   ]
-  sources = [ "from_span_test.cc" ]
 }
 
 pw_source_set("testing") {
-  public_configs = [ ":public_include_path" ]
+  testonly = pw_unit_test_TESTONLY
   public = [ "public/pw_multibuf/simple_allocator_for_test.h" ]
+  public_configs = [ ":public_include_path" ]
   public_deps = [
+    ":config",
     ":simple_allocator",
     "$dir_pw_allocator:synchronized_allocator",
     "$dir_pw_allocator:testing",
+    "$dir_pw_assert:assert",
     "$dir_pw_sync:mutex",
-    dir_pw_assert,
   ]
 }
 
-pw_source_set("internal_test_utils") {
-  sources = [ "pw_multibuf_private/test_utils.h" ]
-  public_deps = [
-    ":header_chunk_region_tracker",
-    ":pw_multibuf",
-    "$dir_pw_allocator:testing",
-    dir_pw_assert,
-    dir_pw_bytes,
-  ]
-  visibility = [ ":*" ]
+pw_source_set("chunk_testing") {
+  testonly = pw_unit_test_TESTONLY
+  public = [ "private/pw_multibuf_private/chunk_test_base.h" ]
+  public_configs = [ ":private_include_path" ]
+  visibility = [ "$dir_pw_multibuf/*" ]
+  deps = [ dir_pw_unit_test ]
 }
+
+pw_source_set("test_utils") {
+  testonly = pw_unit_test_TESTONLY
+  public = [ "private/pw_multibuf_private/test_utils.h" ]
+  public_configs = [ ":private_include_path" ]
+  visibility = [ "$dir_pw_multibuf/*" ]
+}
+
+# LINT.ThenChange(BUILD.bazel, CMakeLists.txt)
+
+## Test group
 
 pw_test_group("tests") {
-  tests = [
-    ":allocator_test",
-    ":chunk_test",
-    ":from_span_test",
-    ":header_chunk_region_tracker_test",
-    ":multibuf_test",
-    ":simple_allocator_test",
-    ":single_chunk_region_tracker_test",
-    ":stream_test",
+  group_deps = [
+    "v1:tests",
+    "v1_adapter:tests",
+    "v2:tests",
   ]
-}
-
-pw_doc_group("docs") {
-  sources = [ "docs.rst" ]
 }

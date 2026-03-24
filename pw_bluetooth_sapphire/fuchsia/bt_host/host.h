@@ -20,8 +20,10 @@
 
 #include "fidl/fuchsia.bluetooth.host/cpp/fidl.h"
 #include "fidl/fuchsia.hardware.bluetooth/cpp/fidl.h"
+#include "pw_bluetooth_sapphire/fuchsia/host/fidl/activity_governor_lease_provider.h"
 #include "pw_bluetooth_sapphire/internal/host/gap/adapter.h"
 #include "pw_bluetooth_sapphire/internal/host/gatt/gatt.h"
+#include "pw_bluetooth_sapphire/null_lease_provider.h"
 #include "pw_random_fuchsia/zircon_random_generator.h"
 
 namespace bthost {
@@ -32,7 +34,9 @@ class BtHostComponent {
  public:
   // Creates a new Host.
   static std::unique_ptr<BtHostComponent> Create(
-      async_dispatcher_t* dispatcher, const std::string& device_path);
+      async_dispatcher_t* dispatcher,
+      const std::string& device_path,
+      std::unique_ptr<ActivityGovernorLeaseProvider> activity_governor);
 
   // Does not override RNG
   static std::unique_ptr<BtHostComponent> CreateForTesting(
@@ -50,14 +54,16 @@ class BtHostComponent {
       fidl::ClientEnd<fuchsia_hardware_bluetooth::Vendor> vendor_client_end,
       InitCallback init_cb,
       ErrorCallback error_cb,
-      bool legacy_pairing_enabled);
+      bool legacy_pairing_enabled,
+      uint16_t override_vendor_capabilites_version);
 
   // Shuts down all systems.
   void ShutDown();
 
   // Binds the given |host_client| to a Host FIDL interface server.
   void BindToHostInterface(
-      fidl::ServerEnd<fuchsia_bluetooth_host::Host> host_client);
+      fidl::ServerEnd<fuchsia_bluetooth_host::Host> host_client,
+      uint8_t sco_offload_index);
 
   std::string device_path() { return device_path_; }
 
@@ -65,11 +71,19 @@ class BtHostComponent {
   WeakPtr GetWeakPtr() { return weak_self_.GetWeakPtr(); }
 
  private:
-  BtHostComponent(async_dispatcher_t* dispatcher,
-                  const std::string& device_path,
-                  bool initialize_rng);
+  BtHostComponent(
+      async_dispatcher_t* dispatcher,
+      const std::string& device_path,
+      bool initialize_rng,
+      std::unique_ptr<ActivityGovernorLeaseProvider> activity_governor);
+
+  pw::bluetooth_sapphire::LeaseProvider& lease_provider();
 
   pw::async_fuchsia::FuchsiaDispatcher pw_dispatcher_;
+
+  std::variant<pw::bluetooth_sapphire::NullLeaseProvider,
+               std::unique_ptr<bthost::ActivityGovernorLeaseProvider>>
+      lease_provider_;
 
   // Path of bt-hci device the component supports
   std::string device_path_;

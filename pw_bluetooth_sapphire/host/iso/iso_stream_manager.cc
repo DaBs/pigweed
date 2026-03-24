@@ -21,9 +21,16 @@
 
 namespace bt::iso {
 
-IsoStreamManager::IsoStreamManager(hci_spec::ConnectionHandle handle,
-                                   hci::Transport::WeakPtr hci)
-    : acl_handle_(handle), hci_(std::move(hci)), weak_self_(this) {
+IsoStreamManager::IsoStreamManager(
+    hci_spec::ConnectionHandle handle,
+    hci::Transport::WeakPtr hci,
+    pw::bluetooth_sapphire::LeaseProvider& wake_lease_provider,
+    pw::chrono::VirtualSystemClock& clock)
+    : acl_handle_(handle),
+      hci_(std::move(hci)),
+      wake_lease_provider_(wake_lease_provider),
+      clock_(clock),
+      weak_self_(this) {
   PW_CHECK(hci_.is_alive());
   cmd_ = hci_->command_channel()->AsWeakPtr();
   PW_CHECK(cmd_.is_alive());
@@ -38,22 +45,11 @@ IsoStreamManager::IsoStreamManager(hci_spec::ConnectionHandle handle,
         self->OnCisRequest(event);
         return hci::CommandChannel::EventCallbackResult::kContinue;
       });
-
-  disconnect_handler_ = cmd_->AddEventHandler(
-      hci_spec::kDisconnectionCompleteEventCode,
-      [self = std::move(weak_self)](const hci::EventPacket& event) {
-        if (!self.is_alive()) {
-          return hci::CommandChannel::EventCallbackResult::kRemove;
-        }
-        self->OnDisconnect(event);
-        return hci::CommandChannel::EventCallbackResult::kContinue;
-      });
 }
 
 IsoStreamManager::~IsoStreamManager() {
   if (cmd_.is_alive()) {
     cmd_->RemoveEventHandler(cis_request_handler_);
-    cmd_->RemoveEventHandler(disconnect_handler_);
   }
   if (hci_.is_alive()) {
     hci::IsoDataChannel* iso_data_channel = hci_->iso_data_channel();
@@ -89,6 +85,24 @@ AcceptCisStatus IsoStreamManager::AcceptCis(CigCisIdentifier id,
 
   accept_handlers_[id] = std::move(cb);
   return AcceptCisStatus::kSuccess;
+}
+
+IsoStream::WeakPtr IsoStreamManager::CreateCisConfiguration(
+    CigCisIdentifier id,
+    hci_spec::ConnectionHandle cis_handle,
+    CisEstablishedCallback on_established_cb,
+    pw::Callback<void()> on_closed_cb) {
+  auto cis = IsoStream::Create(id.cig_id(),
+                               id.cis_id(),
+                               cis_handle,
+                               hci_,
+                               std::move(on_established_cb),
+                               std::move(on_closed_cb),
+                               wake_lease_provider_,
+                               clock_);
+  auto result = cis->GetWeakPtr();
+  streams_.emplace(id, std::move(cis));
+  return result;
 }
 
 void IsoStreamManager::OnCisRequest(const hci::EventPacket& event) {
@@ -139,29 +153,6 @@ void IsoStreamManager::OnCisRequest(const hci::EventPacket& event) {
   AcceptCisRequest(event_view, std::move(cb));
 }
 
-void IsoStreamManager::OnDisconnect(const hci::EventPacket& event) {
-  PW_CHECK(event.event_code() == hci_spec::kDisconnectionCompleteEventCode);
-  auto event_view =
-      event.view<pw::bluetooth::emboss::DisconnectionCompleteEventView>();
-  hci_spec::ConnectionHandle disconnected_handle =
-      event_view.connection_handle().Read();
-  for (auto it = streams_.begin(); it != streams_.end(); ++it) {
-    if (it->second->cis_handle() == disconnected_handle) {
-      bt_log(
-          INFO, "iso", "CIS Disconnected at handle %#x", disconnected_handle);
-      if (hci_.is_alive()) {
-        hci::IsoDataChannel* iso_data_channel = hci_->iso_data_channel();
-        if (iso_data_channel) {
-          iso_data_channel->UnregisterConnection(disconnected_handle);
-        }
-      }
-      streams_.erase(it);
-      // There shouldn't be any more, connections are unique.
-      return;
-    }
-  }
-}
-
 void IsoStreamManager::AcceptCisRequest(
     const pw::bluetooth::emboss::LECISRequestSubeventView& event_view,
     CisEstablishedCallback cb) {
@@ -194,10 +185,11 @@ void IsoStreamManager::AcceptCisRequest(
   streams_[id] = IsoStream::Create(cig_id,
                                    cis_id,
                                    cis_handle,
+                                   hci_,
                                    std::move(cb),
-                                   cmd_->AsWeakPtr(),
                                    on_closed_cb,
-                                   hci_->iso_data_channel());
+                                   wake_lease_provider_,
+                                   clock_);
 
   auto command = hci::CommandPacket::New<
       pw::bluetooth::emboss::LEAcceptCISRequestCommandWriter>(
@@ -225,7 +217,7 @@ void IsoStreamManager::AcceptCisRequest(
                                          self->streams_[id]->GetWeakPtr());
   };
 
-  cmd_->SendCommand(std::move(command), cmd_complete_cb);
+  cmd_->SendCommand(std::move(command), cmd_complete_cb).IgnoreError();
 }
 
 void IsoStreamManager::RejectCisRequest(
@@ -248,7 +240,8 @@ void IsoStreamManager::RejectCisRequest(
                                    "bt-iso",
                                    "reject CIS request failed for handle %#x",
                                    cis_handle);
-                    });
+                    })
+      .IgnoreError();
 }
 
 }  // namespace bt::iso

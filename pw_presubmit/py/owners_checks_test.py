@@ -18,7 +18,10 @@ import tempfile
 from typing import Iterable, Sequence
 import unittest
 from unittest import mock
+
+from pw_cli import tool_runner
 from pw_presubmit import owners_checks
+from pw_presubmit.format import owners
 
 # ===== Test data =====
 
@@ -276,13 +279,13 @@ test1@example.com
 """
 
 BAD_TEST_FILES = (
-    ("bad_duplicate", owners_checks.OwnersDuplicateError),
-    ("bad_duplicate_user", owners_checks.OwnersDuplicateError),
-    ("bad_duplicate_wildcard", owners_checks.OwnersDuplicateError),
-    ("bad_email", owners_checks.OwnersInvalidLineError),
-    ("bad_grant_combo", owners_checks.OwnersUserGrantError),
-    ("bad_ordering1", owners_checks.OwnersStyleError),
-    ("bad_prohibited1", owners_checks.OwnersProhibitedError),
+    ("bad_duplicate", owners.OwnersDuplicateError),
+    ("bad_duplicate_user", owners.OwnersDuplicateError),
+    ("bad_duplicate_wildcard", owners.OwnersDuplicateError),
+    ("bad_email", owners.OwnersInvalidLineError),
+    ("bad_grant_combo", owners.OwnersUserGrantError),
+    ("bad_ordering1", owners.OwnersStyleError),
+    ("bad_prohibited1", owners.OwnersProhibitedError),
 )
 
 STYLING_CHECKS = (
@@ -320,34 +323,42 @@ class TestOwnersChecks(unittest.TestCase):
         temp_dir_path = Path(temp_dir)
         for name, contents in file_list:
             file_path = temp_dir_path / name
-            file_path.write_text(contents)
+            file_path.write_text(contents, newline='\n')
             real_files.append(file_path)
         return real_files
 
     def test_bad_files(self):
+        owners_formatter = owners.OwnersFormatter(
+            tool_runner=tool_runner.BasicSubprocessRunner()
+        )
         # First test_file is the "primary" owners file followed by any needed
         # "secondary" owners.
         for test_file, expected_exception in BAD_TEST_FILES:
-            with self.subTest(
-                i=test_file
-            ), tempfile.TemporaryDirectory() as temp_dir, self.assertRaises(
-                expected_exception
+            with (
+                self.subTest(i=test_file),
+                tempfile.TemporaryDirectory() as temp_dir,
+                self.assertRaises(expected_exception),
             ):
                 file_contents = globals()[test_file]
                 primary_file = self._create_temp_files(
                     temp_dir=temp_dir, file_list=((test_file, file_contents),)
                 )[0]
-                owners_file = owners_checks.OwnersFile(primary_file)
+                owners_file = owners.OwnersFile.load_from_path(primary_file)
                 owners_file.look_for_owners_errors()
-                owners_file.check_style()
+                formatted_diff = owners_formatter.get_formatting_diff(
+                    primary_file
+                )
+                if formatted_diff:
+                    raise owners.OwnersStyleError()
 
     def test_good(self):
         # First test_file is the "primary" owners file followed by any needed
         # "secondary" owners.
         for test_files in GOOD_TEST_CASES:
-            with self.subTest(
-                i=test_files[0]
-            ), tempfile.TemporaryDirectory() as temp_dir:
+            with (
+                self.subTest(i=test_files[0]),
+                tempfile.TemporaryDirectory() as temp_dir,
+            ):
                 files = [
                     (file_name, globals()[file_name])
                     for file_name in test_files
@@ -361,27 +372,34 @@ class TestOwnersChecks(unittest.TestCase):
 
     def test_style_proposals(self):
         for unstyled_file, styled_file in STYLING_CHECKS:
-            with self.subTest(
-                i=unstyled_file
-            ), tempfile.TemporaryDirectory() as temp_dir:
+            with (
+                self.subTest(i=unstyled_file),
+                tempfile.TemporaryDirectory() as temp_dir,
+            ):
                 unstyled_contents = globals()[unstyled_file]
                 styled_contents = globals()[styled_file]
                 unstyled_real_file = self._create_temp_files(
                     temp_dir=temp_dir,
                     file_list=((unstyled_file, unstyled_contents),),
                 )[0]
-                owners_file = owners_checks.OwnersFile(unstyled_real_file)
+                owners_file = owners.OwnersFile.load_from_path(
+                    unstyled_real_file
+                )
                 formatted_content = "\n".join(owners_file.formatted_lines)
                 self.assertEqual(styled_contents, formatted_content)
 
     def test_dependency_discovery(self):
+        """Tests OWNERS file dependency walking."""
         for file_under_test, expected_deps in DEPENDENCY_TEST_CASES:
             # During test make the test file directory the "git root"
             with tempfile.TemporaryDirectory() as temp_dir:
                 temp_dir_path = Path(temp_dir).resolve()
-                with self.subTest(i=file_under_test), mock.patch(
-                    "pw_presubmit.owners_checks.git_repo.root",
-                    return_value=temp_dir_path,
+                with (
+                    self.subTest(i=file_under_test),
+                    mock.patch(
+                        "pw_presubmit.owners_checks.git_repo.root",
+                        return_value=temp_dir_path,
+                    ),
                 ):
                     primary_file = (file_under_test, globals()[file_under_test])
                     deps_files = tuple(
@@ -395,7 +413,9 @@ class TestOwnersChecks(unittest.TestCase):
                         temp_dir=temp_dir, file_list=deps_files
                     )
 
-                    owners_file = owners_checks.OwnersFile(primary_file)
+                    owners_file = owners_checks.OwnersWalker.load_from_path(
+                        primary_file
+                    )
 
                     # get_dependencies is expected to resolve() files
                     found_deps = owners_file.get_dependencies()
@@ -410,16 +430,23 @@ class TestOwnersChecks(unittest.TestCase):
             # During test make the test file directory the "git root"
             with tempfile.TemporaryDirectory() as temp_dir:
                 temp_dir_path = Path(temp_dir).resolve()
-                with self.subTest(i=file_under_test), mock.patch(
-                    "pw_presubmit.owners_checks.git_repo.root",
-                    return_value=temp_dir_path,
+                with (
+                    self.subTest(i=file_under_test),
+                    mock.patch(
+                        "pw_presubmit.owners_checks.git_repo.root",
+                        return_value=temp_dir_path,
+                    ),
                 ):
                     owners_file_path = (
                         temp_dir_path / "owners" / file_under_test
                     )
                     owners_file_path.parent.mkdir(parents=True)
-                    owners_file_path.write_text(globals()[file_under_test])
-                    owners_file = owners_checks.OwnersFile(owners_file_path)
+                    owners_file_path.write_text(
+                        globals()[file_under_test], newline='\n'
+                    )
+                    owners_file = owners_checks.OwnersWalker.load_from_path(
+                        owners_file_path
+                    )
 
                     # get_dependencies is expected to resolve() files
                     found_deps = owners_file.get_dependencies()

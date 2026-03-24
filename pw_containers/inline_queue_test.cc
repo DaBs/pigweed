@@ -20,7 +20,7 @@
 
 #include "pw_compilation_testing/negative_compilation.h"
 #include "pw_containers/algorithm.h"
-#include "pw_containers_private/test_helpers.h"
+#include "pw_containers/internal/test_helpers.h"
 #include "pw_unit_test/framework.h"
 
 namespace pw::containers {
@@ -31,10 +31,14 @@ using test::CopyOnly;
 using test::Counter;
 using test::MoveOnly;
 
+static_assert(!std::is_constructible_v<pw::InlineQueue<int>>,
+              "Cannot construct generic capacity container");
+
 TEST(InlineQueue, Construct_Sized) {
   InlineQueue<int, 3> queue;
   EXPECT_TRUE(queue.empty());
   EXPECT_EQ(queue.size(), 0u);
+  EXPECT_EQ(queue.capacity(), 3u);
   EXPECT_EQ(queue.max_size(), 3u);
 }
 
@@ -43,6 +47,7 @@ TEST(InlineQueue, Construct_GenericSized) {
   InlineQueue<int>& queue(sized_queue);
   EXPECT_TRUE(queue.empty());
   EXPECT_EQ(queue.size(), 0u);
+  EXPECT_EQ(queue.capacity(), 3u);
   EXPECT_EQ(queue.max_size(), 3u);
 }
 
@@ -50,6 +55,7 @@ TEST(InlineQueue, Construct_ConstexprSized) {
   constexpr InlineQueue<int, 3> queue(pw::kConstexpr);
   EXPECT_TRUE(queue.empty());
   EXPECT_EQ(queue.size(), 0u);
+  EXPECT_EQ(queue.capacity(), 3u);
   EXPECT_EQ(queue.max_size(), 3u);
 }
 
@@ -228,6 +234,7 @@ TEST(InlineQueue, Access_ZeroLength) {
   InlineQueue<Counter, 0> queue;
 
   EXPECT_EQ(0u, queue.size());
+  EXPECT_EQ(0u, queue.capacity());
   EXPECT_EQ(0u, queue.max_size());
   EXPECT_TRUE(queue.empty());
   EXPECT_TRUE(queue.full());
@@ -478,7 +485,7 @@ TEST(InlineQueue, ConstexprMaxSize) {
 #if PW_NC_TEST(InlineQueue_GenericMaxSize_NotConstexpr)
   PW_NC_EXPECT_CLANG(
       "kGenericMaxSize.* must be initialized by a constant expression");
-  PW_NC_EXPECT_GCC("call to non-'constexpr' function .*InlineQueue.*max_size");
+  PW_NC_EXPECT_GCC("call to non-'constexpr' function .*Queue.*max_size");
   [[maybe_unused]] constexpr size_t kGenericMaxSize = generic_queue.max_size();
 #endif  // PW_NC_TEST
 }
@@ -780,10 +787,7 @@ TEST(InlineQueue, DereferenceOperator) {
 }
 
 // Test that InlineQueue<T> is trivially destructible when its type is.
-static_assert(std::is_trivially_destructible_v<InlineQueue<int, 4>>);
-
-static_assert(std::is_trivially_destructible_v<MoveOnly>);
-static_assert(std::is_trivially_destructible_v<InlineQueue<MoveOnly, 1>>);
+static_assert(std::is_trivially_destructible_v<InlineQueue<int, 1>>);
 
 static_assert(std::is_trivially_destructible_v<CopyOnly>);
 static_assert(std::is_trivially_destructible_v<InlineQueue<CopyOnly, 99>>);

@@ -40,12 +40,14 @@ StatusWithSize UartBlockingAdapter::DoTryReadFor(
 
   // Start a new transfer.
   rx_.Start();
-  auto status = uart_.ReadAtLeast(
-      rx_buffer, min_bytes, [this](Status xfer_status, ConstByteSpan buffer) {
-        rx_.Complete(StatusWithSize(xfer_status, buffer.size()));
-      });
-  if (!status.ok()) {
-    return StatusWithSize(status, 0);
+  if (const auto status = uart_.ReadAtLeast(
+          rx_buffer,
+          min_bytes,
+          [this](Status xfer_status, ConstByteSpan buffer) {
+            rx_.Complete(StatusWithSize(xfer_status, buffer.size()));
+          });
+      !status.ok()) {
+    rx_.Complete(status);
   }
 
   // Wait for completion.
@@ -67,10 +69,10 @@ StatusWithSize UartBlockingAdapter::DoTryWriteFor(
 
   // Start a new transfer.
   tx_.Start();
-  auto status = uart_.Write(
-      tx_buffer, [this](StatusWithSize result) { tx_.Complete(result); });
-  if (!status.ok()) {
-    return StatusWithSize(status, 0);
+  if (const auto status = uart_.Write(
+          tx_buffer, [this](StatusWithSize result) { tx_.Complete(result); });
+      !status.ok()) {
+    tx_.Complete(status);
   }
 
   // Wait for completion.
@@ -90,7 +92,11 @@ Status UartBlockingAdapter::DoFlushOutput() {
 
   // Start a flush.
   tx_.Start();
-  PW_TRY(uart_.FlushOutput([this](Status result) { tx_.Complete(result); }));
+  if (const auto status =
+          uart_.FlushOutput([this](Status result) { tx_.Complete(result); });
+      !status.ok()) {
+    tx_.Complete(status);
+  }
 
   // Wait for completion.
   tx_.WaitForCompletion();

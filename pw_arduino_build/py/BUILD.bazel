@@ -12,20 +12,21 @@
 # License for the specific language governing permissions and limitations under
 # the License.
 
-load("@rules_python//python:defs.bzl", "py_library")
-load("//pw_build:python.bzl", "pw_py_test")
+load("//pw_build:python.bzl", "pw_py_library", "pw_py_test")
 
 package(default_visibility = ["//visibility:public"])
 
 licenses(["notice"])
 
-py_library(
+pw_py_library(
     name = "pw_arduino_build",
     srcs = [
         "pw_arduino_build/__init__.py",
         "pw_arduino_build/__main__.py",
         "pw_arduino_build/builder.py",
         "pw_arduino_build/core_installer.py",
+        "pw_arduino_build/core_patches/__init__.py",
+        "pw_arduino_build/core_patches/teensy/__init__.py",
         "pw_arduino_build/file_operations.py",
         "pw_arduino_build/log.py",
         "pw_arduino_build/teensy_detector.py",
@@ -34,6 +35,10 @@ py_library(
         "pw_arduino_build/unit_test_server.py",
     ],
     imports = ["."],
+    deps = [
+        "//pw_cli/py:pw_cli",
+        "@pigweed_python_packages//pyserial",
+    ],
 )
 
 pw_py_test(
@@ -44,7 +49,7 @@ pw_py_test(
     ],
     deps = [
         ":pw_arduino_build",
-        "@python_packages//parameterized",
+        "@pigweed_python_packages//parameterized",
     ],
 )
 
@@ -56,6 +61,6 @@ pw_py_test(
     ],
     deps = [
         ":pw_arduino_build",
-        "@python_packages//parameterized",
+        "@pigweed_python_packages//parameterized",
     ],
 )

@@ -14,6 +14,7 @@
 #pragma once
 
 #include "pw_allocator/capability.h"
+#include "pw_allocator/hardening.h"
 #include "pw_allocator/layout.h"
 #include "pw_allocator/unique_ptr.h"
 #include "pw_result/result.h"
@@ -21,6 +22,8 @@
 #include "pw_status/status_with_size.h"
 
 namespace pw {
+
+/// @submodule{pw_allocator,impl}
 
 /// Abstract interface for releasing memory.
 class Deallocator {
@@ -43,8 +46,8 @@ class Deallocator {
 
   constexpr const Capabilities& capabilities() const { return capabilities_; }
 
-  /// Returns whether a given capabilityis enabled for this object.
-  bool HasCapability(Capability capability) const {
+  /// Returns whether a given capability is enabled for this object.
+  constexpr bool HasCapability(Capability capability) const {
     return capabilities_.has(capability);
   }
 
@@ -69,16 +72,80 @@ class Deallocator {
     }
   }
 
-  /// Destroys the object at ``ptr`` and deallocates the associated memory.
+  /// Destroys the object and deallocates the associated memory.
   ///
   /// The given pointer must have been previously obtained from a call to
   /// ``New`` using the same object; otherwise the behavior is undefined.
   ///
+  /// @warning As with `new`/`new[]` and `delete`/`delete[]`, it is an error to
+  /// call a specialization of `Delete` other than the one that corresponds to
+  /// the specialization of `New` that was used to allocate the object.
+  ///
+  /// It is especially important to avoid passing the pointer return by a call
+  /// to `New<T[]>` or `New<T[kN]` to `Delete`, as this will only delete the
+  /// first object in the array. For this reason, it is recommended to use
+  /// `DeleteArray` or explicitly specify the array type as a template parameter
+  /// to either `Delete<T[]>` or `Delete<T[kN]>`.
+  ///
+  /// Using an allocator with the `kImplementsGetRequestedLayout` capability and
+  /// configuring the hardening level to `PW_ALLOCATOR_HARDENING_DEBUG` will
+  /// detect such mismatches when `Delete` is called.
+  ///
   /// @param[in] ptr      Pointer to previously-allocated object.
-  template <typename T>
+  /// @{
+  template <typename T,
+            int&... kExplicitGuard,
+            std::enable_if_t<!std::is_array_v<T>, int> = 0>
   void Delete(T* ptr) {
+    if constexpr (allocator::Hardening::kIncludesDebugChecks) {
+      if (auto result = GetRequestedLayout(ptr); result.ok()) {
+        if constexpr (std::has_virtual_destructor_v<T>) {
+          PW_ASSERT(result->size() >= sizeof(T) &&
+                    result->alignment() >= alignof(T));
+        } else {
+          PW_ASSERT(*result == Layout::Of<T>());
+        }
+      }
+    }
+    DeleteArray<T>(ptr, 1);
+  }
+
+  template <typename T,
+            int&... kExplicitGuard,
+            typename ElementType = std::remove_extent_t<T>,
+            std::enable_if_t<is_bounded_array_v<T>, int> = 0>
+  void Delete(ElementType* ptr) {
+    size_t count = std::extent_v<T>;
+    if (count != 0) {
+      DeleteArray<ElementType>(&ptr[0], count);
+    }
+  }
+
+  template <typename T,
+            int&... kExplicitGuard,
+            typename ElementType = std::remove_extent_t<T>,
+            std::enable_if_t<is_unbounded_array_v<T>, int> = 0>
+  void Delete(ElementType* ptr, size_t count) {
+    DeleteArray<ElementType>(ptr, count);
+  }
+  /// @}
+
+  /// Destroys the array and deallocates the associated memory.
+  ///
+  /// The given pointer must be to an array with `count` elements that was
+  /// previously obtained from a call to `New` using the same object; otherwise
+  /// the behavior is undefined.
+  ///
+  /// This method MUST be used to delete arrays with deallocators that do
+  /// not have the capability to recover the layout that was used to request
+  /// memory, i.e. `Capability::kImplementsGetRequestedLayout`.
+  ///
+  /// @param[in] ptr      Pointer to previously-allocated array.
+  /// @param[in] count    Number of items in the array.
+  template <typename ElementType>
+  void DeleteArray(ElementType* ptr, size_t count) {
     if (!capabilities_.has(Capability::kSkipsDestroy)) {
-      std::destroy_at(ptr);
+      std::destroy_n(ptr, count);
     }
     Deallocate(ptr);
   }
@@ -107,14 +174,6 @@ class Deallocator {
   /// @param[in]  other       Object to compare with this object.
   bool IsEqual(const Deallocator& other) const { return this == &other; }
 
-  // See WrapUnique below. Disallow calls with explicitly-sized array types like
-  // `T[kN]`.
-  template <typename T,
-            int&... kExplicitGuard,
-            std::enable_if_t<is_bounded_array_v<T>, int> = 0,
-            typename... Args>
-  void WrapUnique(Args&&...) = delete;
-
  protected:
   /// TODO(b/326509341): Remove when downstream consumers migrate.
   constexpr Deallocator() = default;
@@ -122,15 +181,11 @@ class Deallocator {
   explicit constexpr Deallocator(const Capabilities& capabilities)
       : capabilities_(capabilities) {}
 
-  /// Wraps an object of type ``T`` in a ``UniquePtr``
-  ///
-  /// @param[in]  ptr         Pointer to memory provided by this object.
-  template <typename T, std::enable_if_t<!std::is_array_v<T>, int> = 0>
-  [[nodiscard]] UniquePtr<T> WrapUnique(T* ptr) {
-    return UniquePtr<T>(ptr, this);
-  }
-
   /// Wraps an array of type ``T`` in a ``UniquePtr``
+  ///
+  /// @deprecated  Construct a UniquePtr<T> directly instead.
+  ///
+  /// TODO(b/326509341): Remove when downstream consumers migrate.
   ///
   /// @param[in]  ptr         Pointer to memory provided by this object.
   /// @param[in]  size        The size of the array.
@@ -138,17 +193,9 @@ class Deallocator {
             int&... kExplicitGuard,
             typename ElementType = std::remove_extent_t<T>,
             std::enable_if_t<is_unbounded_array_v<T>, int> = 0>
-  [[nodiscard]] UniquePtr<T> WrapUnique(ElementType* ptr, size_t size) {
+  [[deprecated("Use `UniquePtr<T>(...)` instead.")]] UniquePtr<T> WrapUnique(
+      ElementType* ptr, size_t size) {
     return UniquePtr<T>(ptr, size, this);
-  }
-
-  /// Deprecated version of `WrapUnique` with a different name and templated on
-  /// the object type instead of the array type.
-  /// Do not use this method. It will be removed.
-  /// TODO(b/326509341): Remove when downstream consumers migrate.
-  template <typename T>
-  [[nodiscard]] UniquePtr<T[]> WrapUniqueArray(T* ptr, size_t size) {
-    return WrapUnique<T[]>(ptr, size);
   }
 
   /// Indicates what kind of information to retrieve using `GetInfo`.
@@ -308,10 +355,10 @@ class Deallocator {
   /// Virtual `Deallocate` function implemented by derived classes.
   ///
   /// @param[in]  ptr           Pointer to memory, guaranteed to not be null.
-  virtual void DoDeallocate(void*) {
-    // This method will be pure virtual once consumer migrate from the deprected
-    // version that takes a `Layout` parameter. In the meantime, the check that
-    // this method is implemented is deferred to run-time.
+  virtual void DoDeallocate([[maybe_unused]] void* ptr) {
+    // This method will be pure virtual once consumer migrate from the
+    // deprecated version that takes a `Layout` parameter. In the meantime, the
+    // check that this method is implemented is deferred to run-time.
     PW_ASSERT(false);
   }
 
@@ -333,4 +380,7 @@ namespace allocator {
 using Deallocator = ::pw::Deallocator;
 
 }  // namespace allocator
+
+/// @}
+
 }  // namespace pw

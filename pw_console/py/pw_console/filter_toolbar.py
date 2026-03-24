@@ -71,7 +71,7 @@ class FilterToolbar(ConditionalContainer):
                 fragments.append(('class:filter-bar-setting', log_filter.field))
                 fragments.append(space)
 
-            fragments.append(('', filter_text))
+            fragments.append(('class:default-fg', filter_text))
             fragments.append(space)
 
             fragments.append(

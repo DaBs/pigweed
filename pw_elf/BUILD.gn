@@ -14,7 +14,6 @@
 
 import("//build_overrides/pigweed.gni")
 
-import("$dir_pw_docgen/docs.gni")
 import("$dir_pw_unit_test/test.gni")
 
 config("public_include_path") {
@@ -39,6 +38,9 @@ pw_source_set("reader") {
     dir_pw_status,
     dir_pw_stream,
   ]
+
+  # TODO(b/259746255): Remove this when everything compiles with -Wconversion.
+  configs = [ "$dir_pw_build:conversion_warnings" ]
 }
 
 pw_test("reader_test") {
@@ -61,9 +63,4 @@ pw_test("reader_test") {
 
 pw_test_group("tests") {
   tests = [ ":reader_test" ]
-}
-
-pw_doc_group("docs") {
-  inputs = [ "examples/reader.cc" ]
-  sources = [ "docs.rst" ]
 }

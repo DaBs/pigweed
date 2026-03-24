@@ -34,3 +34,14 @@ pw_add_library(pw_preprocessor.arch INTERFACE
   PUBLIC_INCLUDES
     public
 )
+
+pw_add_test(pw_preprocessor.apply_test
+  SOURCES
+    apply_test.cc
+  PRIVATE_DEPS
+    pw_preprocessor
+    pw_unit_test.constexpr
+  GROUPS
+    pw_preprocessor
+    modules
+)

@@ -22,6 +22,11 @@
 
 namespace pw::containers::internal {
 
+/// @module{pw_containers}
+
+/// @addtogroup pw_containers_lists
+/// @{
+
 /// Generic intrusive list implementation.
 ///
 /// This implementation relies on the `Item` type to provide details of how to
@@ -102,6 +107,18 @@ class GenericIntrusiveList {
       erase_after(before_begin());
     }
   }
+
+  /// Inserts an element at the end of the list.
+  void push_back(Item& item) { insert_after(before_end(), item); }
+
+  /// Removes the last item in the list. The list must not be empty.
+  void pop_back() { erase_after(before_end()->previous()); }
+
+  /// Inserts an element at the beginning of the list.
+  void push_front(Item& item) { insert_after(before_begin(), item); }
+
+  /// Removes the first item in the list. The list must not be empty.
+  void pop_front() { erase_after(before_begin()); }
 
   /// Inserts an item into a list.
   ///

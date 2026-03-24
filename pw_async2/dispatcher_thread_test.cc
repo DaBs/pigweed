@@ -1,4 +1,4 @@
-// Copyright 2024 The Pigweed Authors
+// Copyright 2025 The Pigweed Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License"); you may not
 // use this file except in compliance with the License. You may obtain a copy of
@@ -12,60 +12,93 @@
 // License for the specific language governing permissions and limitations under
 // the License.
 
-#include <atomic>
-
-#include "gtest/gtest.h"
-#include "pw_async2/dispatcher.h"
-#include "pw_function/function.h"
+#include "pw_async2/dispatcher_for_test.h"
+#include "pw_sync/thread_notification.h"
 #include "pw_thread/sleep.h"
+#include "pw_thread/test_thread_context.h"
 #include "pw_thread/thread.h"
-#include "pw_thread_stl/options.h"
+#include "pw_unit_test/framework.h"
 
-namespace pw::async2 {
 namespace {
 
 using namespace std::chrono_literals;
 
-class MockTask : public Task {
- public:
-  std::atomic_bool should_complete = false;
-  std::atomic_int polled = 0;
-  std::atomic_int destroyed = 0;
-  Waker last_waker;
+using pw::async2::Context;
+using pw::async2::DispatcherForTest;
+using pw::async2::Pending;
+using pw::async2::Poll;
+using pw::async2::Ready;
+using pw::async2::Task;
+using pw::async2::Waker;
 
- private:
+class BlockingTask : public Task {
+ public:
+  explicit BlockingTask() : Task(PW_ASYNC_TASK_NAME("BlockingTask")) {}
+
   Poll<> DoPend(Context& cx) override {
-    ++polled;
-    PW_ASYNC_STORE_WAKER(cx, last_waker, "MockTask is waiting for last_waker");
-    if (should_complete) {
-      return Ready();
-    } else {
+    if (first_run_) {
+      first_run_ = false;
+      PW_ASYNC_STORE_WAKER(cx, waker_, "BlockingTask::Wake()");
+      running_.release();
       return Pending();
     }
+    return Ready();
   }
-  void DoDestroy() override { ++destroyed; }
+
+  void WaitUntilRunning() { running_.acquire(); }
+
+  void Wake() { waker_.Wake(); }
+
+ private:
+  pw::sync::ThreadNotification running_;
+  Waker waker_;
+  bool first_run_ = true;
 };
 
-TEST(Dispatcher, RunToCompletion_SleepsUntilWoken) {
-  MockTask task;
-  task.should_complete = false;
-  Dispatcher dispatcher;
+TEST(DispatcherForTest, RunToCompletionWaitsForTaskToWake) {
+  DispatcherForTest dispatcher;
+  BlockingTask task;
   dispatcher.Post(task);
 
-  Thread work_thread(thread::stl::Options(), [&task]() {
-    this_thread::sleep_for(100ms);
-    task.should_complete = true;
-    std::move(task.last_waker).Wake();
+  pw::thread::test::TestThreadContext context;
+  pw::Thread thread(context.options(), [&task] {
+    task.WaitUntilRunning();
+    task.Wake();
   });
 
-  dispatcher.RunToCompletion(task);
+  dispatcher.AllowBlocking();
+  dispatcher.RunToCompletion();
+  EXPECT_FALSE(task.IsRegistered());
 
-  work_thread.join();
+  thread.join();
+}
 
-  // Poll once when sleeping then once when woken.
-  EXPECT_EQ(task.polled, 2);
-  EXPECT_EQ(task.destroyed, 1);
+TEST(DispatcherForTest, RunToCompletionUntilReleased) {
+  DispatcherForTest dispatcher;
+
+  pw::thread::test::TestThreadContext context;
+  pw::Thread thread(context.options(), [&dispatcher] {
+    pw::this_thread::sleep_for(10ms);
+    dispatcher.Release();
+  });
+
+  dispatcher.RunToCompletionUntilReleased();
+
+  thread.join();
+}
+
+TEST(DispatcherForTest, RunToCompletionUntilReleasedMultipleTimes) {
+  DispatcherForTest dispatcher;
+
+  pw::thread::test::TestThreadContext context;
+  for (int i = 0; i < 3; ++i) {
+    pw::Thread thread(context.options(),
+                      [&dispatcher] { dispatcher.Release(); });
+
+    dispatcher.RunToCompletionUntilReleased();
+
+    thread.join();
+  }
 }
 
 }  // namespace
-}  // namespace pw::async2

@@ -17,9 +17,11 @@
 #include <algorithm>
 #include <atomic>
 
+#include "pw_allocator/testing.h"
 #include "pw_bytes/span.h"
+#include "pw_containers/dynamic_vector.h"
 #include "pw_log/log.h"
-#include "pw_span/span.h"
+#include "pw_rpc_transport/stream_rpc_dispatcher_logging_metric_tracker.h"
 #include "pw_status/status.h"
 #include "pw_stream/stream.h"
 #include "pw_sync/mutex.h"
@@ -36,11 +38,12 @@ using namespace std::chrono_literals;
 class TestIngress : public RpcIngressHandler {
  public:
   explicit TestIngress(size_t num_bytes_expected)
-      : num_bytes_expected_(num_bytes_expected) {}
+      : num_bytes_expected_(num_bytes_expected), received_(allocator_) {}
 
   Status ProcessIncomingData(ConstByteSpan buffer) override {
     if (num_bytes_expected_ > 0) {
       std::copy(buffer.begin(), buffer.end(), std::back_inserter(received_));
+
       num_bytes_expected_ -= std::min(num_bytes_expected_, buffer.size());
     }
     if (num_bytes_expected_ == 0) {
@@ -49,18 +52,19 @@ class TestIngress : public RpcIngressHandler {
     return OkStatus();
   }
 
-  std::vector<std::byte> received() const { return received_; }
+  const pw::DynamicVector<std::byte>& received() const { return received_; }
   void Wait() { done_.acquire(); }
 
  private:
   size_t num_bytes_expected_ = 0;
   sync::ThreadNotification done_;
-  std::vector<std::byte> received_;
+  pw::allocator::test::AllocatorForTest<2048> allocator_;
+  pw::DynamicVector<std::byte> received_;
 };
 
 class TestStream : public stream::NonSeekableReader {
  public:
-  TestStream() : position_(0) {}
+  TestStream() : to_send_(allocator_), position_(0) {}
 
   void QueueData(ConstByteSpan data) {
     std::lock_guard lock(send_mutex_);
@@ -108,7 +112,8 @@ class TestStream : public stream::NonSeekableReader {
   }
 
   sync::Mutex send_mutex_;
-  std::vector<std::byte> to_send_;
+  pw::allocator::test::AllocatorForTest<2048> allocator_;
+  pw::DynamicVector<std::byte> to_send_;
   std::atomic<bool> stopped_ = false;
   size_t position_;
   sync::ThreadNotification available_;
@@ -119,9 +124,12 @@ TEST(StreamRpcDispatcherTest, RecvOk) {
   constexpr std::array<std::byte, kWriteSize> kWriteBuffer = {};
 
   TestIngress test_ingress(kWriteSize);
+  StreamRpcDispatcherLoggingMetricTracker tracker;
   TestStream test_stream;
 
-  auto dispatcher = StreamRpcDispatcher<kWriteSize>(test_stream, test_ingress);
+  auto dispatcher =
+      StreamRpcDispatcher<kWriteSize>(test_stream, test_ingress, &tracker);
+
   auto dispatcher_thread = Thread(thread::stl::Options(), dispatcher);
 
   test_stream.QueueData(kWriteBuffer);
@@ -132,9 +140,9 @@ TEST(StreamRpcDispatcherTest, RecvOk) {
   test_stream.Stop();
   dispatcher_thread.join();
 
-  auto received = test_ingress.received();
+  const auto& received = test_ingress.received();
   EXPECT_EQ(received.size(), kWriteSize);
-  EXPECT_EQ(dispatcher.num_read_errors(), 0U);
+  EXPECT_EQ(tracker.read_errors(), 0U);
 }
 
 }  // namespace

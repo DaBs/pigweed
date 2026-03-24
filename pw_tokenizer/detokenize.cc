@@ -1,4 +1,4 @@
-// Copyright 2020 The Pigweed Authors
+// Copyright 2025 The Pigweed Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License"); you may not
 // use this file except in compliance with the License. You may obtain a copy of
@@ -16,14 +16,18 @@
 
 #include <algorithm>
 #include <cctype>
+#include <charconv>
 #include <cstring>
 #include <string_view>
+#include <utility>
 #include <vector>
 
+#include "pw_base64/base64.h"
 #include "pw_bytes/bit.h"
 #include "pw_bytes/endian.h"
 #include "pw_elf/reader.h"
 #include "pw_log/log.h"
+#include "pw_preprocessor/compiler.h"
 #include "pw_result/result.h"
 #include "pw_status/try.h"
 #include "pw_tokenizer/base64.h"
@@ -35,10 +39,22 @@
 namespace pw::tokenizer {
 namespace {
 
+// True if a Base10 character.
+constexpr bool IsValidBase10(char ch) { return ('0' <= ch && ch <= '9'); }
+
+// True if a Base16 character.
+constexpr bool IsValidBase16(char ch) {
+  return ('0' <= ch && ch <= '9') || ('A' <= ch && ch <= 'F') ||
+         ('a' <= ch && ch <= 'f');
+}
+
 class NestedMessageDetokenizer {
  public:
   NestedMessageDetokenizer(const Detokenizer& detokenizer)
-      : detokenizer_(detokenizer) {}
+      : detokenizer_(detokenizer),
+        message_start_(0),
+        domain_size_(0),
+        data_start_(0) {}
 
   void Detokenize(std::string_view chunk) {
     for (char next_char : chunk) {
@@ -47,64 +63,270 @@ class NestedMessageDetokenizer {
   }
 
   bool OutputChangedSinceLastCheck() {
-    const bool changed = output_changed_;
-    output_changed_ = false;
-    return changed;
+    return std::exchange(output_changed_, false);
   }
 
   void Detokenize(char next_char) {
+    if (next_char == PW_TOKENIZER_NESTED_PREFIX) {
+      HandleEndOfMessage();
+
+      message_start_ = output_.size();
+      state_ = kMessageStart;
+      output_.push_back(next_char);
+      return;
+    }
+
+    output_.push_back(next_char);
     switch (state_) {
-      case kNonMessage:
-        if (next_char == PW_TOKENIZER_NESTED_PREFIX) {
-          message_buffer_.push_back(next_char);
-          state_ = kMessage;
+      case kPassthrough:
+        break;
+      case kMessageStart:
+        if (next_char == '{') {
+          state_ = kDomain;
         } else {
-          output_.push_back(next_char);
+          HandleRadixOrBase64Data(next_char);
         }
         break;
-      case kMessage:
-        if (base64::IsValidChar(next_char)) {
-          message_buffer_.push_back(next_char);
+      case kDomain:
+        if (next_char == '}') {
+          state_ = kRadixOrData;
+        } else if (internal::ValidDomainChar(next_char)) {
+          domain_size_ += 1;
         } else {
-          HandleEndOfMessage();
-          if (next_char == PW_TOKENIZER_NESTED_PREFIX) {
-            message_buffer_.push_back(next_char);
-          } else {
-            output_.push_back(next_char);
-            state_ = kNonMessage;
-          }
+          ResetMessage();
+        }
+        break;
+      case kRadixOrData:
+        HandleRadixOrBase64Data(next_char);
+        break;
+      case kRadix10Or16:
+        if (next_char == '0' || next_char == '6') {
+          state_ = kRadixEnd;
+        } else {
+          state_ = kData64;
+          HandleBase64Char(next_char);
+        }
+        break;
+      case kRadix64:
+        if (next_char == '4') {
+          state_ = kRadixEnd;
+        } else {
+          state_ = kData64;
+          HandleBase64Char(next_char);
+        }
+        break;
+      case kRadixEnd:
+        if (next_char == '#') {
+          // Check if the radix was 10, 16, or 64.
+          const char digit = output_[output_.size() - 2];
+          state_ = digit == '0' ? kData10 : digit == '6' ? kData16 : kData64;
+          data_start_ = output_.size();
+        } else {
+          state_ = kData64;
+          HandleBase64Char(next_char);
+        }
+        break;
+      case kData10:
+        HandleBase10Char(next_char);
+        break;
+      case kData16:
+        HandleBase16Char(next_char);
+        break;
+      case kData64:
+        HandleBase64Char(next_char);
+        break;
+      case kData64Padding:
+        if (next_char == '=') {
+          HandleEndOfMessageValidBase64();
+        } else {
+          ResetMessage();
         }
         break;
     }
   }
 
   std::string Flush() {
-    if (state_ == kMessage) {
-      HandleEndOfMessage();
-      state_ = kNonMessage;
-    }
+    HandleEndOfMessage();
     std::string output(std::move(output_));
     output_.clear();
     return output;
   }
 
  private:
-  void HandleEndOfMessage() {
-    if (auto result = detokenizer_.DetokenizeBase64Message(message_buffer_);
-        result.ok()) {
-      output_ += result.BestString();
-      output_changed_ = true;
-    } else {
-      output_ += message_buffer_;  // Keep the original if it doesn't decode.
+  std::string_view domain() const {
+    // The domain starts 2 characters after the message start ("${domain}").
+    return std::string_view(output_.data() + message_start_ + 2, domain_size_);
+  }
+
+  void HandleRadixOrBase64Data(char next_char) {
+    if (next_char == '#') {
+      state_ = kData16;              // $# or ${}# means base 16
+      data_start_ = output_.size();  // data starts after the #
+      return;
     }
-    message_buffer_.clear();
+
+    // If this is Base64 data, it includes this character.
+    data_start_ = output_.size() - 1;
+    if (next_char == '1') {
+      state_ = kRadix10Or16;
+    } else if (next_char == '6') {
+      state_ = kRadix64;
+    } else if (base64::IsValidChar(next_char)) {
+      state_ = kData64;
+    } else {
+      ResetMessage();
+    }
+  }
+
+  void HandleBase10Char(char next_char) {
+    if (!IsValidBase10(next_char)) {
+      ResetMessage();
+      return;
+    }
+
+    // Base10 data must be 10 chars long.
+    const size_t block_size = (output_.size() - data_start_);
+    if (block_size == 10) {
+      HandleEndOfMessageValidBase10OrBase16(10);
+    }
+  }
+
+  void HandleBase16Char(char next_char) {
+    if (!IsValidBase16(next_char)) {
+      ResetMessage();
+      return;
+    }
+
+    // Base16 data must be 8 chars long.
+    const size_t block_size = (output_.size() - data_start_);
+    if (block_size == 8) {
+      HandleEndOfMessageValidBase10OrBase16(16);
+    }
+  }
+
+  // The first few characters after $ could be either a radix specification or
+  // Base64 data (e.g. $16dAw5== versus $16#00000001).
+  void HandleBase64Char(char next_char) {
+    if (base64::IsValidChar(next_char)) {
+      return;
+    }
+
+    // Base64 data must be in 4 char blocks, ending with padding if needed.
+    const size_t block_size = (output_.size() - data_start_) % 4;
+    if (block_size == 1) {
+      // Got invalid character after a 4-byte block. Pop that char and decode.
+      output_.pop_back();
+      HandleEndOfMessageValidBase64();
+      output_.push_back(next_char);
+    } else if (block_size == 2 || next_char != '=') {
+      // Invalid character not on a 4-char block boundary. Could try decoding at
+      // the block boundary instead of resetting.
+      ResetMessage();
+    } else if (block_size == 3) {  // Found padding '=' character, need 1 more.
+      state_ = kData64Padding;
+    } else {  // The '=' was the final character of the block.
+      HandleEndOfMessageValidBase64();
+    }
+  }
+
+  void HandleEndOfMessage() {
+    if (state_ < kData10) {
+      // It's not possible to have a complete token outside of the kData
+      // states, even for the shortest possible messages ($10==).
+      ResetMessage();
+      return;
+    }
+
+    if (state_ >= kData64) {
+      // Base64 data must come in 4-byte blocks.
+      if ((output_.size() - data_start_) % 4 == 0) {
+        HandleEndOfMessageValidBase64();
+      } else {
+        ResetMessage();
+      }
+      return;
+    }
+
+    if (state_ == kData10) {
+      if (output_.size() - data_start_ == 10) {
+        HandleEndOfMessageValidBase10OrBase16(10);
+      }
+    } else if (state_ == kData16) {
+      if (output_.size() - data_start_ == 8) {
+        HandleEndOfMessageValidBase10OrBase16(16);
+      }
+    }
+    ResetMessage();
+  }
+
+  void HandleEndOfMessageValidBase10OrBase16(int base) {
+    char* data_start = output_.data() + data_start_;
+    char* data_end = output_.data() + output_.size();
+
+    uint32_t token = 0;
+
+    auto [_, ec] = std::from_chars(data_start, data_end, token, base);
+
+    if (ec == std::errc()) {
+      DetokenizeOnce(token);
+    } else {
+      ResetMessage();
+    }
+  }
+
+  void HandleEndOfMessageValidBase64() {
+    std::string_view data(output_.data() + data_start_,
+                          output_.size() - data_start_);
+    std::vector<std::byte> bytes(base64::DecodedSize(data));
+    base64::Decode(data, bytes.data());
+    DetokenizeOnceBase64(bytes);
+  }
+
+  void DetokenizeOnce(uint32_t token) {
+    if (auto result = detokenizer_.DatabaseLookup(token, domain());
+        result.size() == 1) {
+      std::string replacement =
+          result.front().first.Format(span<const uint8_t>()).value();
+      output_.replace(message_start_, output_.size(), replacement);
+      output_changed_ = true;
+    }
+    ResetMessage();
+  }
+
+  void DetokenizeOnceBase64(span<const std::byte> bytes) {
+    if (auto result = detokenizer_.Detokenize(bytes, domain()); result.ok()) {
+      output_.replace(message_start_, output_.size(), result.BestString());
+      output_changed_ = true;
+    }
+    ResetMessage();
+  }
+
+  void ResetMessage() {
+    message_start_ = 0;
+    domain_size_ = 0;
+    data_start_ = 0;
+    state_ = kPassthrough;
   }
 
   const Detokenizer& detokenizer_;
   std::string output_;
-  std::string message_buffer_;
+  size_t message_start_;  // Index of the message prefix ($)
+  size_t domain_size_;
+  size_t data_start_;  // Index of the token data
 
-  enum : uint8_t { kNonMessage, kMessage } state_ = kNonMessage;
+  enum : uint8_t {
+    kPassthrough,  // not parsing a nested message
+    kMessageStart,
+    kDomain,
+    kRadixOrData,
+    kRadix10Or16,
+    kRadix64,
+    kRadixEnd,
+    kData10,
+    kData16,
+    kData64,
+    kData64Padding,
+  } state_ = kPassthrough;
   bool output_changed_ = false;
 };
 
@@ -168,9 +390,29 @@ constexpr bool IsPrintableAscii(std::string_view data) {
   return true;
 }
 
+void AddEntryIfUnique(std::vector<TokenizedStringEntry>& entries,
+                      std::string_view new_entry,
+                      uint32_t date_removed) {
+  // TODO(b/326365218): Construct FormatString with string_view to avoid
+  // creating a copy here.
+  FormatString format_string(std::string(new_entry).c_str());
+  for (TokenizedStringEntry& entry : entries) {
+    if (format_string == entry.first) {
+      if (date_removed > entry.second) {
+        entry.second = date_removed;
+      }
+      return;
+    }
+  }
+
+  entries.emplace_back(std::move(format_string), date_removed);
+}
+
 }  // namespace
 
 DetokenizedString::DetokenizedString(
+    const Detokenizer& detokenizer,
+    bool recursion,
     uint32_t token,
     const span<const TokenizedStringEntry>& entries,
     const span<const std::byte>& arguments)
@@ -178,21 +420,24 @@ DetokenizedString::DetokenizedString(
   std::vector<DecodingResult> results;
 
   for (const auto& [format, date_removed] : entries) {
-    results.push_back(DecodingResult{
+    results.emplace_back(
         format.Format(span(reinterpret_cast<const uint8_t*>(arguments.data()),
                            arguments.size())),
-        date_removed});
+        date_removed);
   }
 
   std::sort(results.begin(), results.end(), IsBetterResult);
-
   for (auto& result : results) {
     matches_.push_back(std::move(result.first));
   }
-}
 
-std::string DetokenizedString::BestString() const {
-  return matches_.empty() ? std::string() : matches_[0].value();
+  if (recursion && !matches_.empty()) {
+    best_string_ = detokenizer.DetokenizeText(matches_[0].value());
+  } else if (!matches_.empty()) {
+    best_string_ = matches_[0].value();
+  } else {
+    best_string_ = std::string();
+  }
 }
 
 std::string DetokenizedString::BestStringWithErrors() const {
@@ -231,14 +476,15 @@ Result<Detokenizer> Detokenizer::FromElfSection(
           reinterpret_cast<const char*>(elf_section.data() + index),
           header.domain_length - 1);
       index += header.domain_length;
-      // TODO(b/326365218): Construct FormatString with string_view to avoid
-      // creating a copy here.
-      std::string entry(
+
+      std::string_view entry(
           reinterpret_cast<const char*>(elf_section.data() + index),
           header.string_length - 1);
       index += header.string_length;
-      database[std::move(domain)][header.token].emplace_back(
-          entry.c_str(), TokenDatabase::kDateRemovedNever);
+
+      AddEntryIfUnique(database[std::move(domain)][header.token],
+                       entry,
+                       TokenDatabase::kDateRemovedNever);
     }
   }
   return Detokenizer(std::move(database));
@@ -327,12 +573,15 @@ Result<Detokenizer> Detokenizer::FromCsv(std::string_view csv) {
         return Status::DataLoss();
       }
 
-      date = (year << 16) | (month << 8) | day;
+      date = static_cast<uint32_t>(year << 16) |
+             static_cast<uint32_t>(month << 8) | static_cast<uint32_t>(day);
     }
 
     // Add to database.
-    database[std::move(domain)][std::stoul(token, nullptr, 16)].emplace_back(
-        row[3].c_str(), date);
+    AddEntryIfUnique(database[std::move(domain)][static_cast<uint32_t>(
+                         std::stoul(token, nullptr, 16))],
+                     row[3],
+                     date);
   }
 
   // Log warning if any data lines were skipped.
@@ -347,8 +596,9 @@ Result<Detokenizer> Detokenizer::FromCsv(std::string_view csv) {
   return Detokenizer(std::move(database));
 }
 
-DetokenizedString Detokenizer::Detokenize(
-    const span<const std::byte>& encoded) const {
+DetokenizedString Detokenizer::Detokenize(const span<const std::byte>& encoded,
+                                          std::string_view domain,
+                                          bool recursion) const {
   // The token is missing from the encoded data; there is nothing to do.
   if (encoded.empty()) {
     return DetokenizedString();
@@ -357,19 +607,15 @@ DetokenizedString Detokenizer::Detokenize(
   uint32_t token = bytes::ReadInOrder<uint32_t>(
       endian::little, encoded.data(), encoded.size());
 
-  const auto domain_it = database_.find(kDefaultDomain);
-  if (domain_it == database_.end()) {
-    return DetokenizedString();
-  }
+  const auto result = DatabaseLookup(token, domain);
 
-  const auto result = domain_it->second.find(token);
-
-  return DetokenizedString(
-      token,
-      result == domain_it->second.end() ? span<TokenizedStringEntry>()
-                                        : span(result->second),
-      encoded.size() < sizeof(token) ? span<const std::byte>()
-                                     : encoded.subspan(sizeof(token)));
+  return DetokenizedString(*this,
+                           recursion,
+                           token,
+                           result,
+                           encoded.size() < sizeof(token)
+                               ? span<const std::byte>()
+                               : encoded.subspan(sizeof(token)));
 }
 
 DetokenizedString Detokenizer::DetokenizeBase64Message(
@@ -379,8 +625,29 @@ DetokenizedString Detokenizer::DetokenizeBase64Message(
   return Detokenize(buffer);
 }
 
-std::string Detokenizer::DetokenizeText(std::string_view text,
-                                        const unsigned max_passes) const {
+span<const TokenizedStringEntry> Detokenizer::DatabaseLookup(
+    uint32_t token, std::string_view domain) const {
+  std::string canonical_domain;
+  for (char ch : domain) {
+    if (!std::isspace(ch)) {
+      canonical_domain.push_back(ch);
+    }
+  }
+
+  auto domain_it = database_.find(canonical_domain);
+  if (domain_it == database_.end()) {
+    return span<TokenizedStringEntry>();
+  }
+  auto token_it = domain_it->second.find(token);
+  if (token_it == domain_it->second.end()) {
+    return span<TokenizedStringEntry>();
+  }
+
+  return span(token_it->second);
+}
+
+std::string Detokenizer::DetokenizeTextRecursive(std::string_view text,
+                                                 unsigned max_passes) const {
   NestedMessageDetokenizer detokenizer(*this);
   detokenizer.Detokenize(text);
 
@@ -399,7 +666,7 @@ std::string Detokenizer::DetokenizeText(std::string_view text,
 }
 
 std::string Detokenizer::DecodeOptionallyTokenizedData(
-    const ConstByteSpan& optionally_tokenized_data) {
+    span<const std::byte> optionally_tokenized_data) const {
   // Try detokenizing as binary using the best result if available, else use
   // the input data as a string.
   const auto result = Detokenize(optionally_tokenized_data);

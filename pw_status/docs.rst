@@ -6,13 +6,14 @@ pw_status
 .. pigweed-module::
    :name: pw_status
 
-   - **Easy**: Simple to understand, includes convenient macro ``PW_TRY``
+   - **Easy**: Simple to understand, includes convenient macro
+     :cc:`PW_TRY`
    - **Efficient**: No memory allocation, no exceptions
    - **Established**: Just like ``absl::Status``, deployed extensively at Google
 
-   :cpp:type:`pw::Status` is Pigweed's error propagation primitive, enabling
+   :cc:`pw::Status` is Pigweed's error propagation primitive, enabling
    exception-free error handling. The primary feature of ``pw_status`` is the
-   :cpp:class:`pw::Status` class, a simple, zero-overhead status object that
+   :cc:`pw::Status` class, a simple, zero-overhead status object that
    wraps a status code, and the ``PW_TRY`` macro. For example:
 
    .. code-block:: cpp

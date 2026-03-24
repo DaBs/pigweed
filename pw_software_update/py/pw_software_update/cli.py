@@ -173,9 +173,9 @@ def add_file_to_bundle(
     else:
         raise Exception(f'File name {file_name} already exists in bundle')
 
-    bundle.targets_metadata[
-        'targets'
-    ].serialized_targets_metadata = targets_metadata.SerializeToString()
+    bundle.targets_metadata['targets'].serialized_targets_metadata = (
+        targets_metadata.SerializeToString()
+    )
 
     return bundle
 

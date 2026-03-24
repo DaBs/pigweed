@@ -15,6 +15,7 @@
 #pragma once
 #include <pw_bluetooth/hci_android.emb.h>
 
+#include "pw_bluetooth_sapphire/internal/host/l2cap/autosniff.h"
 #include "pw_bluetooth_sapphire/internal/host/l2cap/l2cap_defs.h"
 #include "pw_bluetooth_sapphire/internal/host/transport/command_channel.h"
 #include "pw_bluetooth_sapphire/internal/host/transport/error.h"
@@ -47,6 +48,14 @@ class A2dpOffloadManager {
 
   explicit A2dpOffloadManager(hci::CommandChannel::WeakPtr cmd_channel)
       : cmd_channel_(std::move(cmd_channel)) {}
+
+  using SniffSuppressCallback =
+      fit::function<std::unique_ptr<AutosniffSuppressInterest>(
+          const char* reason)>;
+
+  void SetSniffSuppress(SniffSuppressCallback cb) {
+    sniff_suppress_cb_ = std::move(cb);
+  }
 
   // Request the start of A2DP source offloading. |callback| will be called with
   // the result of the request. If offloading is already started or still
@@ -89,6 +98,14 @@ class A2dpOffloadManager {
   // Contains a callback if stop command was requested before offload status was
   // |kStarted|
   std::optional<hci::ResultCallback<>> pending_stop_a2dp_offload_request_;
+
+  // Pointer to the logical link we are responsible for A2DP offload of. Set via
+  // the LogicalLink using ResisterLink
+  SniffSuppressCallback sniff_suppress_cb_;
+
+  // Pointer to the autosniff suppression interest.  This prevents entering
+  // sniff mode while offload is active.
+  std::unique_ptr<AutosniffSuppressInterest> autosniff_suppress_;
 
   WeakSelf<A2dpOffloadManager> weak_self_{this};
 };

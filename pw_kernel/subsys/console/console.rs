@@ -13,18 +13,14 @@
 // the License.
 #![no_std]
 
-use embedded_io::{ErrorType, Write};
+use core::fmt::{Error, Write};
+
 use pw_status::Result;
 
 pub struct Console {}
 
 unsafe extern "Rust" {
-    fn console_backend_write(buf: &[u8]) -> Result<usize>;
-    fn console_backend_flush() -> Result<()>;
-}
-
-impl ErrorType for Console {
-    type Error = pw_status::Error;
+    fn console_backend_write_all(buf: &[u8]) -> Result<()>;
 }
 
 impl Default for Console {
@@ -34,20 +30,21 @@ impl Default for Console {
 }
 
 impl Console {
+    #[must_use]
     #[inline]
     pub const fn new() -> Self {
         Self {}
+    }
+
+    #[inline]
+    pub fn write_all(&mut self, buf: &[u8]) -> Result<()> {
+        unsafe { console_backend_write_all(buf) }
     }
 }
 
 impl Write for Console {
     #[inline]
-    fn write(&mut self, buf: &[u8]) -> Result<usize> {
-        unsafe { console_backend_write(buf) }
-    }
-
-    #[inline]
-    fn flush(&mut self) -> Result<()> {
-        unsafe { console_backend_flush() }
+    fn write_str(&mut self, s: &str) -> core::fmt::Result {
+        self.write_all(s.as_bytes()).map_err(|_| Error)
     }
 }

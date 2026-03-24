@@ -15,7 +15,8 @@
 #include "pw_bluetooth_sapphire/peripheral.h"
 
 #include "pw_async/fake_dispatcher.h"
-#include "pw_async2/pend_func_task.h"
+#include "pw_async2/dispatcher_for_test.h"
+#include "pw_async2/func_task.h"
 #include "pw_bluetooth_sapphire/internal/host/gap/fake_adapter.h"
 #include "pw_unit_test/framework.h"
 
@@ -27,11 +28,11 @@ using AdvertiseError = pw::bluetooth::low_energy::Peripheral2::AdvertiseError;
 template <typename T>
 class ReceiverTask final : public pw::async2::Task {
  public:
-  ReceiverTask(pw::async2::OnceReceiver<T> receiver)
-      : receiver_(std::move(receiver)) {}
+  ReceiverTask(pw::async2::OptionalValueFuture<T> future)
+      : future_(std::move(future)) {}
 
   pw::async2::Poll<> DoPend(pw::async2::Context& cx) override {
-    pw::async2::Poll<pw::Result<T>> pend = receiver_.Pend(cx);
+    pw::async2::Poll<std::optional<T>> pend = future_.Pend(cx);
     if (pend.IsPending()) {
       return pw::async2::Pending();
     }
@@ -39,11 +40,11 @@ class ReceiverTask final : public pw::async2::Task {
     return pw::async2::Ready();
   }
 
-  pw::Result<T>& result() { return result_; }
+  std::optional<T>& result() { return result_; }
 
  private:
-  pw::async2::OnceReceiver<T> receiver_;
-  pw::Result<T> result_;
+  pw::async2::OptionalValueFuture<T> future_;
+  std::optional<T> result_;
 };
 
 class PeripheralTest : public ::testing::Test {
@@ -52,19 +53,19 @@ class PeripheralTest : public ::testing::Test {
 
   void TearDown() override {}
 
-  // Returns nullopt if OnceReceiver received no result or a OnceReceiver error.
+  // Returns nullopt if ValueFuture received no result or a nullopt result.
   std::optional<Peripheral2::AdvertiseResult> Advertise(
       Peripheral2::AdvertisingParameters& parameters) {
-    pw::async2::OnceReceiver<Peripheral2::AdvertiseResult> receiver =
+    pw::async2::OptionalValueFuture<Peripheral2::AdvertiseResult> future =
         peripheral().Advertise(parameters);
 
-    ReceiverTask<Peripheral2::AdvertiseResult> task(std::move(receiver));
+    ReceiverTask<Peripheral2::AdvertiseResult> task(std::move(future));
     dispatcher2().Post(task);
-    EXPECT_TRUE(task.result().status().IsUnknown());
+    EXPECT_FALSE(task.result().has_value());
 
     dispatcher().RunUntilIdle();
-    EXPECT_TRUE(dispatcher2().RunUntilStalled().IsReady());
-    if (!task.result().status().ok()) {
+    dispatcher2().RunToCompletion();
+    if (!task.result().has_value()) {
       return std::nullopt;
     }
     return std::move(task.result().value());
@@ -89,11 +90,11 @@ class PeripheralTest : public ::testing::Test {
   bt::gap::testing::FakeAdapter& adapter() { return adapter_; }
 
   pw::async::test::FakeDispatcher& dispatcher() { return async_dispatcher_; }
-  pw::async2::Dispatcher& dispatcher2() { return async2_dispatcher_; }
+  pw::async2::RunnableDispatcher& dispatcher2() { return async2_dispatcher_; }
 
  private:
   pw::async::test::FakeDispatcher async_dispatcher_;
-  pw::async2::Dispatcher async2_dispatcher_;
+  pw::async2::DispatcherForTest async2_dispatcher_;
   bt::gap::testing::FakeAdapter adapter_{async_dispatcher_};
   pw::bluetooth_sapphire::Peripheral peripheral_{adapter_.AsWeakPtr(),
                                                  async_dispatcher_};
@@ -419,7 +420,7 @@ TEST_F(PeripheralTest,
 
   advertised_peripheral->StopAdvertising();
 
-  pw::async2::PendFuncTask stop_task(
+  pw::async2::FuncTask stop_task(
       [&advertised_peripheral](pw::async2::Context& cx) -> pw::async2::Poll<> {
         pw::async2::Poll<pw::Status> pend = advertised_peripheral->PendStop(cx);
         if (pend.IsReady()) {
@@ -430,12 +431,12 @@ TEST_F(PeripheralTest,
       });
   dispatcher2().Post(stop_task);
 
-  EXPECT_EQ(dispatcher2().RunUntilStalled(stop_task), pw::async2::Pending());
+  EXPECT_TRUE(dispatcher2().RunUntilStalled());
   ASSERT_EQ(adapter().fake_le()->registered_advertisements().size(), 1u);
 
   // Process the stop request.
   dispatcher().RunUntilIdle();
   // Process the waker wake.
-  EXPECT_EQ(dispatcher2().RunUntilStalled(stop_task), pw::async2::Ready());
+  dispatcher2().RunToCompletion();
   ASSERT_EQ(adapter().fake_le()->registered_advertisements().size(), 0u);
 }

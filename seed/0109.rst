@@ -32,7 +32,9 @@ Sending a Proto Into a Socket
    Allocator& msg_allocator = socket.Allocator();
    size_t size = EncodedProtoSize(some_proto);
    std::optional<pw::MultiBuf> buffer = msg_allocator.Allocate(size);
-   if (!buffer) { return; }
+   if (!buffer) {
+     return;
+   }
    EncodeProto(some_proto, *buffer);
    socket.Send(std::move(*buffer));
 
@@ -51,16 +53,23 @@ chunks, each of which has reserved space for headers and/or footers:
 .. code-block:: cpp
 
    std::optional<pw::MultiBuf> Allocate(size_t size) {
-     if (size == 0) { return pw::MultiBuf(); }
+     if (size == 0) {
+       return pw::MultiBuf();
+     }
      size_t data_per_chunk = mtu_size_ - header_size_;
      size_t num_chunks = 1 + ((size - 1) / data_per_chunk);
      std::optional<pw::MultiBuf> buffer = pw::MultiBuf::WithCapacity(num_chunks);
-     if (!buffer) { return std::nullopt; }
+     if (!buffer) {
+       return std::nullopt;
+     }
      for (size_t i = 0; i < num_chunks; i++) {
        // Note: we could allocate smaller than `mtu_size_` for the final
        // chunk. This is ommitted here for brevity.
-       std::optional<pw::MultiBuf::Chunk> chunk = internal_alloc_.Allocate(mtu_size_);
-       if (!chunk) { return std::nullopt; }
+       std::optional<pw::MultiBuf::Chunk> chunk =
+           internal_alloc_.Allocate(mtu_size_);
+       if (!chunk) {
+         return std::nullopt;
+       }
        // Reserve the header size by discarding the front of each buffer.
        chunk->DiscardFront(header_size_);
        buffer->Chunks()[i] = std::move(chunk);
@@ -84,8 +93,10 @@ Multiplexing Incoming Data
 
    [[nodiscard]] bool SplitAndSend(pw::MultiBuf buffer) {
      std::optional<std::array<pw::MultiBuf, 2>> buffers =
-       std::move(buffer).Split(split_index);
-     if (!buffers) { return false; }
+         std::move(buffer).Split(split_index);
+     if (!buffers) {
+       return false;
+     }
      socket_1_.Send(std::move(buffers->at(0)));
      socket_2_.Send(std::move(buffers->at(1)));
      return true;
@@ -246,7 +257,8 @@ The primary API is as follows:
      /// memory using `ClaimPrefix`.
      [[nodiscard]] bool ClaimSuffix(size_t suffix_bytes);
 
-     /// Shrinks this handle to refer to the data beginning at offset ``new_start``.
+     /// Shrinks this handle to refer to the data beginning at offset
+     /// ``new_start``.
      ///
      /// Does not modify the underlying data.
      void DiscardFront(size_t new_start);
@@ -287,8 +299,8 @@ The primary API is as follows:
      std::optional<std::array<MultiBuf, 2>> Split(Index split_point) &&;
      std::optional<std::array<MultiBuf, 2>> Split(size_t split_point) &&;
 
-     /// Appends the contents of ``suffix`` to this ``MultiBuf`` without copying data.
-     /// Returns ``false`` if the ``ChunkList`` allocator is out of memory.
+     /// Appends the contents of ``suffix`` to this ``MultiBuf`` without copying
+     /// data. Returns ``false`` if the ``ChunkList`` allocator is out of memory.
      [[nodiscard]] bool Append(MultiBuf suffix);
 
      /// Discards the first elements of ``MultiBuf`` up to (but not including)
@@ -306,11 +318,12 @@ The primary API is as follows:
      /// Returns ``false`` if the ``ChunkList`` allocator is out of memory.
      [[nodiscard]] bool Slice(size_t begin, size_t end);
 
-     /// Discards the tail of this ``MultiBuf`` starting with ``first_index_to_drop``.
-     /// Returns ``false`` if the ``ChunkList`` allocator is out of memory.
+     /// Discards the tail of this ``MultiBuf`` starting with
+     /// ``first_index_to_drop``. Returns ``false`` if the ``ChunkList`` allocator
+     /// is out of memory.
      [[nodiscard]] bool Truncate(Index first_index_to_drop);
-     /// Discards the tail of this ``MultiBuf`` so that only ``len`` elements remain.
-     /// Returns ``false`` if the ``ChunkList`` allocator is out of memory.
+     /// Discards the tail of this ``MultiBuf`` so that only ``len`` elements
+     /// remain. Returns ``false`` if the ``ChunkList`` allocator is out of memory.
      [[nodiscard]] bool Truncate(size_t len);
 
      /// Discards the elements beginning with ``cut_start`` and resuming at
@@ -319,7 +332,8 @@ The primary API is as follows:
      /// Returns ``false`` if the ``ChunkList`` allocator is out of memory.
      [[nodiscard]] bool DiscardSegment(Index cut_start, Index resume_point);
 
-     /// Returns an iterable over the ``Chunk``s of memory within this ``MultiBuf``.
+     /// Returns an iterable over the ``Chunk``s of memory within this
+     /// ``MultiBuf``.
      auto Chunks();
      auto Chunks() const;
 
@@ -349,7 +363,6 @@ The primary API is as follows:
      Index IndexAt(size_t position) const;
    };
 
-
    class MultiBufAllocationFuture {
     public:
      Poll<std::optional<Buffer>> Poll(Context&);
@@ -365,22 +378,26 @@ The primary API is as follows:
      std::optional<MultiBuf> Allocate(size_t size);
      std::optional<MultiBuf> Allocate(size_t min_size, size_t desired_size);
      std::optional<MultiBuf::Chunk> AllocateContiguous(size_t size);
-     std::optional<MultiBuf::Chunk> AllocateContiguous(size_t min_size, size_t desired_size);
+     std::optional<MultiBuf::Chunk> AllocateContiguous(size_t min_size,
+                                                       size_t desired_size);
 
      MultiBufAllocationFuture AllocateAsync(size_t size);
      MultiBufAllocationFuture AllocateAsync(size_t min_size, size_t desired_size);
      MultiBufChunkAllocationFuture AllocateContiguousAsync(size_t size);
-     MultiBufChunkAllocationFuture AllocateContiguousAsync(size_t min_size, size_t desired_size);
+     MultiBufChunkAllocationFuture AllocateContiguousAsync(size_t min_size,
+                                                           size_t desired_size);
 
     protected:
-     virtual std::optional<MultiBuf> DoAllocate(size_t min_size, size_t desired_size);
-     virtual std::optional<MultiBuf::Chunk> DoAllocateContiguous(size_t min_size, size_t desired_size);
+     virtual std::optional<MultiBuf> DoAllocate(size_t min_size,
+                                                size_t desired_size);
+     virtual std::optional<MultiBuf::Chunk> DoAllocateContiguous(
+         size_t min_size, size_t desired_size);
 
-     /// Invoked by the ``MultiBufAllocator`` to signal waiting futures that buffers of
-     /// the provided sizes may be available for allocation.
-     void AllocationAvailable(size_t size_available, size_t contiguous_size_available);
+     /// Invoked by the ``MultiBufAllocator`` to signal waiting futures that
+     /// buffers of the provided sizes may be available for allocation.
+     void AllocationAvailable(size_t size_available,
+                              size_t contiguous_size_available);
    };
-
 
 The ``Chunk`` s in the prototype are stored in fallible dynamically-allocated
 arrays, but they could be stored in vectors of a fixed maximum size. The ``Chunk`` s

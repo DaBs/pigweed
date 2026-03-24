@@ -18,14 +18,21 @@ package {
 
 cc_library_static {
     name: "pw_chrono_stl",
-    cpp_std: "c++20",
+    defaults: [
+        "pw_android_common_target_support",
+    ],
     export_include_dirs: [
-        "public",
         "clock_public_overrides",
+        "public",
         "timer_public_overrides",
     ],
-    vendor_available: true,
-    host_supported: true,
+    // Specify the module config flags found in pw_android_common_backends
+    // manually, since it depends on this target.
+    cflags: [
+        // Allow `pw::Function`s to exceed the inline size. This assumes all
+        // targets built with this backend can use dynamic allocation.
+        "-DPW_FUNCTION_ENABLE_DYNAMIC_ALLOCATION=1",
+    ],
     header_libs: [
         "pw_chrono",
     ],
@@ -37,5 +44,8 @@ cc_library_static {
     ],
     export_static_lib_headers: [
         "pw_function",
+    ],
+    srcs: [
+        "system_timer.cc",
     ],
 }

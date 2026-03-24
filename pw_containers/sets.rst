@@ -9,6 +9,23 @@ Sets
 A set is an unordered collection of items. Pigweed provides implementations that
 can insert, find, and remove items in logarithmic time.
 
+----------
+pw::BitSet
+----------
+:cs:`pw::BitSet` is a ``constexpr``-friendly fixed-size sequence of bits,
+similar to ``std::bitset``.
+
+This container supports manipulation of a fixed number of bits, including at
+compile time. It supports common bitwise operations and is optimized for size by
+using the smallest possible underlying integer type.
+
+Example
+=======
+.. literalinclude:: examples/bitset.cc
+   :language: cpp
+   :linenos:
+   :start-at: #include
+
 .. _module-pw_containers-intrusive_set:
 
 ----------------
@@ -17,6 +34,9 @@ pw::IntrusiveSet
 ``pw::IntrusiveSet`` provides an embedded-friendly, tree-based, intrusive
 set implementation. The intrusive aspect of the set is very similar to that of
 :ref:`module-pw_containers-intrusive_list`.
+
+This class is similar to ``std::set<T>``. Items to be added must derive from
+``pw::IntrusiveSet<T>::Item`` or an equivalent type.
 
 See also :ref:`module-pw_containers-multiple_containers`.
 
@@ -31,14 +51,6 @@ Example
 If you need to add this item to containers of more than one type, see
 :ref:`module-pw_containers-multiple_containers`,
 
-API reference
-=============
-This class is similar to ``std::set<T>``. Items to be added must derive from
-``pw::IntrusiveSet<T>::Item`` or an equivalent type.
-
-.. doxygenclass:: pw::IntrusiveSet
-   :members:
-
 ---------------------
 pw::IntrusiveMultiSet
 ---------------------
@@ -46,6 +58,9 @@ pw::IntrusiveMultiSet
 multiset implementation. This is very similar to
 :ref:`module-pw_containers-intrusive_set`, except that the tree may contain
 multiple items with equivalent keys.
+
+This class is similar to ``std::multiset<T>``. Items to be added must derive
+from ``pw::IntrusiveMultiSet<T>::Item`` or an equivalent type.
 
 See also :ref:`module-pw_containers-multiple_containers`.
 
@@ -60,14 +75,12 @@ Example
 If you need to add this item to containers of more than one type, see
 :ref:`module-pw_containers-multiple_containers`,
 
+-------------
 API reference
-=============
-This class is similar to ``std::multiset<T>``. Items to be added must derive
-from ``pw::IntrusiveMultiSet<T>::Item`` or an equivalent type.
+-------------
+Moved: :cc:`pw_containers_sets`
 
-.. doxygenclass:: pw::IntrusiveMultiSet
-   :members:
-
+------------
 Size reports
 ------------
 The tables below illustrate the following scenarios:
@@ -92,6 +105,4 @@ The tables below illustrate the following scenarios:
   and an ``IntrusiveMultiSet`` of the same type. These types reuse code, so the
   combined sum is less than the sum of its parts.
 
-.. TODO: b/388905812 - Re-enable the size report.
-.. .. include:: sets_size_report
-.. include:: ../size_report_notice
+.. include:: sets_size_report

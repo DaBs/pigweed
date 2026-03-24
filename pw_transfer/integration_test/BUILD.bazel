@@ -15,19 +15,23 @@
 load("@com_google_protobuf//bazel:cc_proto_library.bzl", "cc_proto_library")
 load("@com_google_protobuf//bazel:java_proto_library.bzl", "java_proto_library")
 load("@com_google_protobuf//bazel:proto_library.bzl", "proto_library")
+load("@com_google_protobuf//bazel:py_proto_library.bzl", "py_proto_library")
 load("@rules_java//java:defs.bzl", "java_binary")
-load("@rules_jvm_external//:defs.bzl", "artifact")
-load("@rules_python//python:defs.bzl", "py_library")
-load("@rules_python//python:proto.bzl", "py_proto_library")
 load("//pw_build:compatibility.bzl", "incompatible_with_mcu")
 load("//pw_build:pw_cc_binary.bzl", "pw_cc_binary")
-load("//pw_build:python.bzl", "pw_py_binary", "pw_py_test")
+load("//pw_build:python.bzl", "pw_py_binary", "pw_py_library", "pw_py_test")
 
 package(features = ["-layering_check"])
 
 pw_cc_binary(
     name = "server",
     srcs = ["server.cc"],
+    copts = [
+        # These warnings come from protobuf codegen.
+        "-Wno-nullability-extension",
+        "-Wno-gcc-compat",
+    ],
+    features = ["-conversion_warnings"],
     deps = [
         ":config_cc_proto",
         "//pw_assert:check",
@@ -45,6 +49,11 @@ pw_cc_binary(
 pw_py_binary(
     name = "proxy",
     srcs = ["proxy.py"],
+    tags = [
+        # TODO: b/434032260 - Fix these warnings.
+        "nopylint",
+        "nomypy",
+    ],
     deps = [
         ":config_pb2",
         "//pw_hdlc/py:pw_hdlc",
@@ -62,6 +71,11 @@ pw_py_test(
     ],
     imports = ["."],
     main = "proxy_test.py",
+    tags = [
+        # TODO: b/434032260 - Fix these warnings.
+        "nopylint",
+        "nomypy",
+    ],
     deps = [
         ":config_pb2",
         "//pw_hdlc/py:pw_hdlc",
@@ -74,11 +88,13 @@ pw_py_test(
 proto_library(
     name = "config_proto",
     srcs = ["config.proto"],
+    features = ["-conversion_warnings"],
     deps = ["//pw_protobuf:status_proto"],
 )
 
 cc_proto_library(
     name = "config_cc_proto",
+    features = ["-conversion_warnings"],
     # cc_proto_library pulls in the regular proto library, which is only
     # needed for host tests.
     target_compatible_with = incompatible_with_mcu(),
@@ -99,6 +115,12 @@ pw_cc_binary(
     name = "cpp_client",
     testonly = True,
     srcs = ["client.cc"],
+    copts = [
+        # These warnings come from protobuf codegen.
+        "-Wno-nullability-extension",
+        "-Wno-gcc-compat",
+    ],
+    features = ["-conversion_warnings"],
     deps = [
         ":config_cc_proto",
         "//pw_assert:check",
@@ -114,7 +136,7 @@ pw_cc_binary(
     ],
 )
 
-py_library(
+pw_py_library(
     name = "integration_test_fixture",
     testonly = True,
     srcs = [
@@ -127,7 +149,13 @@ py_library(
         ":python_client",
         ":server",
     ],
+    features = ["-conversion_warnings"],
     imports = ["."],
+    # TODO: b/434032260 - Fix these warnings.
+    tags = [
+        "nomypy",
+        "nopylint",
+    ],
     deps = [
         ":config_pb2",
         "//pw_protobuf:status_proto_pb2",
@@ -152,7 +180,7 @@ pw_py_test(
     ],
     deps = [
         ":integration_test_fixture",
-        "@python_packages//parameterized",
+        "@pigweed_python_packages//parameterized",
     ],
 )
 
@@ -172,7 +200,7 @@ pw_py_test(
     ],
     deps = [
         ":integration_test_fixture",
-        "@python_packages//parameterized",
+        "@pigweed_python_packages//parameterized",
     ],
 )
 
@@ -183,14 +211,18 @@ pw_py_test(
     srcs = [
         "cross_language_medium_read_test.py",
     ],
+    features = ["-conversion_warnings"],
     tags = [
         "integration",
+        # TODO: b/434032260 - Fix these warnings.
+        "nopylint",
+        "nomypy",
     ],
     deps = [
         ":config_pb2",
         ":integration_test_fixture",
         "@com_google_protobuf//:protobuf_python",
-        "@python_packages//parameterized",
+        "@pigweed_python_packages//parameterized",
     ],
 )
 
@@ -201,14 +233,18 @@ pw_py_test(
     srcs = [
         "cross_language_medium_write_test.py",
     ],
+    features = ["-conversion_warnings"],
     tags = [
         "integration",
+        # TODO: b/434032260 - Fix these warnings.
+        "nopylint",
+        "nomypy",
     ],
     deps = [
         ":config_pb2",
         ":integration_test_fixture",
         "@com_google_protobuf//:protobuf_python",
-        "@python_packages//parameterized",
+        "@pigweed_python_packages//parameterized",
     ],
 )
 
@@ -219,13 +255,17 @@ pw_py_test(
     srcs = [
         "cross_language_small_test.py",
     ],
+    features = ["-conversion_warnings"],
     tags = [
         "integration",
+        # TODO: b/434032260 - Fix these warnings.
+        "nopylint",
+        "nomypy",
     ],
     deps = [
         ":config_pb2",
         ":integration_test_fixture",
-        "@python_packages//parameterized",
+        "@pigweed_python_packages//parameterized",
     ],
 )
 
@@ -236,13 +276,17 @@ pw_py_test(
     srcs = [
         "multi_transfer_test.py",
     ],
+    features = ["-conversion_warnings"],
     tags = [
         "integration",
+        # TODO: b/434032260 - Fix these warnings.
+        "nopylint",
+        "nomypy",
     ],
     deps = [
         ":config_pb2",
         ":integration_test_fixture",
-        "@python_packages//parameterized",
+        "@pigweed_python_packages//parameterized",
     ],
 )
 
@@ -251,15 +295,19 @@ pw_py_test(
     name = "expected_errors_test",
     timeout = "long",
     srcs = ["expected_errors_test.py"],
+    features = ["-conversion_warnings"],
     tags = [
         "integration",
+        # TODO: b/434032260 - Fix these warnings.
+        "nopylint",
+        "nomypy",
     ],
     deps = [
         ":config_pb2",
         ":integration_test_fixture",
         "//pw_protobuf:status_proto_pb2",
         "@com_google_protobuf//:protobuf_python",
-        "@python_packages//parameterized",
+        "@pigweed_python_packages//parameterized",
     ],
 )
 
@@ -271,8 +319,12 @@ pw_py_test(
     data = [
         "@pw_transfer_test_binaries//:all",
     ],
+    features = ["-conversion_warnings"],
     tags = [
         "integration",
+        # TODO: b/434032260 - Fix these warnings.
+        "nopylint",
+        "nomypy",
     ],
     # Legacy binaries were only built for linux-x86_64.
     target_compatible_with = ["@platforms//os:linux"],
@@ -280,7 +332,7 @@ pw_py_test(
         ":config_pb2",
         ":integration_test_fixture",
         "//pw_protobuf:status_proto_pb2",
-        "@python_packages//parameterized",
+        "@pigweed_python_packages//parameterized",
         "@rules_python//python/runfiles",
     ],
 )
@@ -297,14 +349,19 @@ java_binary(
         "//pw_rpc/java/main/dev/pigweed/pw_rpc:client",
         "//pw_transfer/java/main/dev/pigweed/pw_transfer:client",
         "@com_google_protobuf//:protobuf_java",
-        artifact("com.google.flogger:flogger-system-backend"),
-        artifact("com.google.guava:guava"),
+        "@pigweed_maven_deps//:com_google_flogger_flogger_system_backend",
+        "@pigweed_maven_deps//:com_google_guava_guava",
     ],
 )
 
 pw_py_binary(
     name = "python_client",
     srcs = ["python_client.py"],
+    tags = [
+        # TODO: b/434032260 - Fix these warnings.
+        "nomypy",
+        "nopylint",
+    ],
     deps = [
         ":config_pb2",
         "//pw_hdlc/py:pw_hdlc",
@@ -312,6 +369,6 @@ pw_py_binary(
         "//pw_transfer:transfer_proto_pb2",
         "//pw_transfer/py:pw_transfer",
         "@com_google_protobuf//:protobuf_python",
-        "@python_packages//pyserial",
+        "@pigweed_python_packages//pyserial",
     ],
 )

@@ -28,6 +28,8 @@
 
 #undef PW_RPC_CLIENT_STREAM_END_CALLBACK
 
+/// @submodule{pw_rpc,config}
+
 /// pw_rpc clients may request call completion by sending
 /// `CLIENT_REQUEST_COMPLETION` packet. For client streaming or bi-direction
 /// RPCs, this also indicates that the client is done sending requests. While
@@ -71,6 +73,15 @@
 /// be configured for pw_sync:mutex.
 ///
 /// This is enabled by default.
+///
+/// Note: The dependencies of pw_rpc depend on the value of
+/// PW_RPC_USE_GLOBAL_MUTEX. When building pw_rpc with Bazel, you should NOT set
+/// this module config value directly. Instead, tell the build system which
+/// value you wish to select by adding one of the following constraint_values to
+/// the target platform:
+///
+///   - `@pigweed//pw_rpc:use_global_mutex_true` (the default)
+///   - `@pigweed//pw_rpc:use_global_mutex_false`
 #ifndef PW_RPC_USE_GLOBAL_MUTEX
 #define PW_RPC_USE_GLOBAL_MUTEX 1
 #endif  // PW_RPC_USE_GLOBAL_MUTEX
@@ -182,6 +193,18 @@
 #define PW_RPC_DYNAMIC_ALLOCATION 0
 #endif  // PW_RPC_DYNAMIC_ALLOCATION
 
+/// If set to 0, disables the ability to create RPC call objects directly on the
+/// stack using the regular client. This forces the use of DynamicClient, which
+/// allocates call objects on the heap. This can be useful in environments with
+/// limited stack space. Defaults to 1 (stack allocation allowed).
+#ifndef PW_RPC_ALLOW_INVOCATIONS_ON_STACK
+#define PW_RPC_ALLOW_INVOCATIONS_ON_STACK 1
+#endif  // PW_RPC_ALLOW_INVOCATIONS_ON_STACK
+
+static_assert(PW_RPC_ALLOW_INVOCATIONS_ON_STACK || PW_RPC_DYNAMIC_ALLOCATION,
+              "If PW_RPC_ALLOW_INVOCATIONS_ON_STACK is 0, "
+              "PW_RPC_DYNAMIC_ALLOCATION must be 1 to allow RPC calls.");
+
 #if defined(PW_RPC_DYNAMIC_CONTAINER) || \
     defined(PW_RPC_DYNAMIC_CONTAINER_INCLUDE)
 static_assert(
@@ -233,9 +256,12 @@ static_assert(
 #define PW_RPC_MAKE_UNIQUE_PTR_INCLUDE <memory>
 #endif  // PW_RPC_MAKE_UNIQUE_PTR_INCLUDE
 
-/// Size of the global RPC packet encoding buffer in bytes. If dynamic
-/// allocation is enabled, this value is only used for test helpers that
-/// allocate RPC encoding buffers.
+/// Size of the global RPC packet encoding buffer in bytes.
+///
+/// When dynamic allocation is enabled, the encoding buffer is allocated on
+/// demand. `PW_RPC_ENCODING_BUFFER_SIZE_BYTES` serves as a hint for the maximum
+/// packet size and for `pw::rpc::MaxSafePayloadSize()`. It is also used by test
+/// helpers that allocate RPC encoding buffers.
 #ifndef PW_RPC_ENCODING_BUFFER_SIZE_BYTES
 #define PW_RPC_ENCODING_BUFFER_SIZE_BYTES 512
 #endif  // PW_RPC_ENCODING_BUFFER_SIZE_BYTES
@@ -290,3 +316,5 @@ inline constexpr size_t kEncodingBufferSizeBytes =
 #endif  // PW_RPC_NANOPB_STRUCT_BUFFER_STACK_ALLOCATE
 
 #undef PW_RPC_NANOPB_STRUCT_BUFFER_STACK_ALLOCATE
+
+/// @}

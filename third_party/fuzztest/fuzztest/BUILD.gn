@@ -1,4 +1,4 @@
-# Copyright 2024 The Pigweed Authors
+# Copyright 2025 The Pigweed Authors
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may not
 # use this file except in compliance with the License. You may obtain a copy of
@@ -17,20 +17,20 @@
 
 import("//build_overrides/pigweed.gni")
 
-import("$dir_pw_third_party/fuzztest/fuzztest.gni")
+import("$pw_external_fuzztest/fuzztest.gni")
 
-# Generated from @com_google_fuzztest//fuzztest:absl_helpers
+# Generated from @fuzztest//fuzztest:absl_helpers
 fuzztest_source_set("absl_helpers") {
   public = [
     "$dir_pw_third_party_fuzztest/fuzztest/internal/domains/absl_helpers.h",
   ]
   public_deps = [
     ":logging",
-    "$dir_pw_third_party/abseil-cpp/absl/time",
+    "$pw_external_abseil_cpp/absl/time",
   ]
 }
 
-# Generated from @com_google_fuzztest//fuzztest:any
+# Generated from @fuzztest//fuzztest:any
 fuzztest_source_set("any") {
   public = [ "$dir_pw_third_party_fuzztest/fuzztest/internal/any.h" ]
   public_deps = [
@@ -39,7 +39,7 @@ fuzztest_source_set("any") {
   ]
 }
 
-# Generated from @com_google_fuzztest//fuzztest:compatibility_mode
+# Generated from @fuzztest//fuzztest:compatibility_mode
 fuzztest_source_set("compatibility_mode") {
   public =
       [ "$dir_pw_third_party_fuzztest/fuzztest/internal/compatibility_mode.h" ]
@@ -50,29 +50,29 @@ fuzztest_source_set("compatibility_mode") {
     ":fixture_driver",
     ":logging",
     ":runtime",
-    "$dir_pw_third_party/abseil-cpp/absl/random:distributions",
-    "$dir_pw_third_party/abseil-cpp/absl/strings",
-    "$dir_pw_third_party/abseil-cpp/absl/strings:str_format",
-    "$dir_pw_third_party/abseil-cpp/absl/time",
+    "$pw_external_abseil_cpp/absl/random:distributions",
+    "$pw_external_abseil_cpp/absl/strings",
+    "$pw_external_abseil_cpp/absl/strings:str_format",
+    "$pw_external_abseil_cpp/absl/time",
   ]
 }
 
-# Generated from @com_google_fuzztest//fuzztest:configuration
+# Generated from @fuzztest//fuzztest:configuration
 fuzztest_source_set("configuration") {
   public = [ "$dir_pw_third_party_fuzztest/fuzztest/internal/configuration.h" ]
   sources =
       [ "$dir_pw_third_party_fuzztest/fuzztest/internal/configuration.cc" ]
   public_deps = [
-    "$dir_pw_third_party/abseil-cpp/absl/log:check",
-    "$dir_pw_third_party/abseil-cpp/absl/status",
-    "$dir_pw_third_party/abseil-cpp/absl/status:statusor",
-    "$dir_pw_third_party/abseil-cpp/absl/strings",
-    "$dir_pw_third_party/abseil-cpp/absl/strings:string_view",
-    "$dir_pw_third_party/abseil-cpp/absl/time",
+    "$pw_external_abseil_cpp/absl/log:check",
+    "$pw_external_abseil_cpp/absl/status",
+    "$pw_external_abseil_cpp/absl/status:statusor",
+    "$pw_external_abseil_cpp/absl/strings",
+    "$pw_external_abseil_cpp/absl/strings:string_view",
+    "$pw_external_abseil_cpp/absl/time",
   ]
 }
 
-# Generated from @com_google_fuzztest//fuzztest:corpus_database
+# Generated from @fuzztest//fuzztest:corpus_database
 fuzztest_source_set("corpus_database") {
   public =
       [ "$dir_pw_third_party_fuzztest/fuzztest/internal/corpus_database.h" ]
@@ -81,27 +81,28 @@ fuzztest_source_set("corpus_database") {
   public_deps = [
     ":configuration",
     ":io",
-    "$dir_pw_third_party/abseil-cpp/absl/strings",
-    "$dir_pw_third_party/abseil-cpp/absl/strings:string_view",
-    "$dir_pw_third_party/abseil-cpp/absl/time",
+    "$pw_external_abseil_cpp/absl/strings",
+    "$pw_external_abseil_cpp/absl/strings:string_view",
+    "$pw_external_abseil_cpp/absl/time",
   ]
 }
 
-# Generated from @com_google_fuzztest//fuzztest:coverage
+# Generated from @fuzztest//fuzztest:coverage
 fuzztest_source_set("coverage") {
   public = [ "$dir_pw_third_party_fuzztest/fuzztest/internal/coverage.h" ]
   sources = [ "$dir_pw_third_party_fuzztest/fuzztest/internal/coverage.cc" ]
   public_deps = [
+    ":domain_core",
     ":flag_name",
     ":logging",
     ":table_of_recent_compares",
-    "$dir_pw_third_party/abseil-cpp/absl/base:core_headers",
-    "$dir_pw_third_party/abseil-cpp/absl/strings:str_format",
-    "$dir_pw_third_party/abseil-cpp/absl/types:span",
+    "$pw_external_abseil_cpp/absl/base:core_headers",
+    "$pw_external_abseil_cpp/absl/strings:str_format",
+    "$pw_external_abseil_cpp/absl/types:span",
   ]
 }
 
-# Generated from @com_google_fuzztest//fuzztest:domain_core
+# Generated from @fuzztest//fuzztest:domain_core
 fuzztest_source_set("domain_core") {
   public = [
     "$dir_pw_third_party_fuzztest/fuzztest/domain_core.h",
@@ -118,8 +119,10 @@ fuzztest_source_set("domain_core") {
     "$dir_pw_third_party_fuzztest/fuzztest/internal/domains/flat_map_impl.h",
     "$dir_pw_third_party_fuzztest/fuzztest/internal/domains/in_range_impl.h",
     "$dir_pw_third_party_fuzztest/fuzztest/internal/domains/map_impl.h",
+    "$dir_pw_third_party_fuzztest/fuzztest/internal/domains/mutation_metadata.h",
     "$dir_pw_third_party_fuzztest/fuzztest/internal/domains/one_of_impl.h",
     "$dir_pw_third_party_fuzztest/fuzztest/internal/domains/optional_of_impl.h",
+    "$dir_pw_third_party_fuzztest/fuzztest/internal/domains/overlap_of_impl.h",
     "$dir_pw_third_party_fuzztest/fuzztest/internal/domains/serialization_helpers.h",
     "$dir_pw_third_party_fuzztest/fuzztest/internal/domains/smart_pointer_of_impl.h",
     "$dir_pw_third_party_fuzztest/fuzztest/internal/domains/special_values.h",
@@ -133,7 +136,6 @@ fuzztest_source_set("domain_core") {
   public_deps = [
     ":absl_helpers",
     ":any",
-    ":coverage",
     ":logging",
     ":meta",
     ":printer",
@@ -142,23 +144,23 @@ fuzztest_source_set("domain_core") {
     ":status",
     ":table_of_recent_compares",
     ":type_support",
-    "$dir_pw_third_party/abseil-cpp/absl/container:flat_hash_map",
-    "$dir_pw_third_party/abseil-cpp/absl/container:flat_hash_set",
-    "$dir_pw_third_party/abseil-cpp/absl/functional:function_ref",
-    "$dir_pw_third_party/abseil-cpp/absl/numeric:bits",
-    "$dir_pw_third_party/abseil-cpp/absl/numeric:int128",
-    "$dir_pw_third_party/abseil-cpp/absl/random",
-    "$dir_pw_third_party/abseil-cpp/absl/random:bit_gen_ref",
-    "$dir_pw_third_party/abseil-cpp/absl/random:distributions",
-    "$dir_pw_third_party/abseil-cpp/absl/status",
-    "$dir_pw_third_party/abseil-cpp/absl/strings",
-    "$dir_pw_third_party/abseil-cpp/absl/strings:str_format",
-    "$dir_pw_third_party/abseil-cpp/absl/time",
-    "$dir_pw_third_party/abseil-cpp/absl/types:span",
+    "$pw_external_abseil_cpp/absl/container:flat_hash_map",
+    "$pw_external_abseil_cpp/absl/container:flat_hash_set",
+    "$pw_external_abseil_cpp/absl/functional:function_ref",
+    "$pw_external_abseil_cpp/absl/numeric:bits",
+    "$pw_external_abseil_cpp/absl/numeric:int128",
+    "$pw_external_abseil_cpp/absl/random",
+    "$pw_external_abseil_cpp/absl/random:bit_gen_ref",
+    "$pw_external_abseil_cpp/absl/random:distributions",
+    "$pw_external_abseil_cpp/absl/status",
+    "$pw_external_abseil_cpp/absl/strings",
+    "$pw_external_abseil_cpp/absl/strings:str_format",
+    "$pw_external_abseil_cpp/absl/time",
+    "$pw_external_abseil_cpp/absl/types:span",
   ]
 }
 
-# Generated from @com_google_fuzztest//fuzztest:fixture_driver
+# Generated from @fuzztest//fuzztest:fixture_driver
 fuzztest_source_set("fixture_driver") {
   public = [ "$dir_pw_third_party_fuzztest/fuzztest/internal/fixture_driver.h" ]
   sources =
@@ -171,18 +173,18 @@ fuzztest_source_set("fixture_driver") {
     ":printer",
     ":registration",
     ":type_support",
-    "$dir_pw_third_party/abseil-cpp/absl/status",
-    "$dir_pw_third_party/abseil-cpp/absl/strings:str_format",
-    "$dir_pw_third_party/abseil-cpp/absl/types:span",
+    "$pw_external_abseil_cpp/absl/status",
+    "$pw_external_abseil_cpp/absl/strings:str_format",
+    "$pw_external_abseil_cpp/absl/types:span",
   ]
 }
 
-# Generated from @com_google_fuzztest//fuzztest:flag_name
+# Generated from @fuzztest//fuzztest:flag_name
 fuzztest_source_set("flag_name") {
   public = [ "$dir_pw_third_party_fuzztest/fuzztest/internal/flag_name.h" ]
 }
 
-# Generated from @com_google_fuzztest//fuzztest:fuzztest_core
+# Generated from @fuzztest//fuzztest:fuzztest_core
 fuzztest_source_set("fuzztest_core") {
   public = [ "$dir_pw_third_party_fuzztest/fuzztest/fuzztest_core.h" ]
   public_deps = [
@@ -191,34 +193,35 @@ fuzztest_source_set("fuzztest_core") {
   ]
 }
 
-# Generated from @com_google_fuzztest//fuzztest:fuzztest_gtest_main
+# Generated from @fuzztest//fuzztest:fuzztest_gtest_main
 fuzztest_source_set("fuzztest_gtest_main") {
   sources = [ "$dir_pw_third_party_fuzztest/fuzztest/fuzztest_gtest_main.cc" ]
   public_deps = [
     ":init_fuzztest",
-    "$dir_pw_third_party/abseil-cpp/absl/strings",
-    "$dir_pw_third_party/googletest:gtest",
+    "$pw_external_abseil_cpp/absl/strings",
+    "$pw_external_googletest:gtest",
   ]
 }
 
-# Generated from @com_google_fuzztest//fuzztest:fuzztest_macros
+# Generated from @fuzztest//fuzztest:fuzztest_macros
 fuzztest_source_set("fuzztest_macros") {
   public = [ "$dir_pw_third_party_fuzztest/fuzztest/fuzztest_macros.h" ]
   sources = [ "$dir_pw_third_party_fuzztest/fuzztest/fuzztest_macros.cc" ]
   public_deps = [
     ":io",
+    ":logging",
     ":registration",
     ":registry",
-    "$dir_pw_third_party/abseil-cpp/absl/log:check",
-    "$dir_pw_third_party/abseil-cpp/absl/status",
-    "$dir_pw_third_party/abseil-cpp/absl/status:statusor",
-    "$dir_pw_third_party/abseil-cpp/absl/strings",
-    "$dir_pw_third_party/abseil-cpp/absl/strings:str_format",
-    "$dir_pw_third_party/abseil-cpp/absl/strings:string_view",
+    "$pw_external_abseil_cpp/absl/log:check",
+    "$pw_external_abseil_cpp/absl/status",
+    "$pw_external_abseil_cpp/absl/status:statusor",
+    "$pw_external_abseil_cpp/absl/strings",
+    "$pw_external_abseil_cpp/absl/strings:str_format",
+    "$pw_external_abseil_cpp/absl/strings:string_view",
   ]
 }
 
-# Generated from @com_google_fuzztest//fuzztest:googletest_adaptor
+# Generated from @fuzztest//fuzztest:googletest_adaptor
 fuzztest_source_set("googletest_adaptor") {
   public =
       [ "$dir_pw_third_party_fuzztest/fuzztest/internal/googletest_adaptor.h" ]
@@ -231,14 +234,14 @@ fuzztest_source_set("googletest_adaptor") {
     ":io",
     ":registry",
     ":runtime",
-    "$dir_pw_third_party/abseil-cpp/absl/strings",
-    "$dir_pw_third_party/abseil-cpp/absl/strings:str_format",
-    "$dir_pw_third_party/abseil-cpp/absl/strings:string_view",
-    "$dir_pw_third_party/googletest:gtest",
+    "$pw_external_abseil_cpp/absl/strings",
+    "$pw_external_abseil_cpp/absl/strings:str_format",
+    "$pw_external_abseil_cpp/absl/strings:string_view",
+    "$pw_external_googletest:gtest",
   ]
 }
 
-# Generated from @com_google_fuzztest//fuzztest:init_fuzztest
+# Generated from @fuzztest//fuzztest:init_fuzztest
 fuzztest_source_set("init_fuzztest") {
   public = [ "$dir_pw_third_party_fuzztest/fuzztest/init_fuzztest.h" ]
   sources = [ "$dir_pw_third_party_fuzztest/fuzztest/init_fuzztest.cc" ]
@@ -250,65 +253,65 @@ fuzztest_source_set("init_fuzztest") {
     ":logging",
     ":registry",
     ":runtime",
-    "$dir_pw_third_party/abseil-cpp/absl/algorithm:container",
-    "$dir_pw_third_party/abseil-cpp/absl/base:no_destructor",
-    "$dir_pw_third_party/abseil-cpp/absl/container:flat_hash_set",
-    "$dir_pw_third_party/abseil-cpp/absl/flags:flag",
-    "$dir_pw_third_party/abseil-cpp/absl/flags:parse",
-    "$dir_pw_third_party/abseil-cpp/absl/flags:reflection",
-    "$dir_pw_third_party/abseil-cpp/absl/strings",
-    "$dir_pw_third_party/abseil-cpp/absl/strings:str_format",
-    "$dir_pw_third_party/abseil-cpp/absl/time",
-    "$dir_pw_third_party/googletest:gtest",
+    "$pw_external_abseil_cpp/absl/algorithm:container",
+    "$pw_external_abseil_cpp/absl/base:no_destructor",
+    "$pw_external_abseil_cpp/absl/container:flat_hash_set",
+    "$pw_external_abseil_cpp/absl/flags:flag",
+    "$pw_external_abseil_cpp/absl/flags:parse",
+    "$pw_external_abseil_cpp/absl/flags:reflection",
+    "$pw_external_abseil_cpp/absl/strings",
+    "$pw_external_abseil_cpp/absl/strings:str_format",
+    "$pw_external_abseil_cpp/absl/time",
+    "$pw_external_googletest:gtest",
   ]
 }
 
-# Generated from @com_google_fuzztest//fuzztest:io
+# Generated from @fuzztest//fuzztest:io
 fuzztest_source_set("io") {
   public = [ "$dir_pw_third_party_fuzztest/fuzztest/internal/io.h" ]
   sources = [ "$dir_pw_third_party_fuzztest/fuzztest/internal/io.cc" ]
   public_deps = [
     ":logging",
-    "$dir_pw_third_party/abseil-cpp/absl/functional:function_ref",
-    "$dir_pw_third_party/abseil-cpp/absl/hash",
-    "$dir_pw_third_party/abseil-cpp/absl/status",
-    "$dir_pw_third_party/abseil-cpp/absl/strings:str_format",
-    "$dir_pw_third_party/abseil-cpp/absl/strings:string_view",
-    "$dir_pw_third_party/abseil-cpp/absl/time",
-    "$dir_pw_third_party/abseil-cpp/absl/types:span",
+    "$pw_external_abseil_cpp/absl/functional:function_ref",
+    "$pw_external_abseil_cpp/absl/hash",
+    "$pw_external_abseil_cpp/absl/status",
+    "$pw_external_abseil_cpp/absl/strings:str_format",
+    "$pw_external_abseil_cpp/absl/strings:string_view",
+    "$pw_external_abseil_cpp/absl/time",
+    "$pw_external_abseil_cpp/absl/types:span",
     "../common:blob_file",
     "../common:defs",
     "../common:remote_file",
   ]
 }
 
-# Generated from @com_google_fuzztest//fuzztest:logging
+# Generated from @fuzztest//fuzztest:logging
 fuzztest_source_set("logging") {
   public = [ "$dir_pw_third_party_fuzztest/fuzztest/internal/logging.h" ]
   sources = [ "$dir_pw_third_party_fuzztest/fuzztest/internal/logging.cc" ]
   public_deps = [
-    "$dir_pw_third_party/abseil-cpp/absl/base:core_headers",
-    "$dir_pw_third_party/abseil-cpp/absl/strings",
-    "$dir_pw_third_party/abseil-cpp/absl/synchronization",
+    "$pw_external_abseil_cpp/absl/base:core_headers",
+    "$pw_external_abseil_cpp/absl/strings",
+    "$pw_external_abseil_cpp/absl/synchronization",
   ]
 }
 
-# Generated from @com_google_fuzztest//fuzztest:meta
+# Generated from @fuzztest//fuzztest:meta
 fuzztest_source_set("meta") {
   public = [ "$dir_pw_third_party_fuzztest/fuzztest/internal/meta.h" ]
-  public_deps = [ "$dir_pw_third_party/abseil-cpp/absl/numeric:int128" ]
+  public_deps = [ "$pw_external_abseil_cpp/absl/numeric:int128" ]
 }
 
-# Generated from @com_google_fuzztest//fuzztest:printer
+# Generated from @fuzztest//fuzztest:printer
 fuzztest_source_set("printer") {
   public = [ "$dir_pw_third_party_fuzztest/fuzztest/internal/printer.h" ]
   public_deps = [
     ":meta",
-    "$dir_pw_third_party/abseil-cpp/absl/strings:str_format",
+    "$pw_external_abseil_cpp/absl/strings:str_format",
   ]
 }
 
-# Generated from @com_google_fuzztest//fuzztest:registration
+# Generated from @fuzztest//fuzztest:registration
 fuzztest_source_set("registration") {
   public = [ "$dir_pw_third_party_fuzztest/fuzztest/internal/registration.h" ]
   public_deps = [
@@ -316,14 +319,14 @@ fuzztest_source_set("registration") {
     ":meta",
     ":printer",
     ":type_support",
-    "$dir_pw_third_party/abseil-cpp/absl/functional:any_invocable",
-    "$dir_pw_third_party/abseil-cpp/absl/status",
-    "$dir_pw_third_party/abseil-cpp/absl/strings:str_format",
-    "$dir_pw_third_party/abseil-cpp/absl/types:span",
+    "$pw_external_abseil_cpp/absl/functional:any_invocable",
+    "$pw_external_abseil_cpp/absl/status",
+    "$pw_external_abseil_cpp/absl/strings:str_format",
+    "$pw_external_abseil_cpp/absl/types:span",
   ]
 }
 
-# Generated from @com_google_fuzztest//fuzztest:registry
+# Generated from @fuzztest//fuzztest:registry
 fuzztest_source_set("registry") {
   public = [ "$dir_pw_third_party_fuzztest/fuzztest/internal/registry.h" ]
   sources = [ "$dir_pw_third_party_fuzztest/fuzztest/internal/registry.cc" ]
@@ -332,13 +335,13 @@ fuzztest_source_set("registry") {
     ":fixture_driver",
     ":registration",
     ":runtime",
-    "$dir_pw_third_party/abseil-cpp/absl/container:flat_hash_map",
-    "$dir_pw_third_party/abseil-cpp/absl/functional:function_ref",
-    "$dir_pw_third_party/abseil-cpp/absl/strings:string_view",
+    "$pw_external_abseil_cpp/absl/container:flat_hash_map",
+    "$pw_external_abseil_cpp/absl/functional:function_ref",
+    "$pw_external_abseil_cpp/absl/strings:string_view",
   ]
 }
 
-# Generated from @com_google_fuzztest//fuzztest:runtime
+# Generated from @fuzztest//fuzztest:runtime
 fuzztest_source_set("runtime") {
   public = [ "$dir_pw_third_party_fuzztest/fuzztest/internal/runtime.h" ]
   sources = [ "$dir_pw_third_party_fuzztest/fuzztest/internal/runtime.cc" ]
@@ -356,73 +359,75 @@ fuzztest_source_set("runtime") {
     ":seed_seq",
     ":serialization",
     ":status",
-    "$dir_pw_third_party/abseil-cpp/absl/functional:any_invocable",
-    "$dir_pw_third_party/abseil-cpp/absl/functional:bind_front",
-    "$dir_pw_third_party/abseil-cpp/absl/functional:function_ref",
-    "$dir_pw_third_party/abseil-cpp/absl/log:check",
-    "$dir_pw_third_party/abseil-cpp/absl/random",
-    "$dir_pw_third_party/abseil-cpp/absl/random:bit_gen_ref",
-    "$dir_pw_third_party/abseil-cpp/absl/random:distributions",
-    "$dir_pw_third_party/abseil-cpp/absl/status",
-    "$dir_pw_third_party/abseil-cpp/absl/status:statusor",
-    "$dir_pw_third_party/abseil-cpp/absl/strings",
-    "$dir_pw_third_party/abseil-cpp/absl/strings:str_format",
-    "$dir_pw_third_party/abseil-cpp/absl/time",
-    "$dir_pw_third_party/abseil-cpp/absl/types:span",
+    "$pw_external_abseil_cpp/absl/base:core_headers",
+    "$pw_external_abseil_cpp/absl/functional:any_invocable",
+    "$pw_external_abseil_cpp/absl/functional:bind_front",
+    "$pw_external_abseil_cpp/absl/functional:function_ref",
+    "$pw_external_abseil_cpp/absl/log:check",
+    "$pw_external_abseil_cpp/absl/random",
+    "$pw_external_abseil_cpp/absl/random:bit_gen_ref",
+    "$pw_external_abseil_cpp/absl/random:distributions",
+    "$pw_external_abseil_cpp/absl/status",
+    "$pw_external_abseil_cpp/absl/status:statusor",
+    "$pw_external_abseil_cpp/absl/strings",
+    "$pw_external_abseil_cpp/absl/strings:str_format",
+    "$pw_external_abseil_cpp/absl/time",
+    "$pw_external_abseil_cpp/absl/types:span",
+    "../common:bazel",
   ]
 }
 
-# Generated from @com_google_fuzztest//fuzztest:seed_seq
+# Generated from @fuzztest//fuzztest:seed_seq
 fuzztest_source_set("seed_seq") {
   public = [ "$dir_pw_third_party_fuzztest/fuzztest/internal/seed_seq.h" ]
   sources = [ "$dir_pw_third_party_fuzztest/fuzztest/internal/seed_seq.cc" ]
   public_deps = [
     ":logging",
-    "$dir_pw_third_party/abseil-cpp/absl/random",
-    "$dir_pw_third_party/abseil-cpp/absl/strings",
-    "$dir_pw_third_party/abseil-cpp/absl/types:span",
+    "$pw_external_abseil_cpp/absl/random",
+    "$pw_external_abseil_cpp/absl/strings",
+    "$pw_external_abseil_cpp/absl/types:span",
   ]
 }
 
-# Generated from @com_google_fuzztest//fuzztest:serialization
+# Generated from @fuzztest//fuzztest:serialization
 fuzztest_source_set("serialization") {
   public = [ "$dir_pw_third_party_fuzztest/fuzztest/internal/serialization.h" ]
   sources =
       [ "$dir_pw_third_party_fuzztest/fuzztest/internal/serialization.cc" ]
   public_deps = [
     ":meta",
-    "$dir_pw_third_party/abseil-cpp/absl/numeric:int128",
-    "$dir_pw_third_party/abseil-cpp/absl/strings",
-    "$dir_pw_third_party/abseil-cpp/absl/strings:str_format",
-    "$dir_pw_third_party/abseil-cpp/absl/types:span",
+    "$pw_external_abseil_cpp/absl/numeric:int128",
+    "$pw_external_abseil_cpp/absl/strings",
+    "$pw_external_abseil_cpp/absl/strings:str_format",
+    "$pw_external_abseil_cpp/absl/types:span",
   ]
 }
 
-# Generated from @com_google_fuzztest//fuzztest:status
+# Generated from @fuzztest//fuzztest:status
 fuzztest_source_set("status") {
   public = [ "$dir_pw_third_party_fuzztest/fuzztest/internal/status.h" ]
   sources = [ "$dir_pw_third_party_fuzztest/fuzztest/internal/status.cc" ]
   public_deps = [
-    "$dir_pw_third_party/abseil-cpp/absl/status",
-    "$dir_pw_third_party/abseil-cpp/absl/strings",
-    "$dir_pw_third_party/abseil-cpp/absl/strings:cord",
+    "$pw_external_abseil_cpp/absl/status",
+    "$pw_external_abseil_cpp/absl/strings",
+    "$pw_external_abseil_cpp/absl/strings:cord",
   ]
 }
 
-# Generated from @com_google_fuzztest//fuzztest:table_of_recent_compares
+# Generated from @fuzztest//fuzztest:table_of_recent_compares
 fuzztest_source_set("table_of_recent_compares") {
   public = [
     "$dir_pw_third_party_fuzztest/fuzztest/internal/table_of_recent_compares.h",
   ]
   public_deps = [
     ":type_support",
-    "$dir_pw_third_party/abseil-cpp/absl/container:flat_hash_set",
-    "$dir_pw_third_party/abseil-cpp/absl/random:bit_gen_ref",
-    "$dir_pw_third_party/abseil-cpp/absl/random:distributions",
+    "$pw_external_abseil_cpp/absl/container:flat_hash_set",
+    "$pw_external_abseil_cpp/absl/random:bit_gen_ref",
+    "$pw_external_abseil_cpp/absl/random:distributions",
   ]
 }
 
-# Generated from @com_google_fuzztest//fuzztest:type_support
+# Generated from @fuzztest//fuzztest:type_support
 fuzztest_source_set("type_support") {
   public = [ "$dir_pw_third_party_fuzztest/fuzztest/internal/type_support.h" ]
   sources = [ "$dir_pw_third_party_fuzztest/fuzztest/internal/type_support.cc" ]
@@ -430,11 +435,11 @@ fuzztest_source_set("type_support") {
     ":absl_helpers",
     ":meta",
     ":printer",
-    "$dir_pw_third_party/abseil-cpp/absl/debugging:symbolize",
-    "$dir_pw_third_party/abseil-cpp/absl/functional:function_ref",
-    "$dir_pw_third_party/abseil-cpp/absl/numeric:int128",
-    "$dir_pw_third_party/abseil-cpp/absl/strings",
-    "$dir_pw_third_party/abseil-cpp/absl/strings:str_format",
-    "$dir_pw_third_party/abseil-cpp/absl/time",
+    "$pw_external_abseil_cpp/absl/debugging:symbolize",
+    "$pw_external_abseil_cpp/absl/functional:function_ref",
+    "$pw_external_abseil_cpp/absl/numeric:int128",
+    "$pw_external_abseil_cpp/absl/strings",
+    "$pw_external_abseil_cpp/absl/strings:str_format",
+    "$pw_external_abseil_cpp/absl/time",
   ]
 }

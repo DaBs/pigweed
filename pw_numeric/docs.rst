@@ -29,20 +29,4 @@ substantially, some features may be moved to other modules (e.g.
 -----------------
 C++ API reference
 -----------------
-
-pw_numeric/checked_arithmetic.h
-===============================
-.. doxygenfunction:: pw::CheckedAdd
-
-.. doxygenfunction:: pw::CheckedIncrement
-
-.. doxygenfunction:: pw::CheckedSub
-
-.. doxygenfunction:: pw::CheckedDecrement
-
-.. doxygenfunction:: pw::CheckedMul
-
-
-pw_numeric/integer_division.h
-=============================
-.. doxygenfunction:: pw::IntegerDivisionRoundNearest
+Moved: :cc:`pw_numeric`

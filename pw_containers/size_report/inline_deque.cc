@@ -12,20 +12,23 @@
 // License for the specific language governing permissions and limitations under
 // the License.
 
-#include "pw_containers/size_report/inline_deque.h"
+#include "pw_containers/inline_deque.h"
 
 #include "pw_bloat/bloat_this_binary.h"
+#include "pw_containers/size_report/deque.h"
 
 namespace pw::containers::size_report {
 
 int Measure() {
   volatile uint32_t mask = bloat::kDefaultMask;
   auto& items1 = GetItems<V1>();
-  int rc = MeasureInlineDeque<V1>(items1.begin(), items1.end(), mask);
+  auto& inline_deque1 = GetContainer<InlineDeque<V1, kNumItems>>();
+  int rc = MeasureDeque(inline_deque1, items1.begin(), items1.end(), mask);
 
 #ifdef PW_CONTAINERS_SIZE_REPORT_ALTERNATE_VALUE
   auto& items2 = GetItems<V2>();
-  rc += MeasureInlineDeque<V2>(items2.begin(), items2.end(), mask);
+  auto& inline_deque2 = GetContainer<InlineDeque<V2, kNumItems>>();
+  rc += MeasureDeque(inline_deque2, items2.begin(), items2.end(), mask);
 #endif
 
   return rc;

@@ -24,6 +24,8 @@
 #include <type_traits>
 
 #include "pw_assert/assert.h"
+#include "pw_containers/internal/traits.h"
+#include "pw_containers/ptr_iterator.h"
 #include "pw_preprocessor/compiler.h"
 #include "pw_string/internal/string_impl.h"
 
@@ -40,6 +42,8 @@
   "the source string."
 
 namespace pw {
+
+/// @submodule{pw_string,inline}
 
 /// @brief `pw::InlineBasicString` is a fixed-capacity version of
 /// `std::basic_string`. In brief:
@@ -116,9 +120,9 @@ class InlineBasicString final
     Copy(data(), array, string_impl::ArrayStringLength(array, max_size()));
   }
 
-  template <typename InputIterator,
-            typename = string_impl::EnableIfInputIterator<InputIterator>>
-  constexpr InlineBasicString(InputIterator start, InputIterator finish)
+  template <typename Iterator,
+            typename = containers::internal::EnableIfInputIterator<Iterator>>
+  constexpr InlineBasicString(Iterator start, Iterator finish)
       : InlineBasicString() {
     CopyIterator(data(), start, finish);
   }
@@ -303,8 +307,10 @@ class InlineBasicString<T, string_impl::kGeneric> {
   using const_reference = const value_type&;
   using pointer = value_type*;
   using const_pointer = const value_type*;
-  using iterator = value_type*;
-  using const_iterator = const value_type*;
+  using iterator =
+      containers::PtrIterator<InlineBasicString<T, string_impl::kGeneric>>;
+  using const_iterator =
+      containers::ConstPtrIterator<InlineBasicString<T, string_impl::kGeneric>>;
   using reverse_iterator = std::reverse_iterator<iterator>;
   using const_reverse_iterator = std::reverse_iterator<const_iterator>;
 
@@ -340,6 +346,12 @@ class InlineBasicString<T, string_impl::kGeneric> {
   InlineBasicString(const InlineBasicString&) = default;
 
   InlineBasicString& operator=(const InlineBasicString&) = default;
+
+  // Allow derived fixed-length types to create iterators.
+  static constexpr iterator Iterator(T* data) { return iterator(data); }
+  static constexpr const_iterator Iterator(const T* data) {
+    return const_iterator(data);
+  }
 
   constexpr void PushBack(T* data, T ch);
 
@@ -421,8 +433,6 @@ class InlineBasicString<T, string_impl::kGeneric> {
 
 // Class template argument deduction guides
 
-#ifdef __cpp_deduction_guides
-
 // In C++17, the capacity of the string may be deduced from a string literal or
 // array. For example, the following deduces a character type of char and a
 // capacity of 4 (which does not include the null terminator).
@@ -437,8 +447,6 @@ class InlineBasicString<T, string_impl::kGeneric> {
 template <typename T, size_t kCharArraySize>
 InlineBasicString(const T (&)[kCharArraySize])
     -> InlineBasicString<T, kCharArraySize - 1>;
-
-#endif  // __cpp_deduction_guides
 
 // Operators
 
@@ -572,6 +580,8 @@ using InlineString = InlineBasicString<char, kCapacity>;
 /// simple, efficient byte container.
 template <size_t kCapacity = string_impl::kGeneric>
 using InlineByteString = InlineBasicString<std::byte, kCapacity>;
+
+/// @}
 
 // Function implementations
 

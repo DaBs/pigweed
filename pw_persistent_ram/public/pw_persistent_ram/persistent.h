@@ -15,6 +15,7 @@
 
 #include <cstdint>
 #include <cstring>
+#include <new>
 #include <type_traits>
 #include <utility>
 
@@ -23,7 +24,10 @@
 #include "pw_preprocessor/compiler.h"
 #include "pw_span/span.h"
 
+/// Persistent RAM utilities and containers
 namespace pw::persistent_ram {
+
+/// @module{pw_persistent_ram}
 
 // Behavior to use when attempting to get a handle to the underlying data stored
 // in persistent memory.
@@ -40,16 +44,16 @@ PW_MODIFY_DIAGNOSTICS_PUSH();
 PW_MODIFY_DIAGNOSTIC(ignored, "-Wuninitialized");
 PW_MODIFY_DIAGNOSTIC_GCC(ignored, "-Wmaybe-uninitialized");
 
-// A simple container for holding a value T with CRC16 integrity checking.
-//
-// A Persistent is simply a value T plus integrity checking for use in a
-// persistent RAM section which is not initialized on boot.
-//
-// WARNING: Unlike a DoubleBufferedPersistent, a Persistent will be lost if a
-// write/set operation is interrupted or otherwise not completed.
-//
-// TODO: b/235277454 - Consider a different integrity check implementation which
-// does not use a 512B lookup table.
+/// A simple container for holding a value `T` with CRC16 integrity checking.
+///
+/// A `Persistent` is simply a value `T` plus integrity checking for use in a
+/// persistent RAM section which is not initialized on boot.
+///
+/// @warning Unlike a `DoubleBufferedPersistent`, a `Persistent` will be lost if
+/// a write/set operation is interrupted or otherwise not completed.
+///
+/// TODO: b/235277454 - Consider a different integrity check implementation
+/// which does not use a 512B lookup table.
 template <typename T>
 class Persistent {
  public:

@@ -41,9 +41,11 @@ void pw_Base64Encode(const void* binary_data,
 
 // Evaluates to the maximum size of decoded Base64 data in bytes.
 //
+// Returns 0 if the size is not a multiple of 4.
+//
 // Equivalent to pw::base64::MaxDecodedSize().
 #define PW_BASE64_MAX_DECODED_SIZE(base64_size_bytes) \
-  (((size_t)base64_size_bytes) / 4 * 3)
+  (((base64_size_bytes % 4) == 0) ? ((size_t)base64_size_bytes) / 4 * 3 : 0)
 
 // Decodes the provided Base64 data into raw binary. The output buffer *MUST* be
 // at least PW_BASE64_MAX_DECODED_SIZE bytes large.
@@ -53,7 +55,7 @@ size_t pw_Base64Decode(const char* base64,
                        size_t base64_size_bytes,
                        void* output);
 
-// Returns true if provided char is a valid Base64 character.
+// Returns true if provided char is a valid non-padding Base64 character.
 bool pw_Base64IsValidChar(char base64_char);
 
 // Returns true if the provided string is valid Base64 encoded data. Accepts
@@ -72,7 +74,10 @@ bool pw_Base64IsValid(const char* base64_data, size_t base64_size);
 #include "pw_span/span.h"
 #include "pw_string/string.h"
 
+/// Base64 encoding, decoding, and validating library
 namespace pw::base64 {
+
+/// @module{pw_base64}
 
 /// @param[in] binary_size_bytes The size of the binary data in bytes, before
 /// encoding.
@@ -143,15 +148,34 @@ inline InlineString<EncodedSize(kMaxBinaryDataSizeBytes)> Encode(
 ///
 /// @param[in] base64_size_bytes The size of the Base64-encoded data.
 ///
-/// @pre `base64_size_bytes` must be a multiple of 4, since Base64 encodes
-/// 3-byte groups into 4-character strings.
-///
 /// @returns The maximum size of the Base64-encoded data represented by
 /// `base64_bytes_size` after decoding. If the last 3-byte group has padding,
 /// the actual decoded size will be 1 or 2 bytes less than the value returned
-/// by `MaxDecodedSize()`.
+/// by `MaxDecodedSize()`. Returns 0 if `base64_size_bytes` is not a multiple of
+/// 4, since Base64 encodes 3-byte groups into 4-character strings.
 constexpr size_t MaxDecodedSize(size_t base64_size_bytes) {
   return PW_BASE64_MAX_DECODED_SIZE(base64_size_bytes);
+}
+
+/// Calculates the exact size of Base64-encoded data after decoding.
+///
+/// @param[in] valid_base64 A valid Base64-encoded string
+///
+/// @returns The size of the Base64-encoded data represented by `valid_base64`
+/// after decoding. Returns 0 if `valid_base64.size()` is not a multiple of 4,
+/// since Base64 encodes 3-byte groups into 4-character strings.
+constexpr size_t DecodedSize(std::string_view valid_base64) {
+  if ((valid_base64.size() % 4) != 0 || valid_base64.empty()) {
+    return 0;
+  }
+  const size_t max_bytes = valid_base64.size() / 4 * 3;
+  size_t padding = 0;
+  if (valid_base64[valid_base64.size() - 2] == '=') {
+    padding = 2;
+  } else if (valid_base64[valid_base64.size() - 1] == '=') {
+    padding = 1;
+  }
+  return max_bytes - padding;
 }
 
 /// Decodes the provided Base64 data into raw binary.
@@ -199,7 +223,7 @@ inline bool IsValid(std::string_view base64) {
 /// @param[in] base64 The character to check. Can be encoded with either the
 /// standard (`+/`) or URL-safe (`-_`) alphabet.
 ///
-/// @returns `true` if the provided character is a valid Base64 character.
+/// @returns `true` if the character is a valid non-padding Base64 character.
 inline bool IsValidChar(char base64) { return pw_Base64IsValidChar(base64); }
 
 }  // namespace pw::base64

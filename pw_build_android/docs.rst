@@ -12,17 +12,16 @@ Soong.
 ----------
 Quickstart
 ----------
-Use the ``pw_android_common_backends`` ``cc_defaults`` in the Pigweed module
-library or binary rule to use a preselected set of backends common to most
-Android platform projects.
+Use the ``pw_android_common_backends`` and ``pw_android_common_target_support``
+```cc_defaults`` in the Pigweed module library or binary rule to use a
+preselected set of backends common to most Android platform projects.
 
 .. code-block:: androidbp
 
    cc_binary {
        name: "my_app",
-       host_supported: true,
-       vendor: true,
        defaults: [
+           "pw_android_common_target_support",
            "pw_android_common_backends",
        ],
        srcs: [
@@ -105,17 +104,28 @@ common Android backends via the ``pw_android_common_backends`` defaults.
    Every dependency has to be added as ``whole_static_libs`` to avoid dropping
    symbols on transitive dependencies.
 
+.. note::
+
+   The ``cc_library_static`` rule should be used even if the module includes no
+   source files (only headers); ``cc_library_headers`` should not be used for
+   normal Pigweed modules.
+
+   Rationale: In Soong, dependencies are listed by type (e.g.
+   ``cc_library_headers`` modules are referenced in a ``header_libs`` list,
+   while ``cc_library_static`` modules are referenced in a ``static_libs``
+   list).  That means the type of a module cannot be changed without breaking
+   consumers.
+
 .. code-block:: androidbp
 
    cc_library_static {
        name: "pw_<MODULE_NAME>",
        cpp_std: "c++20",
-       export_include_dirs: ["public"],
-       vendor_available: true,
-       host_supported: true,
        defaults: [
+           "pw_android_common_target_support",
            "pw_android_common_backends",
        ],
+       export_include_dirs: ["public"],
        header_libs: [
            // List of cc_library_headers dependencies needed to support
            // #include directives in the module's header files.
@@ -169,18 +179,22 @@ common Android backend should still be provided, which uses the mentioned
        ],
    }
 
-    cc_library_headers {
-        name: "pw_<MODULE_NAME>_include_dirs",
-        export_include_dirs: [
-            "public",
-        ],
-        vendor_available: true,
-        host_supported: true,
-    }
+   cc_library_headers {
+       name: "pw_<MODULE_NAME>_include_dirs",
+       defaults: [
+           "pw_android_common_target_support",
+       ],
+       export_include_dirs: [
+           "public",
+       ],
+   }
 
    cc_defaults {
        name: "pw_<MODULE_NAME>_no_backends",
        cpp_std: "c++20",
+       defaults: [
+           "pw_android_common_target_support",
+       ],
 
        header_libs: [
            // Header library list for all the libraries in #include directives.
@@ -209,13 +223,12 @@ common Android backend should still be provided, which uses the mentioned
    cc_library_static {
        name: "pw_<MODULE_NAME>",
        cpp_std: "c++20",
-       export_include_dirs: ["public"],
        defaults: [
+           "pw_android_common_target_support",
            "pw_android_common_backends",
            "pw_<MODULE_NAME>_no_backends",
        ],
-       vendor_available: true,
-       host_supported: true,
+       export_include_dirs: ["public"],
    }
 
 Module libraries with configurable build flags
@@ -237,18 +250,22 @@ format.
        ],
    }
 
-    cc_library_headers {
-        name: "pw_<MODULE_NAME>_include_dirs",
-        export_include_dirs: [
-            "public",
-        ],
-        vendor_available: true,
-        host_supported: true,
-    }
+   cc_library_headers {
+       name: "pw_<MODULE_NAME>_include_dirs",
+       defaults: [
+           "pw_android_common_target_support",
+       ],
+       export_include_dirs: [
+           "public",
+       ],
+   }
 
    cc_defaults {
        name: "pw_<MODULE_NAME>_defaults",
        cpp_std: "c++20",
+       defaults: [
+           "pw_android_common_target_support",
+       ],
 
        header_libs: [
            // Header library list for all the libraries in #include directives.
@@ -291,6 +308,7 @@ follows.
            "-DPW_<MODULE_NAME>_<FLAG_NAME>=<FLAG_VALUE>",
        ],
        defaults: [
+           "pw_android_common_target_support",
            "pw_<MODULE_NAME>_defaults",
        ],
    }
@@ -311,8 +329,9 @@ the same as ``<FACADE_NAME>`` follow ``pw_<MODULE_NAME>``, e.g. ``pw_log``.
    cc_library_headers {
        name: "pw_<MODULE_NAME>.<FACADE_NAME>",
        cpp_std: "c++20",
-       vendor_available: true,
-       host_supported: true,
+       defaults: [
+           "pw_android_common_target_support",
+       ],
        export_include_dirs: ["public"],
    }
 
@@ -343,6 +362,9 @@ rule instead, with the source files listed in a ``filegroup`` following the
    cc_defaults {
        name: "pw_<MODULE_NAME>.<FACADE_NAME>",
        cpp_std: "c++20",
+       defaults: [
+           "pw_android_common_target_support",
+       ],
        export_include_dirs: ["public"],
        srcs: [
            "pw_<MODULE_NAME>.<FACADE_NAME>_files",
@@ -358,9 +380,8 @@ binary rule that lists the facade's backend as a dependency.
    cc_static_library {
        name: "user_of_pw_<MODULE_NAME>.<FACADE_NAME>",
        cpp_std: "c++20",
-       vendor_available: true,
-       host_supported: true,
        defaults: [
+           "pw_android_common_target_support",
            "pw_<MODULE_NAME>.<FACADE_NAME>",
        ],
        static_libs: [

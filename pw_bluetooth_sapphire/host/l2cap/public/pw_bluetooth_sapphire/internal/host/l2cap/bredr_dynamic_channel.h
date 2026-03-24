@@ -14,9 +14,11 @@
 
 #pragma once
 #include <lib/fit/function.h>
+#include <pw_async/dispatcher.h>
 
 #include <unordered_map>
 
+#include "pw_bluetooth_sapphire/internal/host/common/smart_task.h"
 #include "pw_bluetooth_sapphire/internal/host/l2cap/bredr_command_handler.h"
 #include "pw_bluetooth_sapphire/internal/host/l2cap/dynamic_channel_registry.h"
 #include "pw_bluetooth_sapphire/internal/host/l2cap/l2cap_defs.h"
@@ -34,7 +36,8 @@ class BrEdrDynamicChannelRegistry final : public DynamicChannelRegistry {
   BrEdrDynamicChannelRegistry(SignalingChannelInterface* sig,
                               DynamicChannelCallback close_cb,
                               ServiceRequestCallback service_request_cb,
-                              bool random_channel_ids);
+                              bool random_channel_ids,
+                              pw::async::Dispatcher& dispatcher);
   ~BrEdrDynamicChannelRegistry() override = default;
 
   std::optional<ExtendedFeatures> extended_features() {
@@ -92,6 +95,8 @@ class BrEdrDynamicChannelRegistry final : public DynamicChannelRegistry {
   SignalingChannelInterface* const sig_;
 
   std::optional<ExtendedFeatures> extended_features_;
+
+  pw::async::Dispatcher& dispatcher_;
 };
 
 class BrEdrDynamicChannel;
@@ -150,7 +155,8 @@ class BrEdrDynamicChannel final : public DynamicChannel {
       Psm psm,
       ChannelId local_cid,
       ChannelParameters params,
-      std::optional<bool> peer_supports_ertm);
+      std::optional<bool> peer_supports_ertm,
+      pw::async::Dispatcher& dispatcher);
 
   static BrEdrDynamicChannelPtr MakeInbound(
       DynamicChannelRegistry* registry,
@@ -159,7 +165,8 @@ class BrEdrDynamicChannel final : public DynamicChannel {
       ChannelId local_cid,
       ChannelId remote_cid,
       ChannelParameters params,
-      std::optional<bool> peer_supports_ertm);
+      std::optional<bool> peer_supports_ertm,
+      pw::async::Dispatcher& dispatcher);
 
   // DynamicChannel overrides
   ~BrEdrDynamicChannel() override = default;
@@ -188,7 +195,7 @@ class BrEdrDynamicChannel final : public DynamicChannel {
   // Called when the peer indicates whether it supports Enhanced Retransmission
   // Mode. Kicks off the configuration process if the preferred channel mode is
   // ERTM.
-  void SetEnhancedRetransmissionSupport(bool supported);
+  [[nodiscard]] bool SetEnhancedRetransmissionSupport(bool supported);
 
   // Reply with affirmative connection response and begin configuration.
   void CompleteInboundConnection(
@@ -244,7 +251,8 @@ class BrEdrDynamicChannel final : public DynamicChannel {
                       ChannelId local_cid,
                       ChannelId remote_cid,
                       ChannelParameters params,
-                      std::optional<bool> peer_supports_ertm);
+                      std::optional<bool> peer_supports_ertm,
+                      pw::async::Dispatcher& pw_dispatcher);
 
   // Deliver the result of channel connection and configuration to the |Open|
   // originator. Can be called multiple times but only the first invocation
@@ -280,10 +288,16 @@ class BrEdrDynamicChannel final : public DynamicChannel {
   // Begin the local channel Configuration Request flow if it has not yet
   // happened. The channel must not be waiting for the extended features info
   // response.
-  void TrySendLocalConfig();
+  // Returns true if the local config was successfully sent, false if there was
+  // an error. On an error, the error will already have been reported and the
+  // caller should return and not attempt to dereference `this`.
+  [[nodiscard]] bool TrySendLocalConfig();
 
-  // Send local configuration request.
-  void SendLocalConfig();
+  // Send local configuration request, bypassing all checks.
+  // Returns true if the local config was successfully sent, false if there was
+  // an error. On an error, the error will already have been reported and the
+  // caller should return and not attempt to dereference `this`.
+  [[nodiscard]] bool SendLocalConfig();
 
   // Returns true if both the remote and local configs have been accepted.
   bool BothConfigsAccepted() const;
@@ -309,10 +323,8 @@ class BrEdrDynamicChannel final : public DynamicChannel {
   CheckForUnacceptableErtmOptions(const ChannelConfiguration& config) const;
 
   // Try to recover from a configuration response with the "Unacceptable
-  // Parameters" result. Returns true if the negative response could be
-  // recovered from, and false otherwise (in which case an error should be
-  // reported).
-  [[nodiscard]] bool TryRecoverFromUnacceptableParametersConfigRsp(
+  // Parameters" result, signaling an error on failure.
+  void TryRecoverFromUnacceptableParametersConfigRsp(
       const ChannelConfiguration& config);
 
   // Response handlers for outbound requests
@@ -361,10 +373,15 @@ class BrEdrDynamicChannel final : public DynamicChannel {
   // v5.1, Vol 3, Part A, Sections 5 and 7.1.2).
   ChannelConfiguration local_config_;
 
-  WeakSelf<BrEdrDynamicChannel> weak_self_;
+  pw::async::Dispatcher& dispatcher_;
+
+  // Timer set after receiving a kNoResources connection response.
+  SmartTask conn_rsp_no_resources_timer_{dispatcher_};
 
   // Counter for number of basic mode configuration requests
   uint8_t num_basic_config_requests_ = 0;
+
+  WeakSelf<BrEdrDynamicChannel> weak_self_;
 };
 
 }  // namespace bt::l2cap::internal

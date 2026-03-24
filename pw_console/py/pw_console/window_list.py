@@ -31,7 +31,10 @@ from prompt_toolkit.layout import (
 )
 from prompt_toolkit.mouse_events import MouseEvent, MouseEventType, MouseButton
 
-from pw_console.widgets import mouse_handlers as pw_console_mouse_handlers
+from pw_console.widgets import (
+    mouse_handlers as pw_console_mouse_handlers,
+    WindowPane,
+)
 
 if TYPE_CHECKING:
     # pylint: disable=ungrouped-imports
@@ -271,17 +274,29 @@ class WindowList:
             fragments.append(separator)
         return fragments
 
-    def switch_to_tab(self, index: int):
-        self.focused_pane_index = index
+    def reset_tabbed_window_visibility(self) -> None:
+        if self.display_mode != DisplayMode.TABBED:
+            return
+        if not self.active_panes:
+            return
 
         # Make the selected tab visible and hide the rest.
         for i, pane in enumerate(self.active_panes):
             pane.show_pane = False
-            if i == index:
+            if i == self.focused_pane_index:
                 pane.show_pane = True
 
-        # refresh_ui() will focus on the new tab container.
-        self.refresh_ui()
+    def switch_to_tab(self, index: int, refresh: bool = True) -> None:
+        if self.display_mode != DisplayMode.TABBED:
+            return
+
+        self.focused_pane_index = index
+
+        self.reset_tabbed_window_visibility()
+
+        if refresh:
+            # refresh_ui() will focus on the new tab container.
+            self.refresh_ui()
 
     def set_display_mode(self, mode: DisplayMode):
         old_display_mode = self.display_mode
@@ -393,7 +408,8 @@ class WindowList:
                 width=lambda: self.width,
             )
 
-        elif self.display_mode == DisplayMode.TABBED:
+        else:
+            # Tabbed mode
             content_split = WindowListHSplit(
                 self,
                 [
@@ -470,7 +486,7 @@ class WindowList:
         try:
             self.active_panes.remove(pane)
         except ValueError:
-            # ValueError will be raised if the the pane is not found
+            # ValueError will be raised if the pane is not found
             pass
         return pane
 
@@ -490,8 +506,8 @@ class WindowList:
                     self.active_panes[existing_pane_index]
                 )
             except ValueError:
-                # ValueError will be raised if the the pane at
-                # existing_pane_index can't be accessed.
+                # ValueError will be raised if the pane at existing_pane_index
+                # can't be accessed.
                 # Focus on the main menu if the existing pane is hidden.
                 self.application.focus_main_menu()
 
@@ -516,7 +532,7 @@ class WindowList:
         target_pane = self.active_panes[self.resize_target_pane_index]
 
         diff = ypos - self.resize_current_row
-        if not self.window_manager.vertical_window_list_spliting():
+        if not self.window_manager.vertical_window_list_splitting():
             # The mouse ypos value includes rows from other window lists. If
             # horizontal splitting is active we need to check the diff relative
             # to the starting y position row. Subtract the start y position and
@@ -596,11 +612,15 @@ class WindowList:
             return
 
         # Swap with the previous pane
-        previous_pane = self.active_panes[pane_index - 1]
-        self.active_panes[pane_index - 1] = pane
+        swapped_pane_index = pane_index - 1
+        previous_pane = self.active_panes[swapped_pane_index]
+        self.active_panes[swapped_pane_index] = pane
         self.active_panes[pane_index] = previous_pane
 
-        self.refresh_ui()
+        if self.display_mode == DisplayMode.TABBED:
+            self.switch_to_tab(swapped_pane_index)
+        else:
+            self.refresh_ui()
 
     def move_pane_down(self):
         pane = self.get_current_active_pane()
@@ -611,11 +631,51 @@ class WindowList:
             return
 
         # Swap with the next pane
-        next_pane = self.active_panes[pane_index + 1]
-        self.active_panes[pane_index + 1] = pane
+        swapped_pane_index = pane_index + 1
+        next_pane = self.active_panes[swapped_pane_index]
+        self.active_panes[swapped_pane_index] = pane
         self.active_panes[pane_index] = next_pane
 
-        self.refresh_ui()
+        if self.display_mode == DisplayMode.TABBED:
+            self.switch_to_tab(swapped_pane_index)
+        else:
+            self.refresh_ui()
+
+    def get_previous_visible_pane(
+        self, current_pane: WindowPane
+    ) -> WindowPane | None:
+        """Return the previous visible pane."""
+        try:
+            current_pane_index = self.active_panes.index(current_pane)
+        except ValueError:
+            # If pane can't be found, focus on the main menu.
+            return None
+
+        # Loop through active panes (not including the current_pane).
+        for pane_index in reversed(range(current_pane_index)):
+            pane = self.active_panes[pane_index]
+            if pane.show_pane:
+                return pane
+
+        return None
+
+    def get_next_visible_pane(
+        self, current_pane: WindowPane
+    ) -> WindowPane | None:
+        """Return the next visible pane."""
+        try:
+            current_pane_index = self.active_panes.index(current_pane)
+        except ValueError:
+            # If pane can't be found, focus on the main menu.
+            return None
+
+        # Loop through active panes (not including the current_pane).
+        for pane_index in range(current_pane_index + 1, len(self.active_panes)):
+            pane = self.active_panes[pane_index]
+            if pane.show_pane:
+                return pane
+
+        return None
 
     def _get_next_visible_pane_after(self, target_pane):
         """Return the next visible pane that appears after the target pane."""

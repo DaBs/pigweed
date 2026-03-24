@@ -20,6 +20,7 @@
 #include "pw_assert/assert.h"
 #include "pw_bytes/span.h"
 #include "pw_result/result.h"
+#include "pw_rpc/internal/config.h"
 #include "pw_rpc/internal/lock.h"
 #include "pw_rpc/internal/packet.h"
 #include "pw_span/span.h"
@@ -40,36 +41,21 @@ Status OverwriteChannelId(ByteSpan rpc_packet, uint32_t channel_id_under_128);
 
 }  // namespace internal
 
-/// @defgroup pw_rpc_channel_functions
-/// @{
+/// @submodule{pw_rpc,channel}
 
 /// Extracts the channel ID from a pw_rpc packet.
 ///
-/// @returns @rst
-///
-/// .. pw-status-codes::
-///
-///    OK: returns the channel ID in the packet
-///
-///    DATA_LOSS: the packet is corrupt and the channel ID could not be found.
-///
-/// @endrst
+/// @returns @Result{the channel ID}
+/// * @DATA_LOSS: The packet is corrupt and the channel ID could not be found.
 Result<uint32_t> ExtractChannelId(ConstByteSpan packet);
 
 /// Rewrites an encoded packet's channel ID in place. Both channel IDs MUST be
 /// less than 128.
 ///
-/// @returns @rst
-///
-/// .. pw-status-codes::
-///
-///    OK: Successfully replaced the channel ID
-///
-///    DATA_LOSS: parsing the packet failed
-///
-///    OUT_OF_RANGE: the encoded packet's channel ID was 128 or larger
-///
-/// @endrst
+/// @returns
+/// * @OK: Successfully replaced the channel ID.
+/// * @DATA_LOSS: Parsing the packet failed.
+/// * @OUT_OF_RANGE: The encoded packet's channel ID was 128 or larger.
 template <uint32_t kNewChannelId>
 Status ChangeEncodedChannelId(ByteSpan rpc_packet) {
   static_assert(kNewChannelId < 128u,
@@ -87,12 +73,18 @@ inline Status ChangeEncodedChannelId(ByteSpan rpc_packet,
   return internal::OverwriteChannelId(rpc_packet, new_channel_id);
 }
 
-/// @}
-
-// Returns the maximum size of the payload of an RPC packet. This can be used
-// when allocating response encode buffers for RPC services.
-// If the RPC encode buffer is too small to fit RPC packet headers, this will
-// return zero.
+/// Returns the maximum payload size of an RPC packet for RPC endpoints as
+/// configured. This can be used when allocating response encode buffers for
+/// RPC services. If the RPC encode buffer is too small to fit RPC packet
+/// headers, this returns zero.
+///
+/// By default, this function uses `PW_RPC_ENCODING_BUFFER_SIZE_BYTES` to
+/// determine the largest supported payload, even when dynamic allocation is
+/// enabled.
+///
+/// @warning `MaxSafePayloadSize` does NOT account for the channel MTU, which
+/// may be smaller. Call `MaxWriteSizeBytes()` on an RPC's call object
+/// (reader/writer) to account for channel MTU.
 constexpr size_t MaxSafePayloadSize(
     size_t encode_buffer_size = cfg::kEncodingBufferSizeBytes) {
   return encode_buffer_size > internal::Packet::kMinEncodedSizeWithoutPayload
@@ -145,6 +137,8 @@ class ChannelOutput {
  private:
   const char* name_;
 };
+
+/// @}
 
 namespace internal {
 
@@ -219,6 +213,10 @@ class ChannelBase {
     output_ = nullptr;
   }
 
+  // Returns the maximum payload size for this channel, factoring in the
+  // ChannelOutput's MTU and the RPC system's `pw::rpc::MaxSafePayloadSize()`.
+  size_t MaxWriteSizeBytes() const;
+
  protected:
   constexpr ChannelBase(uint32_t id, ChannelOutput* output)
       : id_(id), output_(output) {}
@@ -271,6 +269,7 @@ class Channel : public internal::ChannelBase {
  private:
   // Hide internal-only methods defined in the internal::ChannelBase.
   using internal::ChannelBase::Close;
+  using internal::ChannelBase::MaxWriteSizeBytes;
   using internal::ChannelBase::Send;
 };
 

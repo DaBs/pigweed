@@ -1116,6 +1116,7 @@ TEST_F(BrEdrConnectionManagerLegacyPairingTest,
       peer_cache()->AddBondedPeer(BondingData{.identifier = PeerId(999),
                                               .address = kTestDevAddr,
                                               .name = std::nullopt,
+                                              .device_class = {},
                                               .le_pairing_data = {},
                                               .bredr_link_key = kLinkKey,
                                               .bredr_services = {}}));
@@ -1938,6 +1939,7 @@ TEST_F(BrEdrConnectionManagerTest, RecallLinkKeyForBondedPeer) {
       peer_cache()->AddBondedPeer(BondingData{.identifier = PeerId(999),
                                               .address = kTestDevAddr,
                                               .name = std::nullopt,
+                                              .device_class = {},
                                               .le_pairing_data = {},
                                               .bredr_link_key = kLinkKey,
                                               .bredr_services = {}}));
@@ -2825,6 +2827,7 @@ TEST_F(BrEdrConnectionManagerTest, OpenL2capEncryptsForBondedPeerThenRetries) {
       peer_cache()->AddBondedPeer(BondingData{.identifier = PeerId(999),
                                               .address = kTestDevAddr,
                                               .name = std::nullopt,
+                                              .device_class = {},
                                               .le_pairing_data = {},
                                               .bredr_link_key = kLinkKey,
                                               .bredr_services = {}}));
@@ -4370,11 +4373,14 @@ TEST_F(BrEdrConnectionManagerTest, Pair) {
     pairing_status = status;
   };
 
+  ASSERT_FALSE(l2cap()->AutosniffIsSuppressed(kConnectionHandle));
   connmgr()->Pair(
       peer->identifier(), kNoSecurityRequirements, pairing_complete_cb);
+  ASSERT_TRUE(l2cap()->AutosniffIsSuppressed(kConnectionHandle));
   ASSERT_TRUE(IsInitializing(peer));
   ASSERT_FALSE(peer->bonded());
   RunUntilIdle();
+  ASSERT_FALSE(l2cap()->AutosniffIsSuppressed(kConnectionHandle));
 
   ASSERT_EQ(fit::ok(), pairing_status);
   ASSERT_TRUE(IsConnected(peer));
@@ -5063,8 +5069,9 @@ TEST_F(BrEdrConnectionManagerTest, Inspect) {
 
   auto connection_matcher =
       NodeMatches(AllOf(NameMatches("connection_0x1"),
-                        PropertyList(ElementsAre(StringIs(
-                            "peer_id", peer->identifier().ToString())))));
+                        PropertyList(UnorderedElementsAre(
+                            StringIs("peer_id", peer->identifier().ToString()),
+                            IntIs("@time", 0)))));
 
   auto connections_matcher =
       AllOf(NodeMatches(NameMatches("connections")),
@@ -5132,7 +5139,8 @@ TEST_F(BrEdrConnectionManagerTest, Inspect) {
                 AllOf(NameMatches("0"),
                       PropertyList(UnorderedElementsAre(
                           StringIs("peer_id", peer->identifier().ToString()),
-                          UintIs("duration_s", 1u),
+                          StringIs("reason", "api request"),
+                          IntIs("connected_@time", 0),
                           IntIs("@time", 1'000'000'000))))))));
 
   auto conn_mgr_after_disconnect_matcher = AllOf(

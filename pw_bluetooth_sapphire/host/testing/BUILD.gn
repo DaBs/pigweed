@@ -40,9 +40,11 @@ pw_source_set("testing") {
     "$dir_pw_async:fake_dispatcher_fixture",
     "$dir_pw_async:heap_dispatcher",
     "$dir_pw_bluetooth_sapphire:config",
+    "$dir_pw_bluetooth_sapphire:fake_lease_provider",
     "$dir_pw_bluetooth_sapphire/host/common",
     "$dir_pw_bluetooth_sapphire/host/gap:definitions",
     "$dir_pw_bluetooth_sapphire/host/hci-spec",
+    "$dir_pw_bluetooth_sapphire/host/iso",
     "$dir_pw_bluetooth_sapphire/host/l2cap",
     "$dir_pw_bluetooth_sapphire/host/transport",
     dir_pw_bluetooth,
@@ -102,7 +104,7 @@ pw_source_set("mock_controller") {
     ":controller_test_double_base",
     "$dir_pw_bluetooth_sapphire/host/common",
     "$dir_pw_bluetooth_sapphire/host/hci-spec",
-    "$dir_pw_third_party/fuchsia:fit",
+    "$pw_external_fuchsia:fit",
   ]
   deps = [
     ":gtest_helpers",
@@ -143,7 +145,7 @@ pw_source_set("fake_controller") {
     "$dir_pw_bluetooth_sapphire/host/l2cap:definitions",
     "$dir_pw_bluetooth_sapphire/host/l2cap:testing",
     "$dir_pw_bluetooth_sapphire/host/sdp",
-    "$dir_pw_third_party/fuchsia:fit",
+    "$pw_external_fuchsia:fit",
   ]
   deps = [
     "$dir_pw_bluetooth:emboss_hci_group",

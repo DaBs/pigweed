@@ -13,14 +13,22 @@
 # the License.
 
 import("//build_overrides/pigweed.gni")
+import("$dir_pw_toolchain/toolchain_args.gni")
+
+if (defined(pw_toolchain_SCOPE.is_host_toolchain) &&
+    pw_toolchain_SCOPE.is_host_toolchain) {
+  _default_config =
+      "$dir_pigweed/third_party/mbedtls/configs/config_pigweed_host.h"
+} else {
+  _default_config = "$dir_pigweed/third_party/mbedtls/configs/config_pigweed.h"
+}
 
 declare_args() {
   # If compiling backends with mbedtls, this variable is set to the path to the
   # mbedtls source code. When set, a pw_source_set for the mbedtls library is
-  # created at "$dir_pw_third_party/mbedtls".
+  # created at "$pw_external_mbedtls".
+
   dir_pw_third_party_mbedtls = ""
 
-  # Path to the config header.
-  pw_third_party_mbedtls_CONFIG_HEADER =
-      "$dir_pigweed/third_party/mbedtls/configs/config_default.h"
+  pw_third_party_mbedtls_CONFIG_HEADER = _default_config
 }

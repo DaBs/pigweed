@@ -86,6 +86,12 @@ class StreamResponse(NamedTuple):
     status: Status
     responses: Sequence[Any]
 
+    def unwrap_or_raise(self):
+        """Returns the response value or raises `ValueError` if not OK."""
+        if not self.status.ok():
+            raise ValueError(f'RPC returned non-OK status: {self.status}')
+        return self.responses
+
     def __repr__(self) -> str:
         return (
             f'({self.status}, '
@@ -284,7 +290,7 @@ class Call:
 
 
 class UnaryCall(Call):
-    """Tracks the state of a unary RPC call."""
+    """`Call` variant that tracks the a unary RPC call."""
 
     @property
     def response(self) -> Any:
@@ -297,7 +303,7 @@ class UnaryCall(Call):
 
 
 class ServerStreamingCall(Call):
-    """Tracks the state of a server streaming RPC call."""
+    """`Call` variant that tracks a server streaming RPC call."""
 
     @property
     def responses(self) -> Sequence:
@@ -326,7 +332,7 @@ class ServerStreamingCall(Call):
 
 
 class ClientStreamingCall(Call):
-    """Tracks the state of a client streaming RPC call."""
+    """`Call` variant that tracks a client streaming RPC call."""
 
     @property
     def response(self) -> Any:
@@ -350,7 +356,7 @@ class ClientStreamingCall(Call):
 
 
 class BidirectionalStreamingCall(Call):
-    """Tracks the state of a bidirectional streaming RPC call."""
+    """`Call` variant that tracks a bidirectional streaming RPC call."""
 
     @property
     def responses(self) -> Sequence:

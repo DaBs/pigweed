@@ -53,6 +53,7 @@ pw_add_library(pw_protobuf STATIC
     pw_status
     pw_stream
     pw_stream.interval_reader
+    pw_stream.limited_stream
     pw_string.string
     pw_varint
     pw_varint.stream
@@ -81,6 +82,8 @@ pw_add_test(pw_protobuf.decoder_test
   SOURCES
     decoder_test.cc
   PRIVATE_DEPS
+    pw_fuzzer.fuzztest
+    pw_fuzzer.libfuzzer
     pw_protobuf
   GROUPS
     modules

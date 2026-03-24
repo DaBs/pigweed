@@ -14,6 +14,8 @@
 
 #include "pw_stream/std_file_stream.h"
 
+#include <utility>
+
 #include "pw_assert/check.h"
 
 namespace pw::stream {
@@ -34,7 +36,7 @@ std::ios::seekdir WhenceToSeekDir(Stream::Whence whence) {
 }  // namespace
 
 StatusWithSize StdFileReader::DoRead(ByteSpan dest) {
-  stream_.peek();  // Peek to set EOF if at the end of the file.
+  std::ignore = stream_.peek();  // Peek to set EOF if at the end of the file.
   if (stream_.eof()) {
     return StatusWithSize::OutOfRange();
   }

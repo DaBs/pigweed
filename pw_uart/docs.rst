@@ -19,16 +19,27 @@ UART peripheral.
 
 The interface consists of these main classes:
 
-- `UartBase`_ - Base class which provides basic enable/disable and
-  configuration control, but no communication.
-- `Uart`_ - Extends ``pw::uart::UartBase`` to provide blocking Read and Write
-  APIs.
-- `UartNonBlocking`_ - Extends ``pw::uart::UartBase`` to provide non-blocking
-  (callback-based) Read and Write APIs.
-- `UartBlockingAdapter`_ - Provides the blocking `Uart`_ interface on top of a
-  `UartNonBlocking`_ device.
-- `UartStream`_ - Provides the ``pw::stream::NonSeekableReaderWriter``
-  (:ref:`module-pw_stream`) interface on top of a `Uart`_ device.
+- :cc:`UartBase <pw::uart::UartBase>` - Base class which provides basic
+  enable/disable and configuration control, but no communication.
+- :cc:`Uart` - Extends ``pw::uart::UartBase`` to provide blocking Read
+  and Write APIs.
+- :cc:`UartNonBlocking <pw::uart::UartNonBlocking>` - Extends
+  ``pw::uart::UartBase`` to provide non-blocking (callback-based) Read and
+  Write APIs.
+- :cc:`UartBlockingAdapter <pw::uart::UartBlockingAdapter>` - Provides
+  the blocking ``Uart`` interface on top of a ``UartNonBlocking`` device.
+- :cc:`UartStream <pw::uart::UartStream>` - Provides the
+  ``pw::stream::NonSeekableReaderWriter`` (:ref:`module-pw_stream`)
+  interface on top of a ``Uart`` device.
+
+.. warning::
+
+   Drivers should not implement both ``Uart`` and ``UartNonBlocking``
+   interfaces.
+
+   Drivers which support non-blocking (callback) behavior should implement
+   ``UartNonBlocking``. Applications that require the blocking ``Uart``
+   interface can use the ``UartBlockingAdapter``.
 
 .. mermaid::
 
@@ -76,10 +87,6 @@ Get started
            ]
          }
 
-      This assumes that your Bazel ``WORKSPACE`` has a `repository
-      <https://bazel.build/concepts/build-ref#repositories>`_ named ``@pigweed``
-      that points to the upstream Pigweed repository.
-
    .. tab-item:: GN
 
       Add ``$dir_pw_uart`` to the ``deps`` list in your ``pw_executable()``
@@ -116,41 +123,7 @@ Get started
 -------------
 API reference
 -------------
-
-.. warning::
-
-   Drivers should not implement both ``Uart`` and ``UartNonBlocking``
-   interfaces.
-
-   Drivers which support non-blocking (callback) behavior should implement
-   ``UartNonBlocking``. Applications that require the blocking ``Uart``
-   interface can use the ``UartBlockingAdapter``.
-
-UartBase
-========
-.. doxygenclass:: pw::uart::UartBase
-  :members:
-
-Uart
-====
-.. doxygenclass:: pw::uart::Uart
-  :members:
-
-UartNonBlocking
-===============
-.. doxygenclass:: pw::uart::UartNonBlocking
-  :members:
-
-UartBlockingAdapter
-===================
-.. doxygenclass:: pw::uart::UartBlockingAdapter
-  :members:
-
-UartStream
-==========
-.. doxygenclass:: pw::uart::UartStream
-  :members:
-
+Moved: :cc:`pw_uart`
 
 .. toctree::
    :hidden:

@@ -14,7 +14,7 @@
 
 #include "pw_channel/stream_channel.h"
 
-#include "pw_async2/dispatcher_base.h"
+#include "pw_async2/dispatcher.h"
 #include "pw_log/log.h"
 #include "pw_multibuf/multibuf.h"
 #include "pw_status/status.h"
@@ -29,6 +29,8 @@ using pw::Status;
 using pw::async2::Context;
 using pw::async2::Pending;
 using pw::async2::Poll;
+using pw::async2::PollOptional;
+using pw::async2::PollResult;
 using pw::channel::ByteReaderWriter;
 using pw::multibuf::MultiBuf;
 using pw::multibuf::MultiBufAllocator;
@@ -49,7 +51,7 @@ void StreamChannelReadState::ProvideBufferToFill(MultiBuf&& buf) {
   buffer_to_fill_available_.release();
 }
 
-Poll<Result<MultiBuf>> StreamChannelReadState::PendFilledBuffer(Context& cx) {
+PollResult<MultiBuf> StreamChannelReadState::PendFilledBuffer(Context& cx) {
   std::lock_guard lock(buffer_lock_);
   if (!filled_buffer_.empty()) {
     return std::move(filled_buffer_);
@@ -97,13 +99,13 @@ OwnedChunk StreamChannelReadState::WaitForBufferToFillAndTakeFrontChunk() {
 void StreamChannelReadState::ProvideFilledBuffer(MultiBuf&& filled_buffer) {
   std::lock_guard lock(buffer_lock_);
   filled_buffer_.PushSuffix(std::move(filled_buffer));
-  std::move(on_buffer_filled_).Wake();
+  on_buffer_filled_.Wake();
 }
 
 void StreamChannelReadState::SetReadError(Status status) {
   std::lock_guard lock(buffer_lock_);
   status_ = status;
-  std::move(on_buffer_filled_).Wake();
+  on_buffer_filled_.Wake();
 }
 
 Status StreamChannelWriteState::SendData(MultiBuf&& buf) {
@@ -170,9 +172,8 @@ Status StreamChannel::ProvideBufferIfAvailable(Context& cx) {
   }
 
   read_allocation_future_.SetDesiredSizes(
-      kMinimumReadSize, kDesiredReadSize, pw::multibuf::kNeedsContiguous);
-  Poll<std::optional<MultiBuf>> maybe_multibuf =
-      read_allocation_future_.Pend(cx);
+      kMinimumReadSize, kDesiredReadSize, pw::multibuf::v1::kNeedsContiguous);
+  PollOptional<MultiBuf> maybe_multibuf = read_allocation_future_.Pend(cx);
 
   // If this is pending, we'll be awoken and this function will be re-run
   // when a buffer becomes available, allowing us to provide a buffer.
@@ -189,7 +190,7 @@ Status StreamChannel::ProvideBufferIfAvailable(Context& cx) {
   return OkStatus();
 }
 
-Poll<Result<MultiBuf>> StreamChannel::DoPendRead(Context& cx) {
+PollResult<MultiBuf> StreamChannel::DoPendRead(Context& cx) {
   PW_TRY(ProvideBufferIfAvailable(cx));
   return read_state_.PendFilledBuffer(cx);
 }

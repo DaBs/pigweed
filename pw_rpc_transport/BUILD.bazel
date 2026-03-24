@@ -26,7 +26,6 @@ load("//pw_unit_test:pw_cc_test.bzl", "pw_cc_test")
 
 package(
     default_visibility = ["//visibility:public"],
-    features = ["-layering_check"],
 )
 
 licenses(["notice"])
@@ -56,11 +55,15 @@ cc_library(
 
 cc_library(
     name = "test_loopback_service_registry",
+    testonly = True,
     hdrs = ["public/pw_rpc_transport/test_loopback_service_registry.h"],
+    features = ["-conversion_warnings"],
     strip_include_prefix = "public",
     deps = [
         ":egress_ingress",
         ":service_registry",
+        "//pw_allocator:testing",
+        "//pw_containers:dynamic_vector",
         "//pw_work_queue",
         "//pw_work_queue:test_thread_header",
     ],
@@ -72,7 +75,7 @@ cc_library(
     strip_include_prefix = "public",
     deps = [
         "//pw_bytes",
-        "//pw_containers:intrusive_list",
+        "//pw_containers:intrusive_queue",
         "//pw_log",
         "//pw_result",
         "//pw_status",
@@ -98,7 +101,6 @@ pw_cc_test(
 
 cc_library(
     name = "local_rpc_egress",
-    srcs = ["local_rpc_egress.cc"],
     hdrs = ["public/pw_rpc_transport/local_rpc_egress.h"],
     strip_include_prefix = "public",
     deps = [
@@ -106,7 +108,7 @@ cc_library(
         ":rpc_transport",
         ":test_protos_pwpb_rpc",
         "//pw_bytes",
-        "//pw_log",
+        "//pw_chrono:system_clock",
         "//pw_result",
         "//pw_rpc:client_server",
         "//pw_status",
@@ -115,26 +117,47 @@ cc_library(
     ],
 )
 
+cc_library(
+    name = "local_rpc_egress_logging_metric_tracker",
+    srcs = ["local_rpc_egress_logging_metric_tracker.cc"],
+    hdrs = ["public/pw_rpc_transport/local_rpc_egress_logging_metric_tracker.h"],
+    strip_include_prefix = "public",
+    deps = [
+        ":local_rpc_egress",
+        "//pw_chrono:system_clock",
+        "//pw_log",
+        "//pw_metric:metric",
+        "//pw_rpc",
+    ],
+)
+
 pw_cc_test(
     name = "local_rpc_egress_test",
     srcs = [
         "local_rpc_egress_test.cc",
     ],
+    features = ["-conversion_warnings"],
     # TODO: b/343986281 - update to run on all compatible devices
     target_compatible_with = incompatible_with_mcu(),
     deps = [
         ":local_rpc_egress",
+        ":local_rpc_egress_logging_metric_tracker",
         ":rpc_transport",
         ":service_registry",
         ":test_protos_pwpb_rpc",
+        "//pw_allocator:testing",
+        "//pw_assert:check",
         "//pw_bytes",
         "//pw_chrono:system_clock",
+        "//pw_containers:dynamic_vector",
+        "//pw_rpc",
         "//pw_rpc:client_server",
         "//pw_status",
         "//pw_sync:counting_semaphore",
         "//pw_sync:thread_notification",
         "//pw_thread:sleep",
         "//pw_thread:thread",
+        "//pw_thread_stl:options",
     ],
 )
 
@@ -143,6 +166,7 @@ cc_library(
     hdrs = [
         "public/pw_rpc_transport/hdlc_framing.h",
     ],
+    features = ["-conversion_warnings"],
     strip_include_prefix = "public",
     deps = [
         ":rpc_transport",
@@ -160,9 +184,12 @@ pw_cc_test(
     srcs = [
         "hdlc_framing_test.cc",
     ],
+    features = ["-conversion_warnings"],
     deps = [
         ":hdlc_framing",
+        "//pw_allocator:testing",
         "//pw_bytes",
+        "//pw_containers:dynamic_vector",
         "//pw_status",
     ],
 )
@@ -186,9 +213,12 @@ cc_library(
 pw_cc_test(
     name = "simple_framing_test",
     srcs = ["simple_framing_test.cc"],
+    features = ["-conversion_warnings"],
     deps = [
         ":simple_framing",
+        "//pw_allocator:testing",
         "//pw_bytes",
+        "//pw_containers:dynamic_vector",
         "//pw_log",
         "//pw_status",
     ],
@@ -196,34 +226,58 @@ pw_cc_test(
 
 cc_library(
     name = "egress_ingress",
-    srcs = [
-        "egress_ingress.cc",
-    ],
     hdrs = ["public/pw_rpc_transport/egress_ingress.h"],
+    features = ["-conversion_warnings"],
     strip_include_prefix = "public",
     deps = [
         ":hdlc_framing",
         ":rpc_transport",
         ":simple_framing",
         "//pw_bytes",
-        "//pw_log",
-        "//pw_metric:metric",
+        "//pw_rpc",
         "//pw_rpc:client_server",
         "//pw_status",
+        "//pw_sync:lock_annotations",
         "//pw_sync:mutex",
+    ],
+)
+
+cc_library(
+    name = "egress_ingress_logging_metric_tracker",
+    srcs = [
+        "egress_ingress_logging_metric_tracker.cc",
+    ],
+    hdrs = ["public/pw_rpc_transport/egress_ingress_logging_metric_tracker.h"],
+    features = ["-conversion_warnings"],
+    strip_include_prefix = "public",
+    deps = [
+        ":egress_ingress",
+        "//pw_log",
+        "//pw_metric:metric",
     ],
 )
 
 pw_cc_test(
     name = "egress_ingress_test",
     srcs = ["egress_ingress_test.cc"],
+    features = ["-conversion_warnings"],
     deps = [
         ":egress_ingress",
+        ":egress_ingress_logging_metric_tracker",
+        ":hdlc_framing",
+        ":rpc_transport",
         ":service_registry",
+        ":simple_framing",
         ":test_protos_pwpb_rpc",
+        "//pw_allocator:testing",
+        "//pw_assert:check",
         "//pw_bytes",
+        "//pw_containers:dynamic_vector",
         "//pw_metric:metric",
+        "//pw_rpc",
+        "//pw_rpc:client_server",
         "//pw_status",
+        "//pw_string:string",
         "//pw_sync:thread_notification",
     ],
 )
@@ -232,6 +286,7 @@ cc_library(
     name = "socket_rpc_transport",
     srcs = ["socket_rpc_transport.cc"],
     hdrs = ["public/pw_rpc_transport/socket_rpc_transport.h"],
+    features = ["-conversion_warnings"],
     strip_include_prefix = "public",
     target_compatible_with = incompatible_with_mcu(),
     deps = [
@@ -242,6 +297,8 @@ cc_library(
         "//pw_status",
         "//pw_stream",
         "//pw_stream:socket_stream",
+        # TODO: https://pwbug.dev/430659831 - Use condition_variable
+        "//pw_sync:condition_variable_facade",
         "//pw_sync:lock_annotations",
         "//pw_sync:mutex",
         "//pw_sync:thread_notification",
@@ -265,50 +322,76 @@ cc_library(
 cc_library(
     name = "stream_rpc_dispatcher",
     hdrs = ["public/pw_rpc_transport/stream_rpc_dispatcher.h"],
+    features = ["-conversion_warnings"],
     strip_include_prefix = "public",
     tags = ["noclangtidy"],
     deps = [
         ":egress_ingress",
-        "//pw_metric:metric",
         "//pw_status",
         "//pw_stream",
         "//pw_thread:thread_core",
     ],
 )
 
+cc_library(
+    name = "stream_rpc_dispatcher_logging_metric_tracker",
+    srcs = ["stream_rpc_dispatcher_logging_metric_tracker.cc"],
+    hdrs = ["public/pw_rpc_transport/stream_rpc_dispatcher_logging_metric_tracker.h"],
+    strip_include_prefix = "public",
+    deps = [
+        ":stream_rpc_dispatcher",
+        "//pw_log",
+        "//pw_metric:metric",
+    ],
+)
+
 pw_cc_test(
     name = "socket_rpc_transport_test",
     srcs = ["socket_rpc_transport_test.cc"],
+    features = ["-conversion_warnings"],
     target_compatible_with = incompatible_with_mcu(),
     deps = [
         ":socket_rpc_transport",
+        "//pw_allocator:testing",
         "//pw_bytes",
+        "//pw_containers:dynamic_vector",
         "//pw_log",
+        "//pw_span",
         "//pw_status",
+        "//pw_stream:socket_stream",
         "//pw_sync:mutex",
         "//pw_sync:thread_notification",
         "//pw_thread:sleep",
         "//pw_thread:thread",
+        "//pw_thread_stl:options",
     ],
 )
 
 pw_cc_test(
     name = "stream_rpc_dispatcher_test",
     srcs = ["stream_rpc_dispatcher_test.cc"],
+    features = ["-conversion_warnings"],
     target_compatible_with = incompatible_with_mcu(),
     deps = [
         ":stream_rpc_dispatcher",
+        ":stream_rpc_dispatcher_logging_metric_tracker",
+        "//pw_allocator:testing",
         "//pw_bytes",
+        "//pw_containers:dynamic_vector",
         "//pw_log",
         "//pw_status",
+        "//pw_stream",
+        "//pw_sync:mutex",
         "//pw_sync:thread_notification",
         "//pw_thread:thread",
+        "//pw_thread_stl:options",
     ],
 )
 
 pw_cc_test(
     name = "rpc_integration_test",
     srcs = ["rpc_integration_test.cc"],
+    features = ["-conversion_warnings"],
     target_compatible_with = incompatible_with_mcu(),
     deps = [
         ":egress_ingress",
@@ -320,8 +403,11 @@ pw_cc_test(
         "//pw_log",
         "//pw_rpc:client_server",
         "//pw_rpc:synchronous_client_api",
-        "//pw_string",
+        "//pw_status",
+        "//pw_string:string",
         "//pw_thread:thread",
+        "//pw_thread:thread_core",
+        "//pw_thread_stl:options",
     ],
 )
 

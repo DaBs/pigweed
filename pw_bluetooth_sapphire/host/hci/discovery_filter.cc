@@ -17,6 +17,7 @@
 #include <pw_assert/check.h>
 #include <pw_bytes/endian.h>
 
+#include "cpp-string/string_printf.h"
 #include "pw_bluetooth_sapphire/internal/host/common/advertising_data.h"
 #include "pw_bluetooth_sapphire/internal/host/common/log.h"
 #include "pw_bluetooth_sapphire/internal/host/hci-spec/constants.h"
@@ -28,7 +29,7 @@ void DiscoveryFilter::SetGeneralDiscoveryFlags() {
             static_cast<uint8_t>(AdvFlag::kLELimitedDiscoverableMode));
 }
 
-bool DiscoveryFilter::MatchLowEnergyResult(
+bool DiscoveryFilter::Matches(
     const std::optional<std::reference_wrapper<const AdvertisingData>>
         advertising_data,
     bool connectable,
@@ -180,6 +181,122 @@ void DiscoveryFilter::Reset() {
   manufacturer_code_.reset();
   pathloss_.reset();
   rssi_.reset();
+}
+
+static std::string UuidCsv(const std::vector<UUID>& uuids) {
+  if (uuids.empty()) {
+    return "unset";
+  }
+
+  bool added = false;
+  std::string result;
+  for (const UUID& uuid : uuids) {
+    bt_lib_cpp_string::StringAppendf(
+        &result, "%s%s", added ? ", " : "", uuid.ToString().c_str());
+    added = true;
+  }
+
+  return result;
+}
+
+static std::string BoolAlpha(bool value) {
+  if (value) {
+    return "true";
+  }
+
+  return "false";
+}
+
+bool DiscoveryFilter::operator==(const DiscoveryFilter& other) const {
+  if (flags_ != other.flags_) {
+    return false;
+  }
+
+  if (all_flags_required_ != other.all_flags_required_) {
+    return false;
+  }
+
+  if (service_uuids_ != other.service_uuids_) {
+    return false;
+  }
+
+  if (service_data_uuids_ != other.service_data_uuids_) {
+    return false;
+  }
+
+  if (solicitation_uuids_ != other.solicitation_uuids_) {
+    return false;
+  }
+
+  if (name_substring_ != other.name_substring_) {
+    return false;
+  }
+
+  if (connectable_ != other.connectable_) {
+    return false;
+  }
+
+  if (manufacturer_code_ != other.manufacturer_code_) {
+    return false;
+  }
+
+  if (pathloss_ != other.pathloss_) {
+    return false;
+  }
+
+  if (rssi_ != other.rssi_) {
+    return false;
+  }
+
+  return true;
+}
+
+std::string DiscoveryFilter::ToString() const {
+  std::string result;
+
+  bt_lib_cpp_string::StringAppendf(
+      &result, "flags: {0x%02hhx}, ", flags_.has_value() ? flags_.value() : 0);
+
+  bt_lib_cpp_string::StringAppendf(&result,
+                                   "all flags required: {%s}, ",
+                                   all_flags_required_ ? "true" : "false");
+
+  bt_lib_cpp_string::StringAppendf(
+      &result, "service uuids: {%s}, ", UuidCsv(service_uuids_).c_str());
+
+  bt_lib_cpp_string::StringAppendf(&result,
+                                   "service data uuids: {%s}, ",
+                                   UuidCsv(service_data_uuids_).c_str());
+
+  bt_lib_cpp_string::StringAppendf(&result,
+                                   "solicitation uuids: {%s}, ",
+                                   UuidCsv(solicitation_uuids_).c_str());
+
+  bt_lib_cpp_string::StringAppendf(
+      &result,
+      "name substring: {%s}, ",
+      name_substring_.empty() ? "unset" : name_substring_.c_str());
+
+  bt_lib_cpp_string::StringAppendf(&result,
+                                   "connectable: {%s}, ",
+                                   connectable_.has_value()
+                                       ? BoolAlpha(connectable_.value()).c_str()
+                                       : "unset");
+
+  bt_lib_cpp_string::StringAppendf(
+      &result,
+      "manufacturer code: {0x%02hhx}, ",
+      manufacturer_code_.has_value() ? manufacturer_code_.has_value() : 0);
+
+  bt_lib_cpp_string::StringAppendf(
+      &result,
+      "pathloss: {0x%02hhx}, ",
+      pathloss_.has_value() ? pathloss_.has_value() : 0);
+
+  bt_lib_cpp_string::StringAppendf(
+      &result, "rssi: {0x%02hhx}", rssi_.has_value() ? rssi_.has_value() : 0);
+
+  return result;
 }
 
 }  // namespace bt::hci

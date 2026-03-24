@@ -19,17 +19,11 @@ package(default_visibility = ["//visibility:public"])
 rust_binary(
     name = "tokenized_logging",
     srcs = ["main.rs"],
-    edition = "2021",
-    linker_script = select({
-        "//pw_build/constraints/board:microbit": "//pw_rust/examples/linker_scripts:qemu-rust-nrf51822",
-        "//pw_build/constraints/chipset:lm3s6965evb": "//pw_rust/examples/linker_scripts:qemu-rust-lm3s6965",
-    }),
+    edition = "2024",
+    linker_script = "//pw_rust/examples/linker_scripts:linker_script_for_rust_examples",
     target_compatible_with = select({
-        "//pw_build/constraints/board:microbit": [],
-        "//pw_build/constraints/chipset:lm3s6965evb": [],
-        "@platforms//os:linux": ["@platforms//:incompatible"],
-        "@platforms//os:macos": ["@platforms//:incompatible"],
-        "//conditions:default": ["@platforms//:incompatible"],
+        "//pw_rust/examples/linker_scripts:linker_script_unset": ["@platforms//:incompatible"],
+        "//conditions:default": [],
     }),
     deps = [
         "//pw_log/rust:pw_log",
@@ -46,6 +40,7 @@ rust_library(
         "pw_log_backend.rs",
     ],
     crate_name = "pw_log_backend",
+    edition = "2024",
     visibility = ["//visibility:public"],
     deps = [
         "//pw_base64/rust:pw_base64",

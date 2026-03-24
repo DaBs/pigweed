@@ -24,10 +24,13 @@
 
 namespace bt::l2cap::internal {
 
-SignalingChannel::SignalingChannel(Channel::WeakPtr chan,
-                                   pw::bluetooth::emboss::ConnectionRole role,
-                                   pw::async::Dispatcher& dispatcher)
+SignalingChannel::SignalingChannel(
+    Channel::WeakPtr chan,
+    pw::bluetooth::emboss::ConnectionRole role,
+    pw::async::Dispatcher& dispatcher,
+    pw::bluetooth_sapphire::LeaseProvider& wake_lease_provider)
     : pw_dispatcher_(dispatcher),
+      wake_lease_provider_(wake_lease_provider),
       is_open_(true),
       chan_(std::move(chan)),
       role_(role),
@@ -56,34 +59,19 @@ bool SignalingChannel::SendRequest(CommandCode req_code,
                                    ResponseHandler cb) {
   PW_CHECK(cb);
 
-  // Command identifiers for pending requests are assumed to be unique across
-  // all types of requests and reused by order of least recent use. See v5.0
-  // Vol 3, Part A Section 4.
-  //
-  // Uniqueness across different command types: "Within each signaling channel a
-  // different Identifier shall be used for each successive command"
-  // Reuse order: "the Identifier may be recycled if all other Identifiers have
-  // subsequently been used"
-  const CommandId initial_id = GetNextCommandId();
-  CommandId id;
-  for (id = initial_id; IsCommandPending(id);) {
-    id = GetNextCommandId();
-
-    if (id == initial_id) {
-      bt_log(
-          WARN,
-          "l2cap",
-          "sig: all valid command IDs in use for pending requests; can't send "
-          "request %#.2x",
-          req_code);
-      return false;
-    }
+  const std::optional<CommandId> id = GetNextAvailableCommandId();
+  if (!id.has_value()) {
+    bt_log(WARN,
+           "l2cap",
+           "sig: all valid command IDs in use for pending requests; can't send "
+           "request %#.2x",
+           req_code);
+    return false;
   }
-
-  auto command_packet = BuildPacket(req_code, id, payload);
+  auto command_packet = BuildPacket(req_code, *id, payload);
 
   CommandCode response_code = req_code + 1;
-  EnqueueResponse(*command_packet, id, response_code, std::move(cb));
+  EnqueueResponse(*command_packet, *id, response_code, std::move(cb));
 
   return Send(std::move(command_packet));
 }
@@ -94,14 +82,38 @@ void SignalingChannel::ServeRequest(CommandCode req_code, RequestDelegate cb) {
   inbound_handlers_[req_code] = std::move(cb);
 }
 
+bool SignalingChannel::SendCommandWithoutResponse(CommandCode req_code,
+                                                  const ByteBuffer& payload) {
+  const std::optional<CommandId> id = GetNextAvailableCommandId();
+  if (!id.has_value()) {
+    bt_log(WARN,
+           "l2cap",
+           "sig: all valid command IDs in use for pending requests; can't send "
+           "request %#.2x",
+           req_code);
+    return false;
+  }
+  auto command_packet = BuildPacket(req_code, *id, payload);
+  return Send(std::move(command_packet));
+}
+
 void SignalingChannel::EnqueueResponse(const ByteBuffer& request_packet,
                                        CommandId id,
                                        CommandCode response_command_code,
                                        ResponseHandler cb) {
   PW_CHECK(IsSupportedResponse(response_command_code));
 
-  const auto [iter, inserted] = pending_commands_.try_emplace(
-      id, request_packet, response_command_code, std::move(cb), pw_dispatcher_);
+  pw::bluetooth_sapphire::Lease wake_lease =
+      PW_SAPPHIRE_ACQUIRE_LEASE(wake_lease_provider_, "SignalingChannel")
+          .value_or(pw::bluetooth_sapphire::Lease());
+
+  const auto [iter, inserted] =
+      pending_commands_.try_emplace(id,
+                                    request_packet,
+                                    response_command_code,
+                                    std::move(cb),
+                                    pw_dispatcher_,
+                                    std::move(wake_lease));
   PW_CHECK(inserted);
 
   // Start the RTX timer per Core Spec v5.0, Volume 3, Part A, Sec 6.2.1 which
@@ -263,7 +275,6 @@ bool SignalingChannel::Send(ByteBufferPtr packet) {
             pw::bytes::ConvertOrderFrom(cpp20::endian::little,
                                         reply.header().length));
   PW_DCHECK(chan_);
-
   return chan_->Send(std::move(packet));
 }
 
@@ -311,6 +322,27 @@ CommandId SignalingChannel::GetNextCommandId() {
   }
 
   return cmd;
+}
+
+std::optional<CommandId> SignalingChannel::GetNextAvailableCommandId() {
+  // Command identifiers for pending requests are assumed to be unique across
+  // all types of requests and reused by order of least recent use. See v5.0
+  // Vol 3, Part A Section 4.
+  //
+  // Uniqueness across different command types: "Within each signaling channel a
+  // different Identifier shall be used for each successive command"
+  // Reuse order: "the Identifier may be recycled if all other Identifiers have
+  // subsequently been used"
+  const CommandId initial_id = GetNextCommandId();
+  CommandId id;
+  for (id = initial_id; IsCommandPending(id);) {
+    id = GetNextCommandId();
+
+    if (id == initial_id) {
+      return std::nullopt;
+    }
+  }
+  return id;
 }
 
 void SignalingChannel::OnChannelClosed() {

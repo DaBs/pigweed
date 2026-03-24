@@ -18,39 +18,51 @@ package {
 
 cc_library_static {
     name: "pw_bluetooth_proxy",
-    cpp_std: "c++20",
-    vendor_available: true,
-    host_supported: true,
+    defaults: [
+        "pw_android_common_backends",
+        "pw_android_common_target_support",
+    ],
 
     // LINT.IfChange
     srcs: [
         "acl_data_channel.cc",
         "basic_l2cap_channel.cc",
+        "basic_mode_rx_engine.cc",
+        "basic_mode_tx_engine.cc",
+        "channel_proxy_impl.cc",
+        "credit_based_flow_control_rx_engine.cc",
+        "credit_based_flow_control_tx_engine.cc",
         "gatt_notify_channel.cc",
-        "h4_storage.cc",
-        "l2cap_aclu_signaling_channel.cc",
+        "gatt_notify_tx_engine.cc",
+        "generic_l2cap_channel.cc",
+        "generic_l2cap_channel_async.cc",
+        "generic_l2cap_channel_sync.cc",
         "l2cap_channel.cc",
+        "l2cap_channel_async.cc",
         "l2cap_channel_manager.cc",
+        "l2cap_channel_manager_async.cc",
+        "l2cap_channel_manager_sync.cc",
+        "l2cap_channel_sync.cc",
         "l2cap_coc.cc",
-        "l2cap_leu_signaling_channel.cc",
+        "l2cap_logical_link.cc",
         "l2cap_signaling_channel.cc",
         "l2cap_status_tracker.cc",
-        "multibuf_writer.cc",
         "proxy_host.cc",
-        "rfcomm_channel.cc",
-        "rfcomm_fcs.cc",
+        "proxy_host_async.cc",
+        "proxy_host_sync.cc",
+        "recombiner.cc",
     ],
     export_include_dirs: [
         "public",
     ],
-    defaults: [
-        "pw_android_common_backends",
-    ],
     static_libs: [
         "pw_allocator",
+        "pw_async2",
         "pw_containers",
         "pw_function",
         "pw_multibuf",
+        "pw_multibuf_allocator",
+        "pw_multibuf_v2",
         "pw_result",
         "pw_span",
         "pw_span_cast",
@@ -58,10 +70,13 @@ cc_library_static {
     ],
     export_static_lib_headers: [
         "pw_allocator",
+        "pw_async2",
         "pw_containers",
         "pw_function",
-        "pw_result",
         "pw_multibuf",
+        "pw_multibuf_allocator",
+        "pw_multibuf_v2",
+        "pw_result",
         "pw_span",
         "pw_status",
     ],
@@ -69,6 +84,10 @@ cc_library_static {
         "emboss_runtime_headers",
         "fuchsia_sdk_lib_stdcompat",
         "pw_bluetooth_emboss_util_include_dirs",
+        "pw_sync",
+    ],
+    export_header_lib_headers: [
+        "pw_sync",
     ],
     generated_headers: [
         "pw_bluetooth_generate_emboss_att",
@@ -78,7 +97,6 @@ cc_library_static {
         "pw_bluetooth_generate_emboss_hci_events",
         "pw_bluetooth_generate_emboss_hci_h4",
         "pw_bluetooth_generate_emboss_l2cap_frames",
-        "pw_bluetooth_generate_emboss_rfcomm_frames",
     ],
     export_generated_headers: [
         "pw_bluetooth_generate_emboss_att",
@@ -88,8 +106,6 @@ cc_library_static {
         "pw_bluetooth_generate_emboss_hci_events",
         "pw_bluetooth_generate_emboss_hci_h4",
         "pw_bluetooth_generate_emboss_l2cap_frames",
-        "pw_bluetooth_generate_emboss_rfcomm_frames",
     ],
-    // LINT.ThenChange(BUILD.gn, BUILD.bazel, CMakeLists.txt)
-
+    // LINT.ThenChange(BUILD.gn, bt-proxy.bzl, CMakeLists.txt)
 }

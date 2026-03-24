@@ -16,11 +16,10 @@ import("//build_overrides/pigweed.gni")
 
 import("$dir_pw_build/linker_script.gni")
 import("$dir_pw_build/target_types.gni")
-import("$dir_pw_docgen/docs.gni")
 import("$dir_pw_malloc/backend.gni")
-import("$dir_pw_third_party/freertos/freertos.gni")
-import("$dir_pw_third_party/mcuxpresso/mcuxpresso.gni")
 import("$dir_pw_toolchain/generate_toolchain.gni")
+import("$pw_external_freertos/freertos.gni")
+import("$pw_external_mcuxpresso/mcuxpresso.gni")
 import("target_toolchains.gni")
 
 generate_toolchains("target_toolchains") {
@@ -49,16 +48,6 @@ config("disable_warnings") {
     "-Wno-unused-variable",
     "-Wno-error=strict-prototypes",
   ]
-  visibility = [ ":*" ]
-}
-
-config("freestanding") {
-  cflags = [
-    "-ffreestanding",
-    "-fno-builtin",
-  ]
-  asmflags = cflags
-  ldflags = cflags
   visibility = [ ":*" ]
 }
 
@@ -94,8 +83,8 @@ if (current_toolchain != default_toolchain) {
         "$dir_pw_preprocessor",
         "$dir_pw_sys_io_mcuxpresso",
         "$dir_pw_system:init",
-        "$dir_pw_third_party/freertos:support",
-        "$dir_pw_toolchain:infinite_loop",
+        "$dir_pw_toolchain:busy_wait_forever",
+        "$pw_external_freertos:support",
         pw_third_party_mcuxpresso_SDK,
       ]
       sources = [
@@ -143,10 +132,9 @@ if (pw_third_party_mcuxpresso_SDK ==
   pw_source_set("mcuxpresso_sdk_config") {
     public_deps = [
       ":freertos_config",
-      "$dir_pw_third_party/freertos",
+      "$pw_external_freertos",
     ]
     public_configs = [
-      ":freestanding",
       ":sdk_defines",
       ":disable_warnings",
     ]
@@ -164,7 +152,7 @@ if (pw_third_party_mcuxpresso_SDK ==
       ":disable_warnings",
       ":freertos_config_public_includes",
     ]
-    public_deps = [ "$dir_pw_third_party/freertos:config_assert" ]
+    public_deps = [ "$pw_external_freertos:config_assert" ]
     public = [ "config_freertos/FreeRTOSConfig.h" ]
   }
 
@@ -193,8 +181,4 @@ if (pw_third_party_mcuxpresso_SDK ==
     ]
     deps = [ ":freertos_config" ]
   }
-}
-
-pw_doc_group("target_docs") {
-  sources = [ "target_docs.rst" ]
 }

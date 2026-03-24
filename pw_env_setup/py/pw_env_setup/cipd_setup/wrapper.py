@@ -124,12 +124,10 @@ def platform_normalized():
         raise Exception('unrecognized os: {}'.format(os_name))
 
 
-def arch_normalized(rosetta=False):
+def arch_normalized():
     """Normalize arch into format expected in CIPD paths."""
 
     machine = platform.machine()
-    if platform_normalized() == 'mac' and rosetta:
-        return 'amd64'
     if machine.startswith(('arm', 'aarch')):
         machine = machine.replace('aarch', 'arm')
         if machine == 'arm64':
@@ -142,8 +140,8 @@ def arch_normalized(rosetta=False):
     raise Exception('unrecognized arch: {}'.format(machine))
 
 
-def platform_arch_normalized(rosetta=False):
-    return '{}-{}'.format(platform_normalized(), arch_normalized(rosetta))
+def platform_arch_normalized():
+    return '{}-{}'.format(platform_normalized(), arch_normalized())
 
 
 def user_agent():
@@ -173,10 +171,10 @@ def actual_hash(path):
     return hasher.hexdigest()
 
 
-def expected_hash(rosetta=False):
+def expected_hash():
     """Pulls expected hash from digests file."""
 
-    expected_plat = platform_arch_normalized(rosetta)
+    expected_plat = platform_arch_normalized()
 
     with open(DIGESTS_FILE, 'r') as ins:
         for line in ins:
@@ -213,7 +211,35 @@ def https_connect_with_proxy(target_url):
     return conn
 
 
-def client_bytes(rosetta=False):
+_SSL_ERROR = """
+
+Bootstrap: SSL error in Python when downloading CIPD client.
+If using system Python try
+
+    sudo pip install certifi
+
+And if on the system Python on a Mac try
+
+    /Applications/Python <version>/Install Certificates.command
+
+If using Homebrew Python try
+
+    brew install openssl
+    brew uninstall python
+    brew install python
+
+If those don't work, address all the potential issues shown
+by the following command.
+
+    brew doctor
+
+Otherwise, check that your machine's Python can use SSL,
+testing with the httplib module on Python 2 or http.client on
+Python 3.
+"""
+
+
+def client_bytes():
     """Pull down the CIPD client and return it as a bytes object.
 
     Often CIPD_HOST returns a 302 FOUND with a pointer to
@@ -227,21 +253,12 @@ def client_bytes(rosetta=False):
     try:
         conn = https_connect_with_proxy(CIPD_HOST)
     except AttributeError:
-        print('=' * 70)
-        print(
-            '''
-It looks like this version of Python does not support SSL. This is common
-when using Homebrew. If using Homebrew please run the following commands.
-If not using Homebrew check how your version of Python was built.
-
-brew install openssl  # Probably already installed, but good to confirm.
-brew uninstall python && brew install python
-'''.strip()
-        )
-        print('=' * 70)
+        print('=' * 70, file=sys.stderr)
+        print(_SSL_ERROR, file=sys.stderr)
+        print('=' * 70, file=sys.stderr)
         raise
 
-    full_platform = platform_arch_normalized(rosetta)
+    full_platform = platform_arch_normalized()
     if full_platform not in SUPPORTED_PLATFORMS:
         raise UnsupportedPlatform(full_platform)
 
@@ -255,33 +272,7 @@ brew uninstall python && brew install python
             # sure we always read it.
             content = res.read()
         except ssl.SSLError:
-            print(
-                '\n'
-                'Bootstrap: SSL error in Python when downloading CIPD client.\n'
-                'If using system Python try\n'
-                '\n'
-                '    sudo pip install certifi\n'
-                '\n'
-                'And if on the system Python on a Mac try\n'
-                '\n'
-                '    /Applications/Python 3.6/Install Certificates.command\n'
-                '\n'
-                'If using Homebrew Python try\n'
-                '\n'
-                '    brew install openssl\n'
-                '    brew uninstall python\n'
-                '    brew install python\n'
-                '\n'
-                "If those don't work, address all the potential issues shown \n"
-                'by the following command.\n'
-                '\n'
-                '    brew doctor\n'
-                '\n'
-                "Otherwise, check that your machine's Python can use SSL, "
-                'testing with the httplib module on Python 2 or http.client on '
-                'Python 3.',
-                file=sys.stderr,
-            )
+            print(_SSL_ERROR, file=sys.stderr)
             raise
 
         # Found client bytes.
@@ -308,7 +299,6 @@ brew uninstall python && brew install python
 def bootstrap(
     client,
     silent=('PW_ENVSETUP_QUIET' in os.environ),
-    rosetta=False,
 ):
     """Bootstrap cipd client installation."""
 
@@ -319,15 +309,15 @@ def bootstrap(
     if not silent:
         print(
             'Bootstrapping cipd client for {}'.format(
-                platform_arch_normalized(rosetta)
+                platform_arch_normalized()
             )
         )
 
     tmp_path = client + '.tmp'
     with open(tmp_path, 'wb') as tmp:
-        tmp.write(client_bytes(rosetta))
+        tmp.write(client_bytes())
 
-    expected = expected_hash(rosetta=rosetta)
+    expected = expected_hash()
     actual = actual_hash(tmp_path)
 
     if expected != actual:
@@ -365,7 +355,6 @@ def init(
     install_dir=DEFAULT_INSTALL_DIR,
     silent=False,
     client=None,
-    rosetta=False,
 ):
     """Install/update cipd client."""
 
@@ -375,7 +364,7 @@ def init(
     os.environ['CIPD_HTTP_USER_AGENT_PREFIX'] = user_agent()
 
     if not os.path.isfile(client):
-        bootstrap(client, silent, rosetta=rosetta)
+        bootstrap(client, silent)
 
     try:
         selfupdate(client)
@@ -384,7 +373,7 @@ def init(
             'CIPD selfupdate failed. Bootstrapping then retrying...',
             file=sys.stderr,
         )
-        bootstrap(client, rosetta=rosetta)
+        bootstrap(client)
         selfupdate(client)
 
     return client

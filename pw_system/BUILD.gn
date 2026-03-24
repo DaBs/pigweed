@@ -1,4 +1,4 @@
-# Copyright 2021 The Pigweed Authors
+# Copyright 2025 The Pigweed Authors
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may not
 # use this file except in compliance with the License. You may obtain a copy of
@@ -20,14 +20,14 @@ import("$dir_pigweed/third_party/nanopb/nanopb.gni")
 import("$dir_pigweed/third_party/pico_sdk/pi_pico.gni")
 import("$dir_pigweed/third_party/smartfusion_mss/mss.gni")
 import("$dir_pigweed/third_party/stm32cube/stm32cube.gni")
-import("$dir_pw_async2/backend.gni")
+
 import("$dir_pw_build/error.gni")
 import("$dir_pw_build/facade.gni")
 import("$dir_pw_build/module_config.gni")
 import("$dir_pw_build/target_types.gni")
 import("$dir_pw_cpu_exception/backend.gni")
-import("$dir_pw_docgen/docs.gni")
 import("$dir_pw_protobuf_compiler/proto.gni")
+import("$dir_pw_sync/backend.gni")
 import("$dir_pw_unit_test/test.gni")
 import("backend.gni")
 
@@ -119,6 +119,7 @@ pw_source_set("log_backend.impl") {
     "$dir_pw_log:proto_utils",
     "$dir_pw_log:pw_log.facade",
     "$dir_pw_log_string:handler.facade",
+    "$dir_pw_log_tokenized:handler.facade",
     "$dir_pw_metric:global",
     "$dir_pw_multisink",
     "$dir_pw_result",
@@ -164,6 +165,7 @@ pw_source_set("init") {
   public = [ "public/pw_system/init.h" ]
   sources = [ "init.cc" ]
   deps = [
+    ":benchmark_service",
     ":device_service",
     ":file_manager",
     ":file_service",
@@ -176,6 +178,7 @@ pw_source_set("init") {
     ":work_queue",
     "$dir_pw_metric:global",
     "$dir_pw_metric:metric_service_pwpb",
+    "$dir_pw_rpc:benchmark",
     "$dir_pw_rpc/pwpb:echo_service",
     "$dir_pw_thread:thread",
     "$dir_pw_trace",
@@ -351,6 +354,14 @@ pw_source_set("device_service") {
   deps = [ ":device_service_pwpb" ]
 }
 
+pw_source_set("benchmark_service") {
+  public = [ "public/pw_system/benchmark_service.h" ]
+  public_configs = [ ":public_include_path" ]
+  public_deps = [ "$dir_pw_rpc:benchmark" ]
+  sources = [ "benchmark_service.cc" ]
+  deps = []
+}
+
 pw_source_set("thread_snapshot_service") {
   public = [ "public/pw_system/thread_snapshot_service.h" ]
   public_configs = [ ":public_include_path" ]
@@ -387,9 +398,9 @@ if (pw_system_TARGET_HOOKS_BACKEND == "") {
     deps = [
       ":config",
       ":init",
-      "$dir_pw_third_party/freertos",
       "$dir_pw_thread:thread",
       "$dir_pw_thread_freertos:thread",
+      "$pw_external_freertos",
     ]
     sources = [ "freertos_target_hooks.cc" ]
   }
@@ -416,12 +427,13 @@ pw_source_set("async") {
   ]
   public_deps = [
     "$dir_pw_allocator:allocator",
-    "$dir_pw_async2:dispatcher",
+    "$dir_pw_async2:pw_async2",
     "$dir_pw_channel",
     "$dir_pw_rpc:server",
   ]
   deps = [
     ":async_packet_io",
+    ":device_service",
     ":file_manager",
     ":file_service",
     ":log",
@@ -430,10 +442,8 @@ pw_source_set("async") {
     ":work_queue",
     "$dir_pw_allocator:best_fit_block_allocator",
     "$dir_pw_allocator:synchronized_allocator",
-    "$dir_pw_async2:allocate_task",
-    "$dir_pw_async2:pend_func_task",
+    "$dir_pw_async2:basic_dispatcher",
     "$dir_pw_hdlc:router",
-    "$dir_pw_multibuf:simple_allocator",
     "$dir_pw_rpc/pwpb:echo_service",
     "$dir_pw_sync:interrupt_spin_lock",
     "$dir_pw_thread:thread",
@@ -454,22 +464,9 @@ pw_executable("system_example") {
   deps = [
     ":pw_system",
     "$dir_pw_log",
+    "$dir_pw_rpc/pwpb:echo_service",
     "$dir_pw_thread:sleep",
     "$dir_pw_trace",
-    "$dir_pw_unit_test:rpc_service",
-
-    # Adds a test that the test server can run.
-    "$dir_pw_status:status_test.lib",
-    "$dir_pw_string:string_builder_test.lib",
-  ]
-}
-
-pw_executable("system_async_host_example") {
-  sources = [ "system_async_host_example.cc" ]
-  deps = [
-    ":async",
-    "$dir_pw_channel:epoll_channel",
-    "$dir_pw_multibuf:testing",
   ]
 }
 
@@ -478,7 +475,7 @@ pw_source_set("async_packet_io") {
   public = [ "public/pw_system/internal/async_packet_io.h" ]
   sources = [ "async_packet_io.cc" ]
   public_deps = [
-    "$dir_pw_async2:dispatcher",
+    "$dir_pw_async2:pw_async2",
     "$dir_pw_channel:forwarding_channel",
     "$dir_pw_containers:inline_var_len_entry_queue",
     "$dir_pw_hdlc:router",
@@ -510,7 +507,7 @@ pw_test("async_packet_io_test") {
   ]
 
   # TODO: b/317922402 - Run on Windows when thread detaching is supported.
-  enable_if = host_os != "win" && pw_async2_DISPATCHER_BACKEND != ""
+  enable_if = host_os != "win" && pw_sync_THREAD_NOTIFICATION_BACKEND != ""
 }
 
 pw_test("system_async_test") {
@@ -519,11 +516,11 @@ pw_test("system_async_test") {
     ":async",
     "$dir_pw_allocator:testing",
     "$dir_pw_channel:loopback_channel",
-    "$dir_pw_multibuf:testing",
+    "$dir_pw_multibuf:simple_allocator",
   ]
 
   # TODO: b/317922402 - Run on Windows when thread detaching is supported.
-  enable_if = host_os != "win" && pw_async2_DISPATCHER_BACKEND != ""
+  enable_if = host_os != "win" && pw_sync_THREAD_NOTIFICATION_BACKEND != ""
 }
 
 group("system_examples") {
@@ -556,17 +553,6 @@ group("system_examples") {
       ":system_example($dir_pigweed/targets/apollo4_pw_system:apollo4_pw_system.size_optimized)",
     ]
   }
-}
-
-pw_doc_group("docs") {
-  sources = [
-    "cli.rst",
-    "docs.rst",
-  ]
-  inputs = [
-    "Kconfig",
-    "system_async_test.cc",
-  ]
 }
 
 pw_test_group("tests") {

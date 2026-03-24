@@ -12,8 +12,67 @@
 # License for the specific language governing permissions and limitations under
 # the License.
 
+declare_args() {
+  # An optional relative path from `root_build_dir` to `//`, which can be used by
+  # `emboss_cc_library` to rebase `embossc` source files.
+  #
+  # Normally we don't need to define this manually ourselves and can rely on builtin GN functions to
+  # `rebase_path()` against `root_build_dir`, but that approach is unreliable for
+  # [build environments where `//out` is a symlink pointing to a directory outside of `//`](1),
+  # since [GN always provides `root_build_dir` as an absolute symlink-derefed path](2).
+  #
+  # When this is the case, we shouldn't use `root_build_dir` directly and must instead construct a
+  # "lexically local" version of `root_build_dir` which is a subpath of `//`.
+  #
+  # Here's an example demonstrating this:
+  #
+  # Using a project filesystem structure like this:
+  #     /home/alice/foo_project (as `//`)
+  #       src/foo.emb
+  #       out/a_build_dir -> /storage/out/a_build_dir
+  # This GN expression:
+  #     rebase_path("src/foo.emb", "$root_build_dir")
+  # Is equivalent to:
+  #     rebase_path("/home/alice/foo_project/src/foo.emb", "/storage/out/a_build_dir")
+  # Which evaluates to:
+  #     "../../../home/alice/foo_project/src/foo.emb"
+  #
+  # This differs from the result if the out directory isn't a symlink.
+  # In that case, the same GN expression:
+  #     rebase_path("src/foo.emb", "$root_build_dir")
+  # Would be equivalent to:
+  #     rebase_path("/home/alice/foo_project/src/foo.emb", "/home/alice/foo_project/out/a_build_dir")
+  # Which evaluates to:
+  #     "../../src/foo.emb"
+  #
+  # While both of these examples resolve to the same file, `embossc` attempts to place generated
+  # header files as siblings to the source .emb files, making it sensitive to the lexical
+  # representation of the path. `emboss_cc_library` also cancels out the leading `../` segments
+  # invoking `embossc` with an `--output-path` of nested r"(fake/)*" directories to ensure
+  # these generated files are contained within out directory.
+  #
+  # In the first example, the output path is:
+  #   "gen/fake/fake/fake/../../../home/alice/foo_project/src/foo.h"
+  # Which simplifies to:
+  #   "gen/home/alice/foo_project/src/foo.h"
+  # This breaks `#include <foo.h>` directives in source files.
+  #
+  # The second example places header files in the correct path:
+  #   "gen/fake/fake/../../src/foo.h"
+  # Which simplifies to:
+  #   "gen/src/foo.h"
+  #
+  # By using `pw_emboss_build_dir_to_root` as the logical relative path from `root_build_dir` to
+  # `//`, it's possible to lexically construct a `symlink_safe_build_dir` which behaves like
+  # `root_build_dir` without resolving symlinks.
+  #
+  # [1]: https://cs.opensource.google/fuchsia/fuchsia/+/main:scripts/cog/cartfs_out_directory.py
+  # [2]: https://gn.googlesource.com/gn/+/e7f3202128bdb2429872fdb138626a010b2bff7f/src/gn/setup.cc#759
+  pw_emboss_build_dir_to_root = ""
+}
+
 import("//build_overrides/pigweed.gni")
-import("$dir_pw_third_party/emboss/emboss.gni")
+import("$pw_external_emboss/emboss.gni")
 
 # Compiles a .emb file into a .h file.
 # $dir_pw_third_party_emboss must be set to the path of your Emboss
@@ -42,6 +101,22 @@ template("emboss_cc_library") {
       "$dir_pw_third_party_emboss" != "",
       "\$dir_pw_third_party_emboss must be set to the path of your Emboss installation")
 
+  # This value is used for the source path given to `embossc` by helping us generate predictable
+  # relative paths from the build dir to source files, which can be specified for projects where the
+  # build directory might be a symlink, since `root_build_dir` is always set to a
+  # resolved/symlink-derefed path.
+  #
+  # See the comment block above and https://fxrev.dev/1416994 for additional context.
+  if (pw_emboss_build_dir_to_root == "") {
+    relative_source = rebase_path(invoker.source, root_build_dir)
+  } else {
+    symlink_safe_build_dir =
+        "/" + rebase_path("//", "/") +
+        rebase_path(root_build_dir,
+                    "${root_build_dir}/${pw_emboss_build_dir_to_root}")
+    relative_source = rebase_path(invoker.source, symlink_safe_build_dir)
+  }
+
   # The --output-path arg to the embossc script only specifies the
   # prefix of the path at which the generated header is placed. To this
   # prefix, the script appends the entire path of the input Emboss source,
@@ -52,13 +127,13 @@ template("emboss_cc_library") {
 
   # In order for the compiled header path in the embossc script to resolve to
   # $target_gen_dir as we desire, we must provide an --output-path arg that
-  # resolves to $target_gen_dir after rebase_path(invoker.source,
-  # root_build_dir) is appended to it. To achieve this, we specify output-path
+  # resolves to $target_gen_dir after rebase_path(invoker.source, root_build_dir)
+  # is appended to it. To achieve this, we specify output-path
   # to be $root_gen_dir followed by a number of fake directories needed to
   # cancel out these starting updirs.
   compiled_header_path = "$target_gen_dir/" + invoker.source + ".h"
   path_sep = "/"
-  elements = string_split(rebase_path(invoker.source, root_build_dir), path_sep)
+  elements = string_split(relative_source, path_sep)
   updirs = filter_include(elements, [ ".." ])
 
   fakedirs = []
@@ -68,7 +143,7 @@ template("emboss_cc_library") {
   output_path = root_gen_dir + path_sep + string_join(path_sep, fakedirs)
 
   action("${target_name}_header") {
-    script = "$dir_pw_third_party/emboss/embossc_runner.py"
+    script = "$pw_external_emboss/embossc_runner.py"
 
     args = [
       rebase_path("$dir_pw_third_party_emboss/embossc", root_build_dir),
@@ -77,7 +152,7 @@ template("emboss_cc_library") {
       "--no-cc-enum-traits",
       "--output-path",
       rebase_path(output_path, root_build_dir),
-      rebase_path(invoker.source, root_build_dir),
+      relative_source,
     ]
 
     # Look for imports in the root directory and Pigweed root by default.
@@ -102,51 +177,58 @@ template("emboss_cc_library") {
       }
     }
 
-    sources = [
-      "$dir_pw_third_party_emboss/compiler/__init__.py",
-      "$dir_pw_third_party_emboss/compiler/back_end/__init__.py",
-      "$dir_pw_third_party_emboss/compiler/back_end/cpp/__init__.py",
-      "$dir_pw_third_party_emboss/compiler/back_end/cpp/attributes.py",
-      "$dir_pw_third_party_emboss/compiler/back_end/cpp/emboss_codegen_cpp.py",
-      "$dir_pw_third_party_emboss/compiler/back_end/cpp/generated_code_templates",
-      "$dir_pw_third_party_emboss/compiler/back_end/cpp/header_generator.py",
-      "$dir_pw_third_party_emboss/compiler/back_end/util/__init__.py",
-      "$dir_pw_third_party_emboss/compiler/back_end/util/code_template.py",
-      "$dir_pw_third_party_emboss/compiler/front_end/__init__.py",
-      "$dir_pw_third_party_emboss/compiler/front_end/attribute_checker.py",
-      "$dir_pw_third_party_emboss/compiler/front_end/attributes.py",
-      "$dir_pw_third_party_emboss/compiler/front_end/constraints.py",
-      "$dir_pw_third_party_emboss/compiler/front_end/dependency_checker.py",
-      "$dir_pw_third_party_emboss/compiler/front_end/emboss_front_end.py",
-      "$dir_pw_third_party_emboss/compiler/front_end/error_examples",
-      "$dir_pw_third_party_emboss/compiler/front_end/expression_bounds.py",
-      "$dir_pw_third_party_emboss/compiler/front_end/glue.py",
-      "$dir_pw_third_party_emboss/compiler/front_end/lr1.py",
-      "$dir_pw_third_party_emboss/compiler/front_end/module_ir.py",
-      "$dir_pw_third_party_emboss/compiler/front_end/parser.py",
-      "$dir_pw_third_party_emboss/compiler/front_end/prelude.emb",
-      "$dir_pw_third_party_emboss/compiler/front_end/reserved_words",
-      "$dir_pw_third_party_emboss/compiler/front_end/symbol_resolver.py",
-      "$dir_pw_third_party_emboss/compiler/front_end/synthetics.py",
-      "$dir_pw_third_party_emboss/compiler/front_end/tokenizer.py",
-      "$dir_pw_third_party_emboss/compiler/front_end/type_check.py",
-      "$dir_pw_third_party_emboss/compiler/front_end/write_inference.py",
-      "$dir_pw_third_party_emboss/compiler/util/__init__.py",
-      "$dir_pw_third_party_emboss/compiler/util/attribute_util.py",
-      "$dir_pw_third_party_emboss/compiler/util/error.py",
-      "$dir_pw_third_party_emboss/compiler/util/expression_parser.py",
-      "$dir_pw_third_party_emboss/compiler/util/ir_data.py",
-      "$dir_pw_third_party_emboss/compiler/util/ir_data_fields.py",
-      "$dir_pw_third_party_emboss/compiler/util/ir_data_utils.py",
-      "$dir_pw_third_party_emboss/compiler/util/ir_util.py",
-      "$dir_pw_third_party_emboss/compiler/util/name_conversion.py",
-      "$dir_pw_third_party_emboss/compiler/util/parser_types.py",
-      "$dir_pw_third_party_emboss/compiler/util/resources.py",
-      "$dir_pw_third_party_emboss/compiler/util/simple_memoizer.py",
-      "$dir_pw_third_party_emboss/compiler/util/traverse_ir.py",
-      "$dir_pw_third_party_emboss/embossc",
-      invoker.source,
-    ]
+    sources = [ invoker.source ]
+    if ("$pw_third_party_emboss_USE_GEN_SOURCES" == "true") {
+      import("$dir_pw_third_party_emboss/gen/sources.gni")
+      foreach(source, embossc_sources) {
+        sources += [ "$dir_pw_third_party_emboss/$source" ]
+      }
+    } else {
+      sources += [
+        "$dir_pw_third_party_emboss/compiler/__init__.py",
+        "$dir_pw_third_party_emboss/compiler/back_end/__init__.py",
+        "$dir_pw_third_party_emboss/compiler/back_end/cpp/__init__.py",
+        "$dir_pw_third_party_emboss/compiler/back_end/cpp/attributes.py",
+        "$dir_pw_third_party_emboss/compiler/back_end/cpp/emboss_codegen_cpp.py",
+        "$dir_pw_third_party_emboss/compiler/back_end/cpp/generated_code_templates",
+        "$dir_pw_third_party_emboss/compiler/back_end/cpp/header_generator.py",
+        "$dir_pw_third_party_emboss/compiler/back_end/util/__init__.py",
+        "$dir_pw_third_party_emboss/compiler/back_end/util/code_template.py",
+        "$dir_pw_third_party_emboss/compiler/front_end/__init__.py",
+        "$dir_pw_third_party_emboss/compiler/front_end/attribute_checker.py",
+        "$dir_pw_third_party_emboss/compiler/front_end/attributes.py",
+        "$dir_pw_third_party_emboss/compiler/front_end/constraints.py",
+        "$dir_pw_third_party_emboss/compiler/front_end/dependency_checker.py",
+        "$dir_pw_third_party_emboss/compiler/front_end/emboss_front_end.py",
+        "$dir_pw_third_party_emboss/compiler/front_end/error_examples",
+        "$dir_pw_third_party_emboss/compiler/front_end/expression_bounds.py",
+        "$dir_pw_third_party_emboss/compiler/front_end/glue.py",
+        "$dir_pw_third_party_emboss/compiler/front_end/lr1.py",
+        "$dir_pw_third_party_emboss/compiler/front_end/module_ir.py",
+        "$dir_pw_third_party_emboss/compiler/front_end/parser.py",
+        "$dir_pw_third_party_emboss/compiler/front_end/prelude.emb",
+        "$dir_pw_third_party_emboss/compiler/front_end/reserved_words",
+        "$dir_pw_third_party_emboss/compiler/front_end/symbol_resolver.py",
+        "$dir_pw_third_party_emboss/compiler/front_end/synthetics.py",
+        "$dir_pw_third_party_emboss/compiler/front_end/tokenizer.py",
+        "$dir_pw_third_party_emboss/compiler/front_end/type_check.py",
+        "$dir_pw_third_party_emboss/compiler/front_end/write_inference.py",
+        "$dir_pw_third_party_emboss/compiler/util/__init__.py",
+        "$dir_pw_third_party_emboss/compiler/util/attribute_util.py",
+        "$dir_pw_third_party_emboss/compiler/util/error.py",
+        "$dir_pw_third_party_emboss/compiler/util/expression_parser.py",
+        "$dir_pw_third_party_emboss/compiler/util/ir_data.py",
+        "$dir_pw_third_party_emboss/compiler/util/ir_data_fields.py",
+        "$dir_pw_third_party_emboss/compiler/util/ir_data_utils.py",
+        "$dir_pw_third_party_emboss/compiler/util/ir_util.py",
+        "$dir_pw_third_party_emboss/compiler/util/name_conversion.py",
+        "$dir_pw_third_party_emboss/compiler/util/parser_types.py",
+        "$dir_pw_third_party_emboss/compiler/util/resources.py",
+        "$dir_pw_third_party_emboss/compiler/util/simple_memoizer.py",
+        "$dir_pw_third_party_emboss/compiler/util/traverse_ir.py",
+        "$dir_pw_third_party_emboss/embossc",
+      ]
+    }
 
     # TODO(benlawson): Use a depfile for adding imports to inputs (https://github.com/google/emboss/issues/68).
     if (defined(invoker.imports)) {
@@ -175,7 +257,7 @@ template("emboss_cc_library") {
     }
     public_deps += [
       ":${target_name}_header",
-      "$dir_pw_third_party/emboss:cpp_utils",
+      "$pw_external_emboss:cpp_utils",
     ]
 
     if (!defined(invoker.public_configs)) {

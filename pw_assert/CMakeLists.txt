@@ -55,6 +55,7 @@ pw_add_facade(pw_assert.check INTERFACE
     public
   PUBLIC_DEPS
     pw_assert.config
+    pw_numeric.checked_arithmetic
     pw_preprocessor
 )
 
@@ -146,3 +147,15 @@ if((NOT "${pw_assert.assert_BACKEND}" STREQUAL "") AND
       pw_assert
   )
 endif()
+
+# DOCSTAG: [contributing-docs-examples]
+pw_add_test(pw_assert.examples
+  SOURCES
+    examples.cc
+  PRIVATE_DEPS
+    pw_assert.check
+  GROUPS
+    modules
+    pw_assert
+)
+# DOCSTAG: [contributing-docs-examples]

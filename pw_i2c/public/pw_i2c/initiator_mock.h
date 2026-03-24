@@ -23,6 +23,12 @@
 
 namespace pw::i2c {
 
+/// @module{pw_i2c}
+
+///
+/// DEPRECATED: This file is deprecated in favor of initiator_message_mock.h
+///
+
 /// Base class for creating transaction instances. For read-only,
 /// write-only, or probe transactions, improve code readability
 /// by using one of the following helpers instead:
@@ -168,21 +174,16 @@ constexpr Transaction ProbeTransaction(
 class MockInitiator : public Initiator {
  public:
   explicit constexpr MockInitiator(span<Transaction> transaction_list)
-      : expected_transactions_(transaction_list),
+      : Initiator(Initiator::Feature::kStandard),
+        expected_transactions_(transaction_list),
         expected_transaction_index_(0) {}
 
   /// Indicates whether the actual I2C transactions matched the expected
   /// transactions. Should be called at the end of the test.
   ///
-  /// @returns @rst
-  ///
-  /// .. pw-status-codes::
-  ///
-  ///    OK: The actual transactions matched the expected transactions.
-  ///
-  ///    OUT_OF_RANGE: The mocked set of transactions hasn't been exhausted.
-  ///
-  /// @endrst
+  /// @returns
+  /// * @OK: The actual transactions matched the expected transactions.
+  /// * @OUT_OF_RANGE: The mocked set of transactions hasn't been exhausted.
   Status Finalize() const {
     if (expected_transaction_index_ != expected_transactions_.size()) {
       return Status::OutOfRange();

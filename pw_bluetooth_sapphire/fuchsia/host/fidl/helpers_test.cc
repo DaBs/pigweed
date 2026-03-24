@@ -114,6 +114,20 @@ bt::iso::CisEstablishedParameters::CisUnidirectionalParams kMaxUniParams = {
     .max_pdu_size = 0xfb,
 };
 
+bt::hci_spec::BroadcastIsochronousGroupInfo kBigInfo{
+    .num_bis = 0x01,
+    .nse = 0x02,
+    .iso_interval = 0x03,
+    .bn = 0x04,
+    .pto = 0x05,
+    .irc = 0x06,
+    .max_pdu = 0x07,
+    .sdu_interval = 0x08,
+    .max_sdu = 0x09,
+    .phy = pw::bluetooth::emboss::IsoPhyType::LE_1M,
+    .framing = pw::bluetooth::emboss::BigFraming::FRAMED,
+    .encryption = true};
+
 class HelpersTestWithLoop : public bt::testing::TestLoopFixture {
  public:
   pw::async::Dispatcher& pw_dispatcher() { return pw_dispatcher_; }
@@ -1830,12 +1844,15 @@ TEST_F(HelpersAdapterTest, PeerToFidlBondingData_BredrData) {
   auto* peer =
       adapter()->peer_cache()->NewPeer(kTestPeerAddr, /*connectable=*/true);
   EXPECT_TRUE(peer->MutBrEdr().SetBondData(kTestLtk));
+  peer->MutBrEdr().SetDeviceClass(bt::DeviceClass(0x080424));
 
   fsys::BondingData data = PeerToFidlBondingData(adapter().get(), *peer);
   EXPECT_FALSE(data.has_le_bond());
   ASSERT_TRUE(data.has_bredr_bond());
   ASSERT_TRUE(data.bredr_bond().has_link_key());
   EXPECT_TRUE(fidl::Equals(kTestKeyFidl, data.bredr_bond().link_key()));
+  ASSERT_TRUE(data.has_device_class());
+  EXPECT_EQ(0x080424, data.device_class().value);
 }
 
 TEST_F(HelpersAdapterTest, PeerToFidlBondingData_IncludesBredrServices) {
@@ -1863,28 +1880,29 @@ T copy(T t) {
 
 TEST_F(HelpersAdapterTest, FidlToScoParameters) {
   fbredr::ScoConnectionParameters params;
-  EXPECT_TRUE(FidlToScoParameters(params).is_error());
+  uint8_t sco_offload_index = 3;
+  EXPECT_TRUE(FidlToScoParameters(params, sco_offload_index).is_error());
   params.set_parameter_set(fbredr::HfpParameterSet::T2);
-  EXPECT_TRUE(FidlToScoParameters(params).is_error());
+  EXPECT_TRUE(FidlToScoParameters(params, sco_offload_index).is_error());
   params.set_air_coding_format(fbt::AssignedCodingFormat::MSBC);
-  EXPECT_TRUE(FidlToScoParameters(params).is_error());
+  EXPECT_TRUE(FidlToScoParameters(params, sco_offload_index).is_error());
   params.set_air_frame_size(8u);
-  EXPECT_TRUE(FidlToScoParameters(params).is_error());
+  EXPECT_TRUE(FidlToScoParameters(params, sco_offload_index).is_error());
   params.set_io_bandwidth(32000);
-  EXPECT_TRUE(FidlToScoParameters(params).is_error());
+  EXPECT_TRUE(FidlToScoParameters(params, sco_offload_index).is_error());
   params.set_io_coding_format(fbt::AssignedCodingFormat::LINEAR_PCM);
-  EXPECT_TRUE(FidlToScoParameters(params).is_error());
+  EXPECT_TRUE(FidlToScoParameters(params, sco_offload_index).is_error());
   params.set_io_frame_size(16u);
-  EXPECT_TRUE(FidlToScoParameters(params).is_error());
+  EXPECT_TRUE(FidlToScoParameters(params, sco_offload_index).is_error());
   params.set_io_pcm_data_format(faudio::SampleFormat::PCM_SIGNED);
-  EXPECT_TRUE(FidlToScoParameters(params).is_error());
+  EXPECT_TRUE(FidlToScoParameters(params, sco_offload_index).is_error());
   params.set_io_pcm_sample_payload_msb_position(3u);
-  EXPECT_TRUE(FidlToScoParameters(params).is_error());
+  EXPECT_TRUE(FidlToScoParameters(params, sco_offload_index).is_error());
   params.set_path(fbredr::DataPath::OFFLOAD);
-  ASSERT_TRUE(FidlToScoParameters(params).is_ok());
+  ASSERT_TRUE(FidlToScoParameters(params, sco_offload_index).is_ok());
 
   bt::StaticPacket<pw::bluetooth::emboss::SynchronousConnectionParametersWriter>
-      out = FidlToScoParameters(params).take_value();
+      out = FidlToScoParameters(params, sco_offload_index).take_value();
   auto view = out.view();
   EXPECT_EQ(view.transmit_bandwidth().Read(), 8000u);
   EXPECT_EQ(view.receive_bandwidth().Read(), 8000u);
@@ -1927,9 +1945,9 @@ TEST_F(HelpersAdapterTest, FidlToScoParameters) {
   EXPECT_EQ(view.output_pcm_sample_payload_msb_position().Read(), 3u);
 
   EXPECT_EQ(view.input_data_path().Read(),
-            static_cast<pw::bluetooth::emboss::ScoDataPath>(6));
+            static_cast<pw::bluetooth::emboss::ScoDataPath>(sco_offload_index));
   EXPECT_EQ(view.output_data_path().Read(),
-            static_cast<pw::bluetooth::emboss::ScoDataPath>(6));
+            static_cast<pw::bluetooth::emboss::ScoDataPath>(sco_offload_index));
 
   EXPECT_EQ(view.input_transport_unit_size_bits().Read(), 0u);
   EXPECT_EQ(view.output_transport_unit_size_bits().Read(), 0u);
@@ -1945,16 +1963,16 @@ TEST_F(HelpersAdapterTest, FidlToScoParameters) {
 
   // When the IO coding format is Linear PCM, the PCM data format is required.
   params.clear_io_pcm_data_format();
-  EXPECT_TRUE(FidlToScoParameters(params).is_error());
+  EXPECT_TRUE(FidlToScoParameters(params, sco_offload_index).is_error());
 
   // PCM_FLOAT is not a supported PCM format.
   params.set_io_pcm_data_format(faudio::SampleFormat::PCM_FLOAT);
-  EXPECT_TRUE(FidlToScoParameters(params).is_error());
+  EXPECT_TRUE(FidlToScoParameters(params, sco_offload_index).is_error());
 
   // PCM format for non-PCM IO coding formats is kNotApplicable and MSB is 0.
   params.set_io_coding_format(fbt::AssignedCodingFormat::TRANSPARENT);
-  ASSERT_TRUE(FidlToScoParameters(params).is_ok());
-  out = FidlToScoParameters(params).value();
+  ASSERT_TRUE(FidlToScoParameters(params, sco_offload_index).is_ok());
+  out = FidlToScoParameters(params, sco_offload_index).value();
   EXPECT_EQ(view.input_pcm_data_format().Read(),
             pw::bluetooth::emboss::PcmDataFormat::NOT_APPLICABLE);
   EXPECT_EQ(view.input_pcm_sample_payload_msb_position().Read(), 0u);
@@ -2170,6 +2188,8 @@ TEST_F(HelpersTestWithLoop, PeerToFidlLeWithAllFields) {
                      pw_dispatcher());
   peer.RegisterName("name");
   const int8_t kRssi = 1;
+  const uint8_t kAdvertisingSid = 0x04;
+  const uint16_t kPeriodicAdvertisingInterval = 0x5678;
   auto adv_bytes = bt::StaticByteBuffer(
       // Uri: "https://abc.xyz"
       0x0B,
@@ -2187,7 +2207,9 @@ TEST_F(HelpersTestWithLoop, PeerToFidlLeWithAllFields) {
   peer.MutLe().SetAdvertisingData(
       kRssi,
       adv_bytes,
-      pw::chrono::SystemClock::time_point(std::chrono::nanoseconds(1)));
+      pw::chrono::SystemClock::time_point(std::chrono::nanoseconds(1)),
+      kAdvertisingSid,
+      kPeriodicAdvertisingInterval);
 
   fble::Peer fidl_peer = PeerToFidlLe(peer);
   ASSERT_TRUE(fidl_peer.has_id());
@@ -2198,6 +2220,11 @@ TEST_F(HelpersTestWithLoop, PeerToFidlLeWithAllFields) {
   EXPECT_EQ(fidl_peer.name(), "name");
   ASSERT_TRUE(fidl_peer.has_rssi());
   EXPECT_EQ(fidl_peer.rssi(), kRssi);
+  ASSERT_TRUE(fidl_peer.has_advertising_sid());
+  EXPECT_EQ(fidl_peer.advertising_sid(), kAdvertisingSid);
+  ASSERT_TRUE(fidl_peer.has_periodic_advertising_interval());
+  EXPECT_EQ(fidl_peer.periodic_advertising_interval(),
+            kPeriodicAdvertisingInterval);
   ASSERT_TRUE(fidl_peer.has_data());
   EXPECT_THAT(fidl_peer.data().uris(),
               ::testing::ElementsAre("https://abc.xyz"));
@@ -2229,6 +2256,8 @@ TEST_F(HelpersTestWithLoop, PeerToFidlLeWithoutAdvertisingData) {
   EXPECT_FALSE(fidl_peer.bonded());
   EXPECT_FALSE(fidl_peer.has_name());
   EXPECT_FALSE(fidl_peer.has_rssi());
+  EXPECT_FALSE(fidl_peer.has_advertising_sid());
+  EXPECT_FALSE(fidl_peer.has_periodic_advertising_interval());
   EXPECT_FALSE(fidl_peer.has_data());
   ASSERT_TRUE(fidl_peer.has_last_updated());
   EXPECT_EQ(fidl_peer.last_updated(), 0);
@@ -2734,6 +2763,150 @@ TEST(HelpersTest, CisEstablishedParametersToFidl) {
   params4 = params2;
   params4.p_to_c_params = unconfigured_params;
   ValidateCisEstablishedConversion(params4);
+}
+
+TEST(HelpersTest, IsoPhyToFidl) {
+  EXPECT_EQ(IsoPhyToFidl(pw::bluetooth::emboss::IsoPhyType::LE_1M),
+            ::fuchsia_bluetooth_le::PhysicalLayer::kLe1M);
+  EXPECT_EQ(IsoPhyToFidl(pw::bluetooth::emboss::IsoPhyType::LE_2M),
+            ::fuchsia_bluetooth_le::PhysicalLayer::kLe2M);
+  EXPECT_EQ(IsoPhyToFidl(pw::bluetooth::emboss::IsoPhyType::LE_CODED),
+            ::fuchsia_bluetooth_le::PhysicalLayer::kLeCoded);
+}
+
+TEST(HelpersTest, LEPhyToFidl) {
+  EXPECT_EQ(LEPhyToFidl(pw::bluetooth::emboss::LEPhy::LE_1M),
+            ::fuchsia_bluetooth_le::PhysicalLayer::kLe1M);
+  EXPECT_EQ(LEPhyToFidl(pw::bluetooth::emboss::LEPhy::LE_2M),
+            ::fuchsia_bluetooth_le::PhysicalLayer::kLe2M);
+  EXPECT_EQ(LEPhyToFidl(pw::bluetooth::emboss::LEPhy::LE_CODED),
+            ::fuchsia_bluetooth_le::PhysicalLayer::kLeCoded);
+}
+
+TEST(HelpersTest, AppearanceToNewFidlValid) {
+  EXPECT_EQ(AppearanceToNewFidl(128u),
+            ::fuchsia_bluetooth::Appearance::kComputer);
+}
+
+TEST(HelpersTest, AppearanceToNewFidlInvalid) {
+  EXPECT_FALSE(AppearanceToNewFidl(129u).has_value());
+}
+
+TEST(HelpersTest,
+     AdvertisingDataToNewFidlScanDataOmitsNonEnumeratedAppearance) {
+  // There is an "unknown" appearance, which is why this isn't named that.
+  const uint16_t kNonEnumeratedAppearance = 0xFFFFu;
+  bt::AdvertisingData input;
+  input.SetAppearance(kNonEnumeratedAppearance);
+
+  EXPECT_FALSE(AdvertisingDataToNewFidlScanData(input, zx::time())
+                   .appearance()
+                   .has_value());
+
+  const uint16_t kKnownAppearance = 832u;  // HEART_RATE_SENSOR
+  input.SetAppearance(kKnownAppearance);
+
+  EXPECT_TRUE(AdvertisingDataToNewFidlScanData(input, zx::time())
+                  .appearance()
+                  .has_value());
+}
+
+TEST(HelpersTest, EmptyAdvertisingDataToNewFidlScanData) {
+  bt::AdvertisingData input;
+  ::fuchsia_bluetooth_le::ScanData output =
+      AdvertisingDataToNewFidlScanData(input, zx::time(1));
+  EXPECT_FALSE(output.tx_power().has_value());
+  EXPECT_FALSE(output.appearance().has_value());
+  EXPECT_FALSE(output.service_uuids().has_value());
+  EXPECT_FALSE(output.service_data().has_value());
+  EXPECT_FALSE(output.manufacturer_data().has_value());
+  EXPECT_FALSE(output.uris().has_value());
+  ASSERT_TRUE(output.timestamp().has_value());
+  EXPECT_EQ(output.timestamp(), zx::time(1).get());
+}
+
+TEST(HelpersTest, AdvertisingDataToNewFidlScanData) {
+  bt::AdvertisingData input;
+  input.SetTxPower(4);
+  const uint16_t kAppearance = 193u;  // WATCH_SPORTS
+  input.SetAppearance(kAppearance);
+
+  const uint16_t id = 0x5678;
+  const bt::UUID kServiceUuid = bt::UUID(id);
+  auto service_bytes = bt::StaticByteBuffer(0x01, 0x02);
+  EXPECT_TRUE(input.AddServiceUuid(kServiceUuid));
+  EXPECT_TRUE(input.SetServiceData(kServiceUuid, service_bytes.view()));
+
+  const uint16_t kManufacturer = 0x98;
+  auto manufacturer_bytes = bt::StaticByteBuffer(0x04, 0x03);
+  EXPECT_TRUE(
+      input.SetManufacturerData(kManufacturer, manufacturer_bytes.view()));
+
+  const char* const kUri = "http://fuchsia.cl/461435";
+  EXPECT_TRUE(input.AddUri(kUri));
+
+  ::fuchsia_bluetooth_le::ScanData output =
+      AdvertisingDataToNewFidlScanData(input, zx::time(1));
+  EXPECT_EQ(4, output.tx_power());
+  EXPECT_EQ(::fuchsia_bluetooth::Appearance{kAppearance}, output.appearance());
+  ASSERT_TRUE(output.service_uuids().has_value());
+  ASSERT_EQ(1u, output.service_uuids()->size());
+  EXPECT_EQ(kServiceUuid, NewUuidFromFidl(output.service_uuids()->front()));
+  ASSERT_TRUE(output.service_data().has_value());
+  ASSERT_EQ(1u, output.service_data()->size());
+  ASSERT_TRUE(output.timestamp().has_value());
+  EXPECT_EQ(output.timestamp(), zx::time(1).get());
+  ::fuchsia_bluetooth_le::ServiceData service_data =
+      output.service_data()->front();
+  EXPECT_EQ(kServiceUuid, NewUuidFromFidl(service_data.uuid()));
+  EXPECT_TRUE(
+      ContainersEqual(bt::BufferView(service_bytes), service_data.data()));
+  ASSERT_TRUE(output.manufacturer_data().has_value());
+  EXPECT_EQ(1u, output.manufacturer_data()->size());
+  auto manufacturer_data = output.manufacturer_data()->front();
+  EXPECT_EQ(kManufacturer, manufacturer_data.company_id());
+  EXPECT_TRUE(ContainersEqual(bt::BufferView(manufacturer_bytes),
+                              manufacturer_data.data()));
+  ASSERT_TRUE(output.uris().has_value());
+  EXPECT_THAT(output.uris().value(), ::testing::ElementsAre(kUri));
+}
+
+TEST(HelpersTest, BroadcastIsochronousGroupInfoToFidl) {
+  ::fuchsia_bluetooth_le::BroadcastIsochronousGroupInfo out =
+      BroadcastIsochronousGroupInfoToFidl(kBigInfo);
+  EXPECT_EQ(out.streams_count(), 1u);
+  EXPECT_EQ(out.max_sdu_size(), 9u);
+  EXPECT_EQ(out.phy(), ::fuchsia_bluetooth_le::PhysicalLayer::kLe1M);
+  EXPECT_EQ(out.encryption(), true);
+}
+
+TEST(HelpersTest, SyncReportFromPeriodicAdvertisingReport) {
+  bt::AdvertisingData data;
+  const uint16_t kAppearance = 193u;  // WATCH_SPORTS
+  data.SetAppearance(kAppearance);
+
+  bt::gap::PeriodicAdvertisingReport report;
+  report.event_counter = 9;
+  report.data = std::move(data);
+
+  ::fuchsia_bluetooth_le::SyncReport out = ReportFrom(report, zx::time(1));
+  ASSERT_TRUE(out.periodic_advertising_report().has_value());
+  EXPECT_EQ(out.periodic_advertising_report()->event_counter(), 9);
+  ASSERT_TRUE(out.periodic_advertising_report()->data().has_value());
+  EXPECT_EQ(out.periodic_advertising_report()->data()->appearance(),
+            ::fuchsia_bluetooth::Appearance::kWatchSports);
+  EXPECT_EQ(out.periodic_advertising_report()->timestamp(), 1);
+}
+
+TEST(HelpersTest, SyncReportFromBroadcastIsochronousGroupInfo) {
+  ::fuchsia_bluetooth_le::SyncReport out = ReportFrom(kBigInfo, zx::time(1));
+  ASSERT_TRUE(out.broadcast_isochronous_group_info_report().has_value());
+  ASSERT_TRUE(
+      out.broadcast_isochronous_group_info_report()->info().has_value());
+  EXPECT_EQ(
+      out.broadcast_isochronous_group_info_report()->info()->streams_count(),
+      1u);
+  EXPECT_EQ(out.broadcast_isochronous_group_info_report()->timestamp(), 1u);
 }
 
 }  // namespace

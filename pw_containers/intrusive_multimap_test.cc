@@ -294,6 +294,37 @@ TEST_F(IntrusiveMultiMapTest, ReverseIterator) {
   EXPECT_EQ(iter, multimap.crbegin());
 }
 
+TEST_F(IntrusiveMultiMapTest, IteratorIsDefaultConstructible) {
+  IntrusiveMultiMap::iterator iter;
+  EXPECT_NE(iter, multimap_.begin());
+  EXPECT_NE(iter, multimap_.begin());
+  EXPECT_EQ(iter, IntrusiveMultiMap::iterator());
+}
+
+TEST_F(IntrusiveMultiMapTest, IteratorIsCopyConstructible) {
+  IntrusiveMultiMap::iterator iter1 = multimap_.begin();
+  IntrusiveMultiMap::iterator iter2(iter1);
+  EXPECT_EQ(iter2, multimap_.begin());
+}
+
+TEST_F(IntrusiveMultiMapTest, IteratorCopyAssignable) {
+  IntrusiveMultiMap::iterator iter1 = multimap_.begin();
+  IntrusiveMultiMap::iterator iter2 = iter1;
+  EXPECT_EQ(iter2, multimap_.begin());
+}
+
+TEST_F(IntrusiveMultiMapTest, IteratorisMoveConstructible) {
+  IntrusiveMultiMap::iterator iter1 = multimap_.begin();
+  IntrusiveMultiMap::iterator iter2(std::move(iter1));
+  EXPECT_EQ(iter2, multimap_.begin());
+}
+
+TEST_F(IntrusiveMultiMapTest, IteratorMoveAssignable) {
+  IntrusiveMultiMap::iterator iter1 = multimap_.begin();
+  IntrusiveMultiMap::iterator iter2 = std::move(iter1);
+  EXPECT_EQ(iter2, multimap_.begin());
+}
+
 TEST_F(IntrusiveMultiMapTest, ConstIterator_CompareNonConst) {
   EXPECT_EQ(multimap_.end(), multimap_.cend());
 }
@@ -613,6 +644,14 @@ TEST_F(IntrusiveMultiMapTest, Erase_Range) {
   EXPECT_EQ(multimap_.size(), 2U);
   EXPECT_TRUE(std::is_sorted(multimap_.begin(), multimap_.end(), LessThan));
   EXPECT_EQ(iter->key(), 50U);
+}
+
+TEST_F(IntrusiveMultiMapTest, Erase_AllRange) {
+  auto first = multimap_.begin();
+  auto last = multimap_.end();
+  auto iter = multimap_.erase(first, last);
+  EXPECT_TRUE(multimap_.empty());
+  EXPECT_EQ(iter, multimap_.end());
 }
 
 TEST_F(IntrusiveMultiMapTest, Erase_MissingItem) {

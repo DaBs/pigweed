@@ -37,13 +37,11 @@ use std::collections::VecDeque;
 use std::marker::PhantomData;
 
 use proc_macro2::Ident;
-use quote::{format_ident, quote, ToTokens};
-use syn::{
-    parse::{discouraged::Speculative, Parse, ParseStream},
-    punctuated::Punctuated,
-    spanned::Spanned,
-    Expr, ExprCast, LitStr, Token,
-};
+use quote::{ToTokens, format_ident, quote};
+use syn::parse::{Parse, ParseStream};
+use syn::punctuated::Punctuated;
+use syn::spanned::Spanned;
+use syn::{Expr, ExprCast, LitStr, Token};
 
 use crate::{
     ConversionSpec, Flag, FormatFragment, FormatString, Length, MinFieldWidth, Precision,
@@ -136,7 +134,7 @@ impl FormatParams {
                 return Err(Error::new(&format!(
                     "formatting untyped conversions with {:?} style is unsupported",
                     self.style
-                )))
+                )));
             }
         };
 
@@ -155,7 +153,7 @@ impl TryFrom<&ConversionSpec> for FormatParams {
             MinFieldWidth::Variable => {
                 return Err(Error::new(
                     "Variable width '*' string formats are not supported.",
-                ))
+                ));
             }
         };
 
@@ -258,22 +256,25 @@ pub enum Arg {
     Expr(Expr),
 }
 
+impl Arg {
+    fn parse_expr(expr: Expr) -> syn::parse::Result<Self> {
+        match expr.clone() {
+            Expr::Cast(cast) => Ok(Self::ExprCast(cast)),
+
+            // Expr::Casts maybe be wrapped in an Expr::Group or in unexplained
+            // cases where macro expansion in the rust-analyzer VSCode plugin
+            // may cause them to be wrapped in an Expr::Paren instead.
+            Expr::Paren(paren) => Self::parse_expr(*paren.expr),
+            Expr::Group(group) => Self::parse_expr(*group.expr),
+
+            _ => Ok(Self::Expr(expr)),
+        }
+    }
+}
+
 impl Parse for Arg {
     fn parse(input: ParseStream) -> syn::parse::Result<Self> {
-        // Try parsing as an explicit cast first.  This lets the user name a
-        // type when type_alias_impl_trait is not enabled.
-        let fork = input.fork();
-        if let Ok(cast) = fork.parse::<ExprCast>() {
-            // Speculative parsing and `advance_to` is discouraged due to error
-            // presentation.  However, since `ExprCast` is a subset of `Expr`,
-            //  any errors in parsing here will be reported when trying to parse
-            //  as an `Expr` below.
-            input.advance_to(&fork);
-            return Ok(Self::ExprCast(cast));
-        }
-
-        // Otherwise prase as an expression.
-        input.parse::<Expr>().map(Self::Expr)
+        Self::parse_expr(input.parse::<Expr>()?)
     }
 }
 
@@ -438,7 +439,7 @@ fn handle_conversion(
                 Length::LongDouble => {
                     return Err(Error::new(
                         "Long double length parameter invalid for integer formats",
-                    ))
+                    ));
                 }
             };
             let params = spec.try_into()?;
@@ -637,8 +638,8 @@ impl PrintfFormatStringFragment {
             Self::Expr { arg, format_trait } => {
                 let Arg::ExprCast(cast) = arg else {
                     return Err(Error::new(&format!(
-                      "Expected argument to untyped format (%v/{{}}) to be a cast expression (e.g. x as i32), but found {}.",
-                      arg.to_token_stream()
+                        "Expected argument to untyped format (%v/{{}}) to be a cast expression (e.g. x as i32), but found {}.",
+                        arg.to_token_stream(),
                     )));
                 };
                 let ty = &cast.ty;
@@ -717,9 +718,8 @@ impl<GENERATOR: PrintfFormatMacroGenerator> FormatMacroGenerator for PrintfGener
             64 => "ll",
             _ => {
                 return Err(Error::new(&format!(
-                    "printf backend does not support {} bit field width",
-                    type_width
-                )))
+                    "printf backend does not support {type_width} bit field width"
+                )));
             }
         };
 
@@ -738,7 +738,7 @@ impl<GENERATOR: PrintfFormatMacroGenerator> FormatMacroGenerator for PrintfGener
                 return Err(Error::new(&format!(
                     "printf backend does not support formatting integers with {:?} style",
                     params.style
-                )))
+                )));
             }
         };
 

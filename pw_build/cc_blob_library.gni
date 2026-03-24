@@ -84,6 +84,9 @@ template("pw_cc_blob_library") {
       "--out-source",
       rebase_path(_source, root_build_dir),
     ]
+    if (defined(invoker.checksum)) {
+      args += [ "--checksum=${invoker.checksum}" ]
+    }
 
     inputs = [ _blob_json_file ] + _blob_files
     outputs = [

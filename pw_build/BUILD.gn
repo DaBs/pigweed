@@ -17,11 +17,21 @@ import("//build_overrides/pigweed.gni")
 import("$dir_pw_build/cc_blob_library.gni")
 import("$dir_pw_build/python.gni")
 import("$dir_pw_build/relative_source_file_names.gni")
-import("$dir_pw_docgen/docs.gni")
+import("$dir_pw_protobuf_compiler/proto.gni")
 import("$dir_pw_toolchain/generate_toolchain.gni")
 import("$dir_pw_toolchain/traits.gni")
 import("$dir_pw_unit_test/test.gni")
 import("target_types.gni")
+
+pw_proto_library("workflows_proto") {
+  sources = [
+    "proto/build_driver.proto",
+    "proto/pigweed_build_driver.proto",
+    "proto/workflows.proto",
+  ]
+  prefix = "pw_build"
+  python_package = "py:workflows"
+}
 
 # IMPORTANT: The compilation flags in this file must be kept in sync with
 #            the CMake flags pw_build/CMakeLists.txt.
@@ -166,6 +176,11 @@ config("rust_edition_2021") {
   rustflags = [ "--edition=2021" ]
 }
 
+config("rust_edition_2024") {
+  rustflags = [ "--edition=2024" ]
+}
+
+# LINT.IfChange(strict_warnings)
 config("strict_warnings") {
   cflags = [
     "-Wall",
@@ -183,12 +198,21 @@ config("strict_warnings") {
   cflags_cc = [ "-Wnon-virtual-dtor" ]
 }
 
+# LINT.ThenChange(//pw_toolchain/cc/args/BUILD.bazel:strict_warnings,CMakeLists.txt:strict_warnings)
+
+# LINT.IfChange(clang_thread_safety_warnings)
 # Thread safety warnings are only supported by Clang.
 config("clang_thread_safety_warnings") {
-  cflags = [ "-Wthread-safety" ]
+  cflags = [
+    "-Wthread-safety",
+    "-Wthread-safety-beta",
+  ]
   defines = [ "_LIBCPP_ENABLE_THREAD_SAFETY_ANNOTATIONS=1" ]
 }
 
+# LINT.ThenChange(//pw_toolchain/cc/args/BUILD.bazel:clang_thread_safety_warnings)
+
+# LINT.IfChange(extra_strict_warnings)
 # This config contains warnings that we don't necessarily recommend projects
 # enable, but are enabled for upstream Pigweed for maximum project
 # compatibility.
@@ -200,6 +224,9 @@ config("extra_strict_warnings") {
   cflags_c = [ "-Wstrict-prototypes" ]
 }
 
+# LINT.ThenChange(//pw_toolchain/cc/args/BUILD.bazel:extra_strict_warnings,CMakeLists.txt:extra_strict_warnings)
+
+# LINT.IfChange(internal_strict_warnings)
 # This config contains warnings that are enabled for upstream Pigweed.
 # This config MUST NOT be used downstream to allow for warnings to be
 # added in the future without breaking downstream.
@@ -244,36 +271,19 @@ config("pedantic_warnings") {
     # supported prior and permitted by the Google style guide.
     "-Wno-c++20-designator",
 
+    # __COUNTER__ is a GCC extension until C++26. Using it results in
+    # -Wc2y-extensions warnings, which must be disabled.
+    "-Wno-c2y-extensions",
+
     # Allow empty ... arguments in macros, which are permitted in C++20 but
     # widely supported prior.
     "-Wno-gnu-zero-variadic-macro-arguments",
   ]
-
-  if (pw_toolchain_CXX_STANDARD < pw_toolchain_STANDARD.CXX17) {
-    # Allow C++17 attributes in C++14, since Pigweed targets C++17 or newer.
-    cflags += [ "-Wno-c++17-attribute-extensions" ]
-  }
-
-  # TODO: b/333712899 - Enable C23 extension warnings.
-  cflags += [ "-Wno-c23-extensions" ]
-
-  # TODO: b/335021928 - Enable C++ 20 extension warnings.
-  cflags += [ "-Wno-c++20-extensions" ]
-
-  # TODO: b/335328444 - Enable C++ 20 extension warnings.
-  cflags += [ "-Wno-deprecated-pragma" ]
-
-  cflags += [
-    # TODO: b/356904203 - Unblock Clang roll. Missing template argument
-    # warning introduced by Clang produces warnings in third party code.
-    # Remove this warning suppression after addressing the root cause.
-    "-Wno-missing-template-arg-list-after-template-kw",
-
-    # TODO: b/356689444 - Remove no-unknown-warning-option after Clang roll.
-    "-Wno-unknown-warning-option",
-  ]
 }
 
+# LINT.ThenChange(//pw_toolchain/cc/args/BUILD.bazel:internal_strict_warnings,CMakeLists.txt:internal_strict_warnings)
+
+# LINT.IfChange(conversion_warnings)
 # Numeric conversion warnings.
 #
 # Originally Pigweed didn't enable this, but we ultimately decided to turn it
@@ -286,6 +296,8 @@ config("conversion_warnings") {
     cflags = [ "-Wconversion" ]
   }
 }
+
+# LINT.ThenChange(//pw_toolchain/cc/args/BUILD.bazel:conversion_warnings)
 
 config("cpp14") {
   cflags_cc = [ "-std=c++14" ]
@@ -307,6 +319,13 @@ config("cpp20") {
   ]
 }
 
+config("cpp23") {
+  cflags_cc = [
+    "-std=c++23",
+    "-Wno-register",
+  ]
+}
+
 # Selects the C++ standard to used based on the pw_toolchain_CXX_STANDARD
 # toolchain trait.
 config("toolchain_cpp_standard") {
@@ -316,6 +335,8 @@ config("toolchain_cpp_standard") {
     configs = [ ":cpp17" ]
   } else if (pw_toolchain_CXX_STANDARD == pw_toolchain_STANDARD.CXX20) {
     configs = [ ":cpp20" ]
+  } else if (pw_toolchain_CXX_STANDARD == pw_toolchain_STANDARD.CXX23) {
+    configs = [ ":cpp23" ]
   } else {
     assert(false,
            "Unexpected pw_toolchain_CXX_STANDARD value: " +
@@ -427,34 +448,20 @@ group("link_deps") {
 group("empty") {
 }
 
-config("default_config") {
+config("public_include_path") {
   include_dirs = [ "public" ]
 }
 
 # Linker script utility PW_MUST_PLACE
 pw_source_set("must_place") {
-  public_configs = [ ":default_config" ]
+  public_configs = [ ":public_include_path" ]
   public = [ "public/pw_build/must_place.ld.h" ]
 }
 
 pw_source_set("linker_symbol") {
-  public_configs = [ ":default_config" ]
+  public_configs = [ ":public_include_path" ]
   public = [ "public/pw_build/linker_symbol.h" ]
-  public_deps = [ "$dir_pw_third_party/fuchsia:stdcompat" ]
-}
-
-pw_doc_group("docs") {
-  sources = [
-    "bazel.rst",
-    "cmake.rst",
-    "docs.rst",
-    "gn.rst",
-    "linker_scripts.rst",
-    "project_builder.rst",
-    "python.rst",
-    "python_api.rst",
-  ]
-  other_deps = [ "py" ]
+  public_deps = [ "$pw_external_fuchsia:stdcompat" ]
 }
 
 config("module_config_test_config") {
@@ -506,6 +513,19 @@ if (current_toolchain != default_toolchain) {
     visibility = [ ":*" ]
   }
 
+  pw_cc_blob_library("test_blob_with_checksum") {
+    out_header = "pw_build/test_blob_with_checksum.h"
+    namespace = "test::checksum_ns"
+    blobs = [
+      {
+        file_path = "test_blob_0123.bin"
+        symbol_name = "kBlobWithChecksum"
+      },
+    ]
+    checksum = "CRC32"
+    visibility = [ ":*" ]
+  }
+
   # file_prefix_map_test verifies that the -ffile-prefix-map option is applied
   # correctly.
 
@@ -551,11 +571,47 @@ if (current_toolchain != default_toolchain) {
     visibility = [ ":*" ]
   }
 
+  pw_source_set("sandbox_test_visible_header") {
+    public = [ "public/pw_build/internal/test_header_with_dep.h" ]
+    public_configs = [ ":public_include_path" ]
+  }
+
+  pw_source_set("sandbox_test_invisible_header") {
+    public = [ "public/pw_build/internal/test_header_without_dep.h" ]
+    public_configs = [ ":public_include_path" ]
+  }
+
+  pw_test("sandbox_test") {
+    sources = [
+      "absolute_path_source_file.cc",
+      "sandbox_absolute_source_test.cc",
+      "sandbox_test.cc",
+    ]
+
+    # The GN build does not support sandboxing.
+    defines = [ "SANDBOX_ENABLED=0" ]
+    deps = [ ":sandbox_test_visible_header" ]
+  }
+
+  pw_test("cc_blob_library_checksum_test") {
+    sources = [ "cc_blob_library_checksum_test.cc" ]
+    deps = [ ":test_blob_with_checksum" ]
+  }
+
   pw_test_group("tests") {
     tests = [
+      ":cc_blob_library_checksum_test",
       ":cc_blob_library_test",
       ":file_prefix_map_test",
       ":linker_symbol_test",
+      ":sandbox_test",
     ]
   }
+}
+
+# The python files listed here are only useful for the Bazel build. However the
+# "source_is_in_gn_build" check requires that they be mentioned here, as there
+# is no explicit ignore-list for that check.
+pw_python_script("_bazel_only") {
+  sources = [ "pw_pylint_test_example.py" ]
 }

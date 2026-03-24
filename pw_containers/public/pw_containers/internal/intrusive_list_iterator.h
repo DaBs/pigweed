@@ -22,6 +22,9 @@ namespace pw {
 template <typename>
 class IntrusiveForwardList;
 
+template <typename>
+class IntrusiveQueue;
+
 namespace containers {
 namespace future {
 
@@ -138,6 +141,9 @@ class ForwardIterator : public IteratorBase<ForwardIterator<T, I>, T, I>,
 
   template <typename>
   friend class ::pw::IntrusiveForwardList;
+
+  template <typename>
+  friend class ::pw::IntrusiveQueue;
 
   // Only allow IntrusiveForwardList to create iterators that point to
   // something.

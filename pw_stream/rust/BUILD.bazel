@@ -22,9 +22,10 @@ rust_library(
         "pw_stream/lib.rs",
     ],
     crate_features = select({
-        "@rust_crates//:no_std": ["no_std"],
+        "//pw_build/constraints/rust:no_std": ["no_std"],
         "//conditions:default": [""],
     }),
+    edition = "2024",
     proc_macro_deps = ["@rust_crates//:paste"],
     visibility = ["//visibility:public"],
     deps = [
@@ -37,9 +38,10 @@ rust_test(
     name = "pw_stream_test",
     crate = ":pw_stream",
     crate_features = select({
-        "@rust_crates//:no_std": ["no_std"],
+        "//pw_build/constraints/rust:no_std": ["no_std"],
         "//conditions:default": [""],
     }),
+    edition = "2024",
     # TODO: b/343726867 - support on-device rust tests
     target_compatible_with = incompatible_with_mcu(),
 )

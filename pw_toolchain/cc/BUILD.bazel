@@ -13,6 +13,7 @@
 # the License.
 
 load("@bazel_skylib//rules:common_settings.bzl", "string_flag")
+load("@rules_shell//shell:sh_binary.bzl", "sh_binary")
 
 package(default_visibility = ["//visibility:public"])
 
@@ -22,6 +23,7 @@ string_flag(
     values = [
         "17",
         "20",
+        "23",
     ],
 )
 
@@ -39,9 +41,13 @@ config_setting(
     },
 )
 
-# TODO: https://pwbug.dev/394378542 - This is temporarily silenced to avoid the
-# hassle of adding rules_shell to Pigweed's Bazel dependencies.
-# buildifier: disable=native-sh-binary
+config_setting(
+    name = "c++23_enabled",
+    flag_values = {
+        ":cxx_standard": "23",
+    },
+)
+
 sh_binary(
     name = "generate_module_map",
     srcs = ["generate_module_map.sh"],

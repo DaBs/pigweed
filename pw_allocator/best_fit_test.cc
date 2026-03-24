@@ -72,7 +72,6 @@ TEST_F(BestFitAllocatorTest, AllocatesBestCompatible) {
       {kLargerOuterSize, Preallocation::kFree},
       {Preallocation::kSizeRemaining, Preallocation::kUsed},
   });
-
   void* ptr1 = allocator.Allocate(Layout(kSmallInnerSize, 1));
   EXPECT_LT(Fetch(1), ptr1);
   EXPECT_LT(ptr1, Fetch(3));
@@ -115,6 +114,27 @@ TEST_F(BestFitAllocatorTest, ResizeSmallLarger) { ResizeSmallLarger(); }
 
 TEST_F(BestFitAllocatorTest, ResizeSmallLargerFailure) {
   ResizeSmallLargerFailure();
+}
+
+TEST_F(BestFitAllocatorTest, GetMaxAllocatableWhenAllFree) {
+  GetMaxAllocatableWhenAllFree();
+}
+
+TEST_F(BestFitAllocatorTest, GetMaxAllocatableWhenLargeFreeBlocksAvailable) {
+  GetMaxAllocatableWhenLargeFreeBlocksAvailable();
+}
+
+TEST_F(BestFitAllocatorTest,
+       GetMaxAllocatableWhenOnlySmallFreeBlocksAvailable) {
+  GetMaxAllocatableWhenOnlySmallFreeBlocksAvailable();
+}
+
+TEST_F(BestFitAllocatorTest, GetMaxAllocatableWhenMultipleFreeBlocksAvailable) {
+  GetMaxAllocatableWhenMultipleFreeBlocksAvailable();
+}
+
+TEST_F(BestFitAllocatorTest, GetMaxAllocatableWhenNoBlocksFree) {
+  GetMaxAllocatableWhenNoBlocksFree();
 }
 
 TEST_F(BestFitAllocatorTest, MeasureFragmentation) { MeasureFragmentation(); }

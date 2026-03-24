@@ -49,6 +49,10 @@ class PwpbUnaryResponseClientCall : public UnaryResponseClientCall {
                         Function<void(Status)>&& on_error,
                         const Request&... request)
       PW_LOCKS_EXCLUDED(rpc_lock()) {
+    PW_ASSERT(PW_RPC_ALLOW_INVOCATIONS_ON_STACK);  // RPC client calls on the
+                                                   // stack are not allowed. Use
+                                                   // DynamicClient instead.
+
     rpc_lock().lock();
     CallType call(
         client.ClaimLocked(), channel_id, service_id, method_id, serde);
@@ -208,6 +212,10 @@ class PwpbStreamResponseClientCall : public StreamResponseClientCall {
                         Function<void(Status)>&& on_error,
                         const Request&... request)
       PW_LOCKS_EXCLUDED(rpc_lock()) {
+    PW_ASSERT(PW_RPC_ALLOW_INVOCATIONS_ON_STACK);  // RPC client calls on the
+                                                   // stack are not allowed. Use
+                                                   // DynamicClient instead.
+
     rpc_lock().lock();
     CallType call(
         client.ClaimLocked(), channel_id, service_id, method_id, serde);
@@ -369,6 +377,7 @@ class PwpbClientReaderWriter
 
   using internal::Call::active;
   using internal::Call::channel_id;
+  using internal::Call::MaxWriteSizeBytes;
 
   // Writes a request. Returns the following Status codes:
   //
@@ -444,6 +453,7 @@ class PwpbClientReader
 
   using internal::StreamResponseClientCall::active;
   using internal::StreamResponseClientCall::channel_id;
+  using internal::StreamResponseClientCall::MaxWriteSizeBytes;
 
   using internal::Call::Cancel;
   using internal::Call::RequestCompletion;
@@ -491,6 +501,7 @@ class PwpbClientWriter
 
   using internal::UnaryResponseClientCall::active;
   using internal::UnaryResponseClientCall::channel_id;
+  using internal::UnaryResponseClientCall::MaxWriteSizeBytes;
 
   // Writes a request. Returns the following Status codes:
   //
@@ -551,6 +562,7 @@ class PwpbUnaryReceiver
 
   using internal::Call::active;
   using internal::Call::channel_id;
+  using internal::Call::MaxWriteSizeBytes;
 
   // Functions for setting RPC event callbacks.
   using internal::Call::set_on_error;

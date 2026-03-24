@@ -16,187 +16,302 @@ import("//build_overrides/pigweed.gni")
 
 import("$dir_pigweed/third_party/emboss/emboss.gni")
 import("$dir_pw_bloat/bloat.gni")
+import("$dir_pw_build/module_config.gni")
 import("$dir_pw_build/target_types.gni")
 import("$dir_pw_chrono/backend.gni")
-import("$dir_pw_docgen/docs.gni")
+import("$dir_pw_thread/backend.gni")
 import("$dir_pw_unit_test/test.gni")
+
+# Module configuration
+
+declare_args() {
+  # The build target that overrides the default configuration options for this
+  # module. This should point to a source set that provides defines through a
+  # public config (which may -include a file or add defines directly).
+  pw_bluetooth_proxy_CONFIG = pw_build_DEFAULT_MODULE_CONFIG
+}
 
 config("public_include_path") {
   include_dirs = [ "public" ]
   visibility = [ ":*" ]
 }
 
-pw_doc_group("docs") {
-  # Also, sources with doxygen comment blocks must be added to //docs/BUILD.gn
-  inputs = [ "proxy_host_test.cc" ]
-  sources = [ "docs.rst" ]
-  report_deps = [ ":use_passthrough_proxy_size_report" ]
-}
-
-pw_test_group("tests") {
-  tests = [ ":pw_bluetooth_proxy_test" ]
-}
-
-pw_source_set("pw_bluetooth_proxy") {
-  public_configs = [ ":public_include_path" ]
-
-  # LINT.IfChange
-
-  public = [
-    "public/pw_bluetooth_proxy/basic_l2cap_channel.h",
-    "public/pw_bluetooth_proxy/gatt_notify_channel.h",
-    "public/pw_bluetooth_proxy/h4_packet.h",
-    "public/pw_bluetooth_proxy/internal/acl_data_channel.h",
-    "public/pw_bluetooth_proxy/internal/gatt_notify_channel_internal.h",
-    "public/pw_bluetooth_proxy/internal/h4_storage.h",
-    "public/pw_bluetooth_proxy/internal/hci_transport.h",
-    "public/pw_bluetooth_proxy/internal/l2cap_aclu_signaling_channel.h",
-    "public/pw_bluetooth_proxy/internal/l2cap_channel.h",
-    "public/pw_bluetooth_proxy/internal/l2cap_channel_manager.h",
-    "public/pw_bluetooth_proxy/internal/l2cap_coc_internal.h",
-    "public/pw_bluetooth_proxy/internal/l2cap_leu_signaling_channel.h",
-    "public/pw_bluetooth_proxy/internal/l2cap_signaling_channel.h",
-    "public/pw_bluetooth_proxy/internal/l2cap_status_tracker.h",
-    "public/pw_bluetooth_proxy/internal/logical_transport.h",
-    "public/pw_bluetooth_proxy/internal/multibuf_writer.h",
-    "public/pw_bluetooth_proxy/internal/rfcomm_fcs.h",
-    "public/pw_bluetooth_proxy/l2cap_channel_common.h",
-    "public/pw_bluetooth_proxy/l2cap_coc.h",
-    "public/pw_bluetooth_proxy/l2cap_status_delegate.h",
-    "public/pw_bluetooth_proxy/proxy_host.h",
-    "public/pw_bluetooth_proxy/rfcomm_channel.h",
-  ]
-
-  # LINT.ThenChange(BUILD.bazel, CMakeLists.txt)
-
-  # LINT.IfChange
-
-  public_deps = [
-    "$dir_pw_allocator:best_fit",
-    "$dir_pw_allocator:synchronized_allocator",
-    "$dir_pw_bluetooth:emboss_att",
-    "$dir_pw_bluetooth:emboss_hci_commands",
-    "$dir_pw_bluetooth:emboss_hci_common",
-    "$dir_pw_bluetooth:emboss_hci_data",
-    "$dir_pw_bluetooth:emboss_hci_events",
-    "$dir_pw_bluetooth:emboss_hci_h4",
-    "$dir_pw_bluetooth:emboss_l2cap_frames",
-    "$dir_pw_bluetooth:emboss_rfcomm_frames",
-    "$dir_pw_bluetooth:emboss_util",
-    "$dir_pw_multibuf",
-    "$dir_pw_multibuf:simple_allocator",
-    "$dir_pw_span:cast",
-    "$dir_pw_sync:lock_annotations",
-    "$dir_pw_sync:mutex",
-    dir_pw_containers,
-    dir_pw_function,
-    dir_pw_log,
-    dir_pw_result,
-    dir_pw_span,
-    dir_pw_status,
-  ]
-  deps = [ dir_pw_log ]
-  sources = [
-    "acl_data_channel.cc",
-    "basic_l2cap_channel.cc",
-    "gatt_notify_channel.cc",
-    "h4_storage.cc",
-    "l2cap_aclu_signaling_channel.cc",
-    "l2cap_channel.cc",
-    "l2cap_channel_manager.cc",
-    "l2cap_coc.cc",
-    "l2cap_leu_signaling_channel.cc",
-    "l2cap_signaling_channel.cc",
-    "l2cap_status_tracker.cc",
-    "multibuf_writer.cc",
-    "proxy_host.cc",
-    "rfcomm_channel.cc",
-    "rfcomm_fcs.cc",
-  ]
-
-  # LINT.ThenChange(Android.bp, BUILD.bazel, CMakeLists.txt)
-}
-
-pw_source_set("test_utils") {
-  # TODO: b/303282642 - Remove this testonly
-  testonly = pw_unit_test_TESTONLY
-
-  # LINT.IfChange
-
-  public = [ "pw_bluetooth_proxy_private/test_utils.h" ]
-  public_deps = [
-    ":pw_bluetooth_proxy",
-    "$dir_pw_bluetooth:emboss_hci_commands",
-    "$dir_pw_bluetooth:emboss_hci_common",
-    "$dir_pw_bluetooth:emboss_hci_events",
-    "$dir_pw_bluetooth:emboss_hci_h4",
-    "$dir_pw_bluetooth:emboss_util",
-    "$dir_pw_multibuf:testing",
-    "$dir_pw_third_party/fuchsia:stdcompat",
-    "$dir_pw_unit_test",
-  ]
-  sources = [ "test_utils.cc" ]
-
-  # LINT.ThenChange(BUILD.bazel, CMakeLists.txt)
-
+config("private_include_path") {
+  include_dirs = [ "private" ]
   visibility = [ ":*" ]
 }
 
-pw_test("pw_bluetooth_proxy_test") {
-  enable_if =
-      dir_pw_third_party_emboss != "" && pw_chrono_SYSTEM_CLOCK_BACKEND != ""
-
-  include_dirs = [ "." ]
-
-  # LINT.IfChange
-
-  deps = [
-    ":pw_bluetooth_proxy",
-    ":test_utils",
-    "$dir_pw_bluetooth:emboss_att",
-    "$dir_pw_bluetooth:emboss_hci_commands",
-    "$dir_pw_bluetooth:emboss_hci_common",
-    "$dir_pw_bluetooth:emboss_hci_events",
-    "$dir_pw_bluetooth:emboss_hci_h4",
-    "$dir_pw_bluetooth:emboss_util",
-    "$dir_pw_multibuf",
-    "$dir_pw_third_party/fuchsia:stdcompat",
-  ]
-  sources = [
-    "gatt_notify_test.cc",
-    "h4_packet_test.cc",
-    "l2cap_coc_test.cc",
-    "multibuf_writer_test.cc",
-    "proxy_host_test.cc",
-    "rfcomm_fcs_test.cc",
-    "rfcomm_test.cc",
-    "utils_test.cc",
-  ]
-
-  # LINT.ThenChange(BUILD.bazel, CMakeLists.txt)
+pw_source_set("config") {
+  public = [ "public/pw_bluetooth_proxy/config.h" ]
+  public_configs = [ ":public_include_path" ]
+  public_deps = [ pw_bluetooth_proxy_CONFIG ]
 }
 
-# We depend on emboss, so we can only compute size when emboss is in the build.
-if (dir_pw_third_party_emboss != "") {
-  pw_size_diff("use_passthrough_proxy_size_report") {
-    title = "pw_bluetooth_proxy Passthrough Size Report"
-    base = "$dir_pw_bloat:bloat_base"
-    binaries = [
-      {
-        target = "size_report:use_passthrough_proxy"
-        label = "Create and use proxy as a simple passthrough"
-      },
-    ]
-  }
-} else {
-  pw_size_diff("use_passthrough_proxy_size_report") {
-    title = "pw_bluetooth_proxy Passthrough Size Report"
-    base = "$dir_pw_bloat:bloat_base"
-    binaries = [
-      {
-        target = "$dir_pw_bloat:bloat_base"
-        label = "Emboss not configured."
-      },
-    ]
-  }
+config("sync") {
+  defines = [ "PW_BLUETOOTH_PROXY_ASYNC=0" ]
+}
+
+config("async") {
+  defines = [ "PW_BLUETOOTH_PROXY_ASYNC=1" ]
+}
+
+# LINT.IfChange
+
+_pw_bluetooth_proxy_public = [
+  "public/pw_bluetooth_proxy/connection_handle.h",
+  "public/pw_bluetooth_proxy/channel_proxy.h",
+  "public/pw_bluetooth_proxy/l2cap_channel_manager_interface.h",
+  "public/pw_bluetooth_proxy/basic_l2cap_channel.h",
+  "public/pw_bluetooth_proxy/direction.h",
+  "public/pw_bluetooth_proxy/gatt_notify_channel.h",
+  "public/pw_bluetooth_proxy/h4_packet.h",
+  "public/pw_bluetooth_proxy/internal/acl_data_channel.h",
+  "public/pw_bluetooth_proxy/internal/basic_mode_tx_engine.h",
+  "public/pw_bluetooth_proxy/internal/basic_mode_rx_engine.h",
+  "public/pw_bluetooth_proxy/internal/channel_proxy_impl.h",
+  "public/pw_bluetooth_proxy/internal/credit_based_flow_control_tx_engine.h",
+  "public/pw_bluetooth_proxy/internal/credit_based_flow_control_rx_engine.h",
+  "public/pw_bluetooth_proxy/internal/gatt_notify_rx_engine.h",
+  "public/pw_bluetooth_proxy/internal/gatt_notify_tx_engine.h",
+  "public/pw_bluetooth_proxy/internal/generic_l2cap_channel.h",
+  "public/pw_bluetooth_proxy/internal/generic_l2cap_channel_async.h",
+  "public/pw_bluetooth_proxy/internal/generic_l2cap_channel_sync.h",
+  "public/pw_bluetooth_proxy/internal/hci_transport.h",
+  "public/pw_bluetooth_proxy/internal/l2cap_channel.h",
+  "public/pw_bluetooth_proxy/internal/l2cap_channel_async.h",
+  "public/pw_bluetooth_proxy/internal/l2cap_channel_sync.h",
+  "public/pw_bluetooth_proxy/internal/l2cap_channel_manager.h",
+  "public/pw_bluetooth_proxy/internal/l2cap_channel_manager_async.h",
+  "public/pw_bluetooth_proxy/internal/l2cap_channel_manager_sync.h",
+  "public/pw_bluetooth_proxy/internal/l2cap_signaling_channel.h",
+  "public/pw_bluetooth_proxy/internal/l2cap_status_tracker.h",
+  "public/pw_bluetooth_proxy/internal/l2cap_logical_link.h",
+  "public/pw_bluetooth_proxy/internal/locked_l2cap_channel.h",
+  "public/pw_bluetooth_proxy/internal/logical_transport.h",
+  "public/pw_bluetooth_proxy/internal/mutex.h",
+  "public/pw_bluetooth_proxy/internal/proxy_host_async.h",
+  "public/pw_bluetooth_proxy/internal/proxy_host_sync.h",
+  "public/pw_bluetooth_proxy/internal/recombiner.h",
+  "public/pw_bluetooth_proxy/internal/rx_engine.h",
+  "public/pw_bluetooth_proxy/internal/tx_engine.h",
+  "public/pw_bluetooth_proxy/l2cap_channel_common.h",
+  "public/pw_bluetooth_proxy/l2cap_coc.h",
+  "public/pw_bluetooth_proxy/l2cap_coc_config.h",
+  "public/pw_bluetooth_proxy/l2cap_status_delegate.h",
+  "public/pw_bluetooth_proxy/proxy_host.h",
+]
+
+# LINT.ThenChange(bt-proxy.bzl, CMakeLists.txt)
+
+# LINT.IfChange
+
+_pw_bluetooth_proxy_public_deps = [
+  ":config",
+  "$dir_pw_allocator:best_fit",
+  "$dir_pw_allocator:synchronized_allocator",
+  "$dir_pw_async2:basic_dispatcher",
+  "$dir_pw_async2:channel",
+  "$dir_pw_async2:pw_async2",
+  "$dir_pw_bluetooth:emboss_hci_common",
+  "$dir_pw_bluetooth:emboss_hci_data",
+  "$dir_pw_bluetooth:emboss_hci_events",
+  "$dir_pw_bluetooth:emboss_hci_h4",
+  "$dir_pw_bluetooth:emboss_l2cap_frames",
+  "$dir_pw_containers:flat_map",
+  "$dir_pw_containers:inline_queue",
+  "$dir_pw_containers:intrusive_map",
+  "$dir_pw_containers:vector",
+  "$dir_pw_multibuf:simple_allocator",
+  "$dir_pw_sync:lock_annotations",
+  "$dir_pw_sync:mutex",
+  "$dir_pw_sync:thread_notification",
+  "$dir_pw_thread:id",
+  dir_pw_allocator,
+  dir_pw_bytes,
+  dir_pw_function,
+  dir_pw_multibuf,
+  dir_pw_result,
+  dir_pw_span,
+  dir_pw_status,
+]
+
+_pw_bluetooth_proxy_deps = [
+  "$dir_pw_allocator:best_fit",
+  "$dir_pw_allocator:synchronized_allocator",
+  "$dir_pw_assert:check",
+  "$dir_pw_bluetooth:emboss_att",
+  "$dir_pw_bluetooth:emboss_hci_commands",
+  "$dir_pw_bluetooth:emboss_util",
+  "$dir_pw_containers:algorithm",
+  "$dir_pw_containers:intrusive_map",
+  "$dir_pw_span:cast",
+  dir_pw_log,
+]
+
+_pw_bluetooth_proxy_sources = [
+  "acl_data_channel.cc",
+  "basic_l2cap_channel.cc",
+  "basic_mode_rx_engine.cc",
+  "basic_mode_tx_engine.cc",
+  "channel_proxy_impl.cc",
+  "credit_based_flow_control_rx_engine.cc",
+  "credit_based_flow_control_tx_engine.cc",
+  "gatt_notify_channel.cc",
+  "gatt_notify_tx_engine.cc",
+  "generic_l2cap_channel.cc",
+  "generic_l2cap_channel_async.cc",
+  "generic_l2cap_channel_sync.cc",
+  "l2cap_channel.cc",
+  "l2cap_channel_async.cc",
+  "l2cap_channel_manager.cc",
+  "l2cap_channel_manager_async.cc",
+  "l2cap_channel_manager_sync.cc",
+  "l2cap_channel_sync.cc",
+  "l2cap_coc.cc",
+  "l2cap_logical_link.cc",
+  "l2cap_signaling_channel.cc",
+  "l2cap_status_tracker.cc",
+  "proxy_host.cc",
+  "proxy_host_async.cc",
+  "proxy_host_sync.cc",
+  "recombiner.cc",
+]
+
+# LINT.ThenChange(Android.bp, bt-proxy.bzl, CMakeLists.txt)
+
+# LINT.IfChange
+
+pw_source_set("pw_bluetooth_proxy") {
+  public = _pw_bluetooth_proxy_public
+  public_configs = [ ":public_include_path" ]
+  public_deps = _pw_bluetooth_proxy_public_deps
+  deps = _pw_bluetooth_proxy_deps
+  sources = _pw_bluetooth_proxy_sources
+}
+
+pw_source_set("pw_bluetooth_proxy_sync") {
+  testonly = pw_unit_test_TESTONLY
+  public = _pw_bluetooth_proxy_public
+  public_configs = [
+    ":public_include_path",
+    ":sync",
+  ]
+  public_deps = _pw_bluetooth_proxy_public_deps
+  deps = _pw_bluetooth_proxy_deps
+  sources = _pw_bluetooth_proxy_sources
+  visibility = [ "$dir_pw_bluetooth_proxy/*" ]
+}
+
+pw_source_set("pw_bluetooth_proxy_async") {
+  testonly = pw_unit_test_TESTONLY
+  public = _pw_bluetooth_proxy_public
+  public_configs = [
+    ":public_include_path",
+    ":async",
+  ]
+  public_deps = _pw_bluetooth_proxy_public_deps
+  deps = _pw_bluetooth_proxy_deps
+  sources = _pw_bluetooth_proxy_sources
+  visibility = [ "$dir_pw_bluetooth_proxy/*" ]
+}
+
+# Tests
+
+_pw_bluetooth_proxy_test_deps = [
+  "$dir_pw_allocator:testing",
+  "$dir_pw_assert:check",
+  "$dir_pw_bluetooth:emboss_att",
+  "$dir_pw_bluetooth:emboss_hci_commands",
+  "$dir_pw_multibuf:from_span",
+  "$dir_pw_span:cast",
+]
+
+_pw_bluetooth_proxy_test_sources = [
+  "basic_mode_channel_proxy_test.cc",
+  "basic_mode_rx_engine_test.cc",
+  "basic_mode_tx_engine_test.cc",
+  "channel_proxy_test.cc",
+  "credit_based_flow_control_channel_proxy_test.cc",
+  "credit_based_flow_control_rx_engine_test.cc",
+  "credit_based_flow_control_tx_engine_test.cc",
+  "gatt_notify_test.cc",
+  "gatt_notify_tx_engine_test.cc",
+  "h4_packet_test.cc",
+  "l2cap_coc_test.cc",
+  "proxy_host_test.cc",
+  "recombiner_test.cc",
+  "utils_test.cc",
+]
+
+pw_test("pw_bluetooth_proxy_sync_test") {
+  enable_if =
+      dir_pw_third_party_emboss != "" && pw_thread_THREAD_BACKEND != "" &&
+      pw_thread_TEST_THREAD_CONTEXT_BACKEND != ""
+  sources = _pw_bluetooth_proxy_test_sources
+  deps = _pw_bluetooth_proxy_test_deps + [
+           ":pw_bluetooth_proxy_sync",
+           ":test_utils_sync",
+         ]
+}
+
+pw_test("pw_bluetooth_proxy_async_test") {
+  enable_if =
+      dir_pw_third_party_emboss != "" && pw_thread_THREAD_BACKEND != "" &&
+      pw_thread_TEST_THREAD_CONTEXT_BACKEND != ""
+  sources = _pw_bluetooth_proxy_test_sources
+  deps = _pw_bluetooth_proxy_test_deps + [
+           ":pw_bluetooth_proxy_async",
+           ":test_utils_async",
+         ]
+}
+
+_pw_bluetooth_proxy_test_utils_deps = [
+  "$dir_pw_allocator:libc_allocator",
+  "$dir_pw_allocator:testing",
+  "$dir_pw_assert:check",
+  "$dir_pw_async2:notified_dispatcher",
+  "$dir_pw_bluetooth:emboss_util",
+  "$dir_pw_thread:test_thread_context",
+  "$dir_pw_thread:thread",
+]
+
+_pw_bluetooth_proxy_test_utils_srcs = [
+  "test_utils.cc",
+  "test_utils_async.cc",
+  "test_utils_sync.cc",
+]
+
+pw_source_set("test_utils_sync") {
+  testonly = pw_unit_test_TESTONLY
+  public = [ "private/pw_bluetooth_proxy_private/test_utils.h" ]
+  public_configs = [ ":private_include_path" ]
+  public_deps =
+      _pw_bluetooth_proxy_test_utils_deps + [ ":pw_bluetooth_proxy_sync" ]
+  sources = _pw_bluetooth_proxy_test_utils_srcs
+  visibility = [ "$dir_pw_bluetooth_proxy/*" ]
+}
+
+pw_source_set("test_utils_async") {
+  testonly = pw_unit_test_TESTONLY
+  public = [ "private/pw_bluetooth_proxy_private/test_utils.h" ]
+  public_configs = [ ":private_include_path" ]
+  public_deps =
+      _pw_bluetooth_proxy_test_utils_deps + [ ":pw_bluetooth_proxy_async" ]
+  sources = _pw_bluetooth_proxy_test_utils_srcs
+  visibility = [ "$dir_pw_bluetooth_proxy/*" ]
+}
+
+# LINT.ThenChange(bt-proxy.bzl, CMakeLists.txt)
+
+pw_test_group("tests") {
+  tests = [
+    ":pw_bluetooth_proxy_sync_test",
+    ":pw_bluetooth_proxy_async_test",
+  ]
+
+  group_deps = [
+    "gatt:tests",
+    "hci:tests",
+    "rfcomm:tests",
+  ]
 }

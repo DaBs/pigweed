@@ -14,3 +14,23 @@
 
 include($ENV{PW_ROOT}/pw_build/pigweed.cmake)
 
+pw_add_library(pw_libc.errno STATIC
+  SOURCES
+    errno.cc
+  PUBLIC_DEPS
+    pw_preprocessor
+)
+
+pw_add_library(pw_libc.exit STATIC
+  SOURCES
+    exit.cc
+  PUBLIC_DEPS
+    pw_assert.check
+)
+
+pw_add_library(pw_libc.noop_io STATIC
+  SOURCES
+    noop_io.cc
+  PUBLIC_DEPS
+    pw_preprocessor
+)

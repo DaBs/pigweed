@@ -14,6 +14,22 @@
 package(default_visibility = ["//visibility:public"])
 
 filegroup(
+    name = "no_linker_script",
+)
+
+label_flag(
+    name = "linker_script_for_rust_examples",
+    build_setting_default = ":no_linker_script",
+)
+
+config_setting(
+    name = "linker_script_unset",
+    flag_values = {
+        ":linker_script_for_rust_examples": "no_linker_script",
+    },
+)
+
+filegroup(
     name = "qemu-rust-nrf51822",
     srcs = ["qemu-rust-nrf51822.ld"],
 )

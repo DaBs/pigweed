@@ -16,11 +16,7 @@ import("//build_overrides/pigweed.gni")
 
 import("$dir_pw_arduino_build/arduino.gni")
 import("$dir_pw_build/target_types.gni")
-import("$dir_pw_docgen/docs.gni")
 import("$dir_pw_toolchain/generate_toolchain.gni")
-pw_doc_group("target_docs") {
-  sources = [ "target_docs.rst" ]
-}
 
 if (pw_arduino_build_CORE_PATH != "") {
   import("target_toolchains.gni")
@@ -97,7 +93,7 @@ if (pw_arduino_build_CORE_PATH != "") {
       sources = [ "init.cc" ]
       public_deps = [
         "$dir_pw_sys_io_arduino",
-        "$dir_pw_third_party/arduino:arduino_core_sources",
+        "$pw_external_arduino:arduino_core_sources",
       ]
       deps = [
         "$dir_pw_arduino_build:arduino_init.facade",

@@ -23,6 +23,11 @@ interface TokenData {
   template: string;
 }
 
+interface TokenizedStringEntry {
+  template: string;
+  removalDate: Date | null;
+}
+
 function parseTokenNumber(
   num: string,
   lineNumber?: number,
@@ -101,7 +106,12 @@ export function parseCsvEntry(
   }
 
   // Modern 4-column databases will have the domain in this position.
-  const domain = data.length > 1 ? data.shift()! : '';
+  let domain = '';
+  if (data && data.length > 1) {
+    domain = data.shift()!;
+    // Remove all whitespace from the domain.
+    domain = domain.replace(/\s/g, '');
+  }
 
   // Last column: Template strings
   const template = data.shift() ?? '';
@@ -115,18 +125,26 @@ export function parseCsvEntry(
 }
 
 export class TokenDatabase {
-  private tokens: Map<number, TokenData> = new Map();
+  private tokens: Map<string, Map<number, TokenizedStringEntry[]>> = new Map();
 
   constructor(readonly csv: string) {
     this.parseTokensToTokensMap(csv);
   }
 
-  has(token: number): boolean {
-    return this.tokens.has(token);
+  has(token: number, domain = ''): boolean {
+    const domainMap = this.tokens.get(domain);
+    if (!domainMap) return false;
+    return domainMap.has(token);
   }
 
-  get(token: number): string | undefined {
-    return this.tokens.get(token)?.template;
+  get(token: number, domain = ''): string | undefined {
+    const domainMap = this.tokens.get(domain);
+    if (!domainMap) return undefined;
+    const entries = domainMap.get(token);
+    if (!entries || entries.length !== 1) {
+      return undefined;
+    }
+    return entries[0].template;
   }
 
   private parseTokensToTokensMap(csv: string) {
@@ -144,7 +162,22 @@ export class TokenDatabase {
 
     for (const [lineNumber, line] of csvData.entries()) {
       const entry = parseCsvEntry(line, lineNumber);
-      entry && this.tokens.set(entry.token, entry);
+      if (entry) {
+        let domainMap = this.tokens.get(entry.domain);
+        if (!domainMap) {
+          domainMap = new Map<number, TokenizedStringEntry[]>();
+          this.tokens.set(entry.domain, domainMap);
+        }
+        let tokenEntries = domainMap.get(entry.token);
+        if (!tokenEntries) {
+          tokenEntries = [];
+          domainMap.set(entry.token, tokenEntries);
+        }
+        tokenEntries.push({
+          template: entry.template,
+          removalDate: entry.removalDate,
+        });
+      }
     }
   }
 }

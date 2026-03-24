@@ -49,6 +49,13 @@ pw_add_library(pw_string.builder STATIC
     string_builder.cc
 )
 
+pw_add_library(pw_string.hex INTERFACE
+  HEADERS
+    public/pw_string/hex.h
+  PUBLIC_INCLUDES
+    public
+)
+
 pw_add_library(pw_string.format STATIC
   HEADERS
     public/pw_string/format.h
@@ -72,6 +79,8 @@ pw_add_library(pw_string.string INTERFACE
     public
   PUBLIC_DEPS
     pw_assert
+    pw_containers._common
+    pw_containers.iterator
 )
 
 pw_add_library(pw_string.to_string STATIC
@@ -125,6 +134,16 @@ pw_add_test(pw_string.format_test
     format_test.cc
   PRIVATE_DEPS
     pw_string
+  GROUPS
+    modules
+    pw_string
+)
+
+pw_add_test(pw_string.hex_test
+  SOURCES
+    hex_test.cc
+  PRIVATE_DEPS
+    pw_string.hex
   GROUPS
     modules
     pw_string

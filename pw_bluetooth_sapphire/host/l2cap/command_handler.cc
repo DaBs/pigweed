@@ -121,6 +121,38 @@ void CommandHandler::ServeDisconnectionRequest(
   sig()->ServeRequest(kDisconnectionRequest, std::move(on_discon_req));
 }
 
+bool CommandHandler::SendCredits(ChannelId local_cid, uint16_t credits) {
+  LEFlowControlCreditParams payload = {
+      pw::bytes::ConvertOrderTo(cpp20::endian::little, local_cid),
+      pw::bytes::ConvertOrderTo(cpp20::endian::little, credits)};
+  return sig()->SendCommandWithoutResponse(
+      kLEFlowControlCredit, BufferView(&payload, sizeof(payload)));
+}
+
+void CommandHandler::ServeFlowControlCreditInd(
+    FlowControlCreditIndCallback callback) {
+  auto on_credit_cb = [cb = std::move(callback)](
+                          const ByteBuffer& payload,
+                          SignalingChannel::Responder* sig_responder) {
+    if (payload.size() != sizeof(LEFlowControlCreditParams)) {
+      bt_log(DEBUG,
+             "l2cap",
+             "cmd: rejecting malformed Flow Control Credit Ind, size %zu",
+             payload.size());
+      sig_responder->RejectNotUnderstood();
+      return;
+    }
+
+    LEFlowControlCreditParams params = payload.To<LEFlowControlCreditParams>();
+    ChannelId remote_cid =
+        pw::bytes::ConvertOrderFrom(cpp20::endian::little, params.cid);
+    uint16_t credits =
+        pw::bytes::ConvertOrderFrom(cpp20::endian::little, params.credits);
+    cb(remote_cid, credits);
+  };
+  sig()->ServeRequest(kLEFlowControlCredit, std::move(on_credit_cb));
+}
+
 CommandHandler::CommandHandler(SignalingChannelInterface* sig,
                                fit::closure request_fail_callback)
     : sig_(sig), request_fail_callback_(std::move(request_fail_callback)) {

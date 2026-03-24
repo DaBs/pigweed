@@ -10,7 +10,7 @@ and enable stakeholders to access logs with minimal code and hardware setup.
 This guide assumes that you have ``pw_console`` set up and running.
 See :ref:`module-pw_console-user_guide-start`.
 
-.. figure:: https://storage.googleapis.com/pigweed-media/pw_web/open-from-console.png
+.. figure:: https://www.gstatic.com/pigweed/pw_web/open-from-console.png
    :alt: Example of pw_console log viewer with **Open in browser** selected, no
     logs, and a pop-up with the URL to the web log viewer. The other pane shows
     logs since 'Open in Browser' is not selected.
@@ -25,7 +25,7 @@ Filter logs
 -----------
 Filters by default apply to all columns.
 
-.. figure:: https://storage.googleapis.com/pigweed-media/pw_web/filter.png
+.. figure:: https://www.gstatic.com/pigweed/pw_web/filter.png
    :alt: Filter example with the query 'log', the log viewer highlights and
     filters matches.
 
@@ -109,7 +109,7 @@ The log viewer autoscrolls to the bottom as new entries appear. Autoscroll
 pauses when the view scrolls up. To resume autoscroll, scroll to the bottom of
 the view or press the **Jump to bottom** button.
 
-.. figure:: https://storage.googleapis.com/pigweed-media/pw_web/jump-to-bottom.png
+.. figure:: https://www.gstatic.com/pigweed/pw_web/jump-to-bottom.png
    :alt: Autoscroll pauses when view scrolls up, **Jump to bottom** on center
     bottom of page resumes autoscroll.
 
@@ -118,7 +118,7 @@ Toggle column visibility
 ------------------------
 Column visibility changes with the checkboxes under the toggle column menu.
 
-.. figure:: https://storage.googleapis.com/pigweed-media/pw_web/toggle-fields.png
+.. figure:: https://www.gstatic.com/pigweed/pw_web/toggle-fields.png
    :alt: Toggle fields button in topbar opens checkbox list of fields to toggle
     visibility.
 
@@ -127,7 +127,7 @@ Resize columns
 --------------
 Use resize handles between columns to adjust the width of content.
 
-.. figure:: https://storage.googleapis.com/pigweed-media/pw_web/column-resize.png
+.. figure:: https://www.gstatic.com/pigweed/pw_web/column-resize.png
    :alt: Mouse cursor changes to column resize cursor between columns.
 
 ----------
@@ -135,7 +135,7 @@ Clear logs
 ----------
 To remove logs and display new logs, click the **Clear logs** button.
 
-.. figure:: https://storage.googleapis.com/pigweed-media/pw_web/clear-logs.png
+.. figure:: https://www.gstatic.com/pigweed/pw_web/clear-logs.png
    :alt: Clear logs button in topbar removes all logs from view.
 
    Example of **Clear logs** button press.
@@ -146,7 +146,7 @@ Toggle word-wrap
 To toggle between word wrapped and clipped context, click the **Word wrap**
 button.
 
-.. figure:: https://storage.googleapis.com/pigweed-media/pw_web/word-wrap.png
+.. figure:: https://www.gstatic.com/pigweed/pw_web/word-wrap.png
    :alt: Example of word wrap button on, where longer messages become multiple
     lines in height.
 
@@ -157,12 +157,12 @@ Split views
 -----------
 To split a log view, click the **Split right** button or the **Split down** button in the **Additional actions** (kabob) menu.
 
-.. figure:: https://storage.googleapis.com/pigweed-media/pw_web/split-view-buttons.png
+.. figure:: https://www.gstatic.com/pigweed/pw_web/split-view-buttons.png
    :alt: Split Right/Split Down can be found under the additional actions menu in the toolbar.
 
    **Split Right** and **Split Down** are in the **Additional actions** menu.
 
-.. figure:: https://storage.googleapis.com/pigweed-media/pw_web/split-views.png
+.. figure:: https://www.gstatic.com/pigweed/pw_web/split-views.png
    :alt: Clicking on Split Right/Split Down creates a view to the right of or below the active view.
 
    This creates a copy of the active view.
@@ -172,7 +172,7 @@ Resize views
 ------------
 To resize split views, click and drag the resize handle between them. You can also focus on the resize handle element and use :kbd:`←` and :kbd:`→` to adjust the size of the views.
 
-.. figure:: https://storage.googleapis.com/pigweed-media/pw_web/resizing-views.png
+.. figure:: https://www.gstatic.com/pigweed/pw_web/resizing-views.png
    :alt: Resize split views with the handle located at the border of the views.
 
    The resize handle can be found between adjacent views.
@@ -183,12 +183,12 @@ Download logs
 To download a .txt file of logs click the **Download logs** button under the
 kabob menu.
 
-.. figure:: https://storage.googleapis.com/pigweed-media/pw_web/more-actions.png
+.. figure:: https://www.gstatic.com/pigweed/pw_web/more-actions.png
    :alt: Download logs is found under the more actions button in the top menu.
 
    **Download logs** in the kabob menu.
 
-.. figure:: https://storage.googleapis.com/pigweed-media/pw_web/download-file.png
+.. figure:: https://www.gstatic.com/pigweed/pw_web/download-file.png
    :alt: Logs save to a .txt file
 
    Logs save to a .txt file.

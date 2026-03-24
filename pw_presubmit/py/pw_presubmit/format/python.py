@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Iterable, Iterator, Mapping, Sequence, Tuple
 
 from pw_cli.file_filter import FileFilter
-from pw_cli import find_config
+from pw_config_loader import find_config
 from pw_presubmit.format.core import (
     FileFormatter,
     FormattedFileContents,
@@ -44,7 +44,7 @@ class BlackFormatter(FileFormatter):
                 ``.black.toml`` file in the parent directory of the file being
                 formatted. ``False`` disables this behavior entirely.
         """
-        kwargs.setdefault('mnemonic', 'Python (black)')
+        kwargs.setdefault('mnemonic', 'Python')
         kwargs.setdefault('file_patterns', DEFAULT_PYTHON_FILE_PATTERNS)
         super().__init__(**kwargs)
         self._config_file_override: Path | None = (

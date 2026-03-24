@@ -40,6 +40,8 @@ import("$dir_pw_toolchain/generate_toolchain.gni")
 #    script. linker_script and includes are implicitly added to this by the
 #    template.
 #
+#  deps: Any dependencies needed for includes or inputs.
+#
 # Example:
 #
 #   pw_linker_script("generic_linker_script") {
@@ -78,6 +80,11 @@ template("pw_linker_script") {
       "c",
       rebase_path(invoker.linker_script, root_build_dir),
     ]
+
+    # Include any necessary dependencies
+    if (defined(invoker.deps)) {
+      deps = invoker.deps
+    }
 
     # Trigger a re-generation of the linker script when these inputs change.
     if (defined(invoker.inputs)) {

@@ -126,7 +126,8 @@ types in sync when switching between other ``pw_log`` backends like
 
    // token with default options base-16 and empty domain
    // token database literal: "The sun will come out $#%08x!"
-   PW_LOG("The sun will come out " PW_LOG_TOKEN_FMT() "!", PW_LOG_TOKEN_EXPR("tomorrow"))
+   PW_LOG("The sun will come out " PW_LOG_TOKEN_FMT() "!",
+          PW_LOG_TOKEN_EXPR("tomorrow"))
    // after detokenization: "The sun will come out tomorrow!"
 
 Additional macros are also provided specifically for enum handling. The
@@ -141,17 +142,12 @@ external dependency.
    // enums
    namespace foo {
 
-     enum class Color { kRed, kGreen, kBlue };
+   enum class Color { kRed, kGreen, kBlue };
 
-     // syntax TBD
-     TOKENIZE_ENUM(
-       foo::Color,
-       kRed,
-       kGreen,
-       kBlue
-     )
+   // syntax TBD
+   TOKENIZE_ENUM(foo::Color, kRed, kGreen, kBlue)
 
-   } // namespace foo
+   }  // namespace foo
 
    void LogColor(foo::Color color) {
      // token database literal:

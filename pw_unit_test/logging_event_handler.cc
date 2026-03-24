@@ -119,7 +119,7 @@ void LoggingEventHandler::TestCaseEnd(const TestCase& test_case,
   }
 }
 
-void LoggingEventHandler::TestCaseExpect(const TestCase& test_case,
+void LoggingEventHandler::TestCaseExpect(const TestCase&,
                                          const TestExpectation& expectation) {
   if (!verbose_ && expectation.success) {
     return;
@@ -132,7 +132,7 @@ void LoggingEventHandler::TestCaseExpect(const TestCase& test_case,
          PW_LOG_MODULE_NAME,
          PW_LOG_FLAGS,
          "%s:%d: %s",
-         test_case.file_name,
+         expectation.file_name,
          expectation.line_number,
          result);
   PW_LOG(level,

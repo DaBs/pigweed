@@ -370,9 +370,9 @@ class BashShellModifier(ShellModifier):
 
     def prepend_variable(self, var_name: str, value: str) -> None:
         self.env[var_name] = f'{value}{self.separator}{self.env[var_name]}'
-        self.env_mod[
-            var_name
-        ] = f'{value}{self.separator}{self.env_mod[var_name]}'
+        self.env_mod[var_name] = (
+            f'{value}{self.separator}{self.env_mod[var_name]}'
+        )
         quoted_value = shlex.quote(value)
         self.do_effect(
             f'export {var_name}={quoted_value}{self.separator}${var_name}'
@@ -380,9 +380,9 @@ class BashShellModifier(ShellModifier):
 
     def append_variable(self, var_name: str, value: str) -> None:
         self.env[var_name] = f'{self.env[var_name]}{self.separator}{value}'
-        self.env_mod[
-            var_name
-        ] = f'{self.env_mod[var_name]}{self.separator}{value}'
+        self.env_mod[var_name] = (
+            f'{self.env_mod[var_name]}{self.separator}{value}'
+        )
         quoted_value = shlex.quote(value)
         self.do_effect(
             f'export {var_name}=${var_name}{self.separator}{quoted_value}'

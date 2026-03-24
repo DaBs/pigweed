@@ -11,15 +11,12 @@
 // WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
 // License for the specific language governing permissions and limitations under
 // the License.
+
+use std::io::{Write as StdWrite, stdout};
+
 use pw_status::{Error, Result};
-use std::io::{stdout, Write as StdWrite};
 
-#[no_mangle]
-pub fn console_backend_write(buf: &[u8]) -> Result<usize> {
-    stdout().lock().write(buf).map_err(|_| Error::Unknown)
-}
-
-#[no_mangle]
-pub fn console_backend_flush() -> Result<()> {
-    stdout().lock().flush().map_err(|_| Error::Unknown)
+#[unsafe(no_mangle)]
+pub fn console_backend_write_all(buf: &[u8]) -> Result<()> {
+    stdout().lock().write_all(buf).map_err(|_| Error::Unknown)
 }

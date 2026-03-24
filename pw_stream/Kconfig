@@ -16,7 +16,6 @@ menu "pw_stream"
 
 config PIGWEED_STREAM
     bool "Link pw_stream library"
-    select PIGWEED_ASSERT
     select PIGWEED_BYTES
     select PIGWEED_RESULT
     select PIGWEED_SPAN

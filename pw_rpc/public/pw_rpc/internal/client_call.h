@@ -18,8 +18,13 @@
 #include "pw_bytes/span.h"
 #include "pw_function/function.h"
 #include "pw_rpc/internal/call.h"
+#include "pw_rpc/internal/config.h"
 #include "pw_rpc/internal/endpoint.h"
 #include "pw_rpc/internal/lock.h"
+
+#if PW_RPC_DYNAMIC_ALLOCATION
+#include PW_RPC_MAKE_UNIQUE_PTR_INCLUDE
+#endif  // PW_RPC_DYNAMIC_ALLOCATION
 
 namespace pw::rpc::internal {
 
@@ -81,6 +86,10 @@ class UnaryResponseClientCall : public ClientCall {
                         Function<void(ConstByteSpan, Status)>&& on_completed,
                         Function<void(Status)>&& on_error,
                         ConstByteSpan request) PW_LOCKS_EXCLUDED(rpc_lock()) {
+    PW_ASSERT(PW_RPC_ALLOW_INVOCATIONS_ON_STACK);  // RPC client calls on the
+                                                   // stack are not allowed. Use
+                                                   // DynamicClient instead.
+
     rpc_lock().lock();
     CallType call(client.ClaimLocked(), channel_id, service_id, method_id);
     call.set_on_completed_locked(std::move(on_completed));
@@ -90,6 +99,28 @@ class UnaryResponseClientCall : public ClientCall {
     client.CleanUpCalls();
     return call;
   }
+
+#if PW_RPC_DYNAMIC_ALLOCATION
+  template <typename CallType>
+  static auto StartDynamic(Endpoint& client,
+                           uint32_t channel_id,
+                           uint32_t service_id,
+                           uint32_t method_id,
+                           Function<void(ConstByteSpan, Status)>&& on_completed,
+                           Function<void(Status)>&& on_error,
+                           ConstByteSpan request)
+      PW_LOCKS_EXCLUDED(rpc_lock()) {
+    rpc_lock().lock();
+    auto call = PW_RPC_MAKE_UNIQUE_PTR(
+        CallType, client.ClaimLocked(), channel_id, service_id, method_id);
+    call->set_on_completed_locked(std::move(on_completed));
+    call->set_on_error_locked(std::move(on_error));
+
+    call->SendInitialClientRequest(request);
+    client.CleanUpCalls();
+    return call;
+  }
+#endif  // PW_RPC_DYNAMIC_ALLOCATION
 
   void HandleCompleted(ConstByteSpan response, Status status)
       PW_UNLOCK_FUNCTION(rpc_lock());
@@ -156,6 +187,10 @@ class StreamResponseClientCall : public ClientCall {
                         Function<void(Status)>&& on_completed,
                         Function<void(Status)>&& on_error,
                         ConstByteSpan request) PW_LOCKS_EXCLUDED(rpc_lock()) {
+    PW_ASSERT(PW_RPC_ALLOW_INVOCATIONS_ON_STACK);  // RPC client calls on the
+                                                   // stack are not allowed. Use
+                                                   // DynamicClient instead.
+
     rpc_lock().lock();
     CallType call(client.ClaimLocked(), channel_id, service_id, method_id);
 
@@ -167,6 +202,31 @@ class StreamResponseClientCall : public ClientCall {
     client.CleanUpCalls();
     return call;
   }
+
+#if PW_RPC_DYNAMIC_ALLOCATION
+  template <typename CallType>
+  static auto StartDynamic(Endpoint& client,
+                           uint32_t channel_id,
+                           uint32_t service_id,
+                           uint32_t method_id,
+                           Function<void(ConstByteSpan)>&& on_next,
+                           Function<void(Status)>&& on_completed,
+                           Function<void(Status)>&& on_error,
+                           ConstByteSpan request)
+      PW_LOCKS_EXCLUDED(rpc_lock()) {
+    rpc_lock().lock();
+    auto call = PW_RPC_MAKE_UNIQUE_PTR(
+        CallType, client.ClaimLocked(), channel_id, service_id, method_id);
+
+    call->set_on_next_locked(std::move(on_next));
+    call->set_on_completed_locked(std::move(on_completed));
+    call->set_on_error_locked(std::move(on_error));
+
+    call->SendInitialClientRequest(request);
+    client.CleanUpCalls();
+    return call;
+  }
+#endif  // PW_RPC_DYNAMIC_ALLOCATION
 
   void HandleCompleted(Status status) PW_UNLOCK_FUNCTION(rpc_lock());
 

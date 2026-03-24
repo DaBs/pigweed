@@ -43,7 +43,7 @@ pw_add_library(pw_bytes.alignment STATIC
   PUBLIC_DEPS
     pw_assert
     pw_bytes
-    pw_preprocessor
+    pw_numeric.checked_arithmetic
     pw_third_party.fuchsia.stdcompat
   SOURCES
     alignment.cc
@@ -113,6 +113,7 @@ pw_add_test(pw_bytes.endian_test
     endian_test.cc
   PRIVATE_DEPS
     pw_bytes
+    pw_unit_test.constexpr
   GROUPS
     modules
     pw_bytes
@@ -124,6 +125,17 @@ pw_add_test(pw_bytes.packed_ptr_test
   PRIVATE_DEPS
     pw_compilation_testing._pigweed_only_negative_compilation
     pw_bytes.packed_ptr
+  GROUPS
+    modules
+    pw_bytes
+)
+
+pw_add_test(pw_bytes.span_test
+  SOURCES
+    span_test.cc
+  PRIVATE_DEPS
+    pw_compilation_testing._pigweed_only_negative_compilation
+    pw_bytes
   GROUPS
     modules
     pw_bytes

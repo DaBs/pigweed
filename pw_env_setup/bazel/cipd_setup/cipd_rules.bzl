@@ -16,7 +16,7 @@
 load(
     "//pw_env_setup/bazel/cipd_setup/internal:cipd_internal.bzl",
     _cipd_client_impl = "cipd_client_impl",
-    _cipd_deps_impl = "cipd_deps_impl",
+    _cipd_composite_repository_impl = "cipd_composite_repository_impl",
     _cipd_repository_impl = "cipd_repository_impl",
 )
 
@@ -90,36 +90,63 @@ Example:
 
     cipd_repository(
         name = "bloaty",
-        path = "pigweed/third_party/bloaty-embedded/${os=linux,mac}-${arch=amd64}",
-        tag = "git_revision:2d87d204057b419f5290f8d38b61b9c2c5b4fb52-2",
+        path = "fuchsia/third_party/bloaty/${os=linux,mac}-${arch=amd64}",
+        tag = "git_revision:c057ba4f43db0506d4ba8c096925b054b02a8bd3",
     )
 """,
 )
 
-_pigweed_deps = repository_rule(
-    _cipd_deps_impl,
+cipd_composite_repository = repository_rule(
+    _cipd_composite_repository_impl,
     attrs = {
-        "_pigweed_packages_json": attr.label(
-            default = str(Label("//pw_env_setup:py/pw_env_setup/cipd_setup/pigweed.json")),
+        "build_file": attr.label(
+            allow_single_file = True,
+            doc = "Override the BUILD file in the new CIPD repository.",
         ),
-        "_upstream_testing_packages_json": attr.label(
-            default = str(Label("//pw_env_setup:py/pw_env_setup/cipd_setup/testing.json")),
+        "packages": attr.string_list(
+            doc = "List of paths within CIPD where repositories lives.",
+            default = [],
+        ),
+        "patch_args": attr.string_list(
+            doc = "Arguments to pass to the patch tool. List of strings.",
+            default = [],
+        ),
+        "patches": attr.label_list(
+            doc = "A list of patches to apply to the CIPD package after downloading it",
+            default = [],
+        ),
+        "tag": attr.string(
+            doc = "Tag specifying which version of the repository to fetch.",
+        ),
+        "tag_by_os": attr.string_dict(
+            doc = "Dict from OS name (mac, linux, windows) to tag. Incompatible with the 'tag' attribute.",
+        ),
+        "_cipd_client": attr.label(
+            default = "@cipd_client//:cipd",
+            doc = "Location of the CIPD client binary (internal).",
         ),
     },
-)
+    doc = """
+Downloads multiple CIPD dependencies to the root of a remote repository.
 
-def pigweed_deps():
-    """Configures Pigweeds Bazel dependencies
+Example:
 
-    Example:
-        load("@pigweed//pw_env_setup:pigweed_deps.bzl", "pigweed_deps")
-
-        pigweed_deps()
-
-        load("@cipd_deps//:cipd_init.bzl", "cipd_init")
-
-        cipd_init()
-"""
-    _pigweed_deps(
-        name = "cipd_deps",
+    load(
+        "@pigweed//pw_env_setup/bazel/cipd_setup:cipd_rules.bzl",
+        "cipd_client_repository",
+        "cipd_composite_repository",
     )
+
+    # Must be called before cipd_composite_repository
+    cipd_client_repository()
+
+    cipd_composite_repository(
+        name = "llvm_toolchain",
+        packages = [
+            "fuchsia/third_party/clang/${os}-${arch}",
+            "fuchsia/third_party/clang/target/riscv32-unknown-elf",
+	],
+        tag = "git_revision:03b0f55d9c6319a851a60bb084faca0e32a38f2b",
+    )
+""",
+)

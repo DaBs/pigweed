@@ -85,7 +85,7 @@ search box containing all main menu item actions.
 Words separated by spaces are used to narrow down the match results. The order
 each word is entered does not matter.
 
-.. figure:: https://storage.googleapis.com/pigweed-media/pw_console/command_runner_main_menu.svg
+.. figure:: https://www.gstatic.com/pigweed/pw_console/command_runner_main_menu.svg
   :alt: Main menu item search dialog.
 
 ============================================  =====================
@@ -112,6 +112,11 @@ Function                                      Keys
 ============================================  =====================
 Switch focus to the next window or tab        :kbd:`Ctrl-Alt-n`
 Switch focus to the previous window or tab    :kbd:`Ctrl-Alt-p`
+
+Switch window or tab focus up.                :kbd:`Ctrl-w k`
+Switch window or tab focus down.              :kbd:`Ctrl-w j`
+Switch window or tab focus left.              :kbd:`Ctrl-w h`
+Switch window or tab focus right.             :kbd:`Ctrl-w l`
 
 Switch focus to the next UI element           :kbd:`Shift-Tab`
                                               :kbd:`Ctrl-Right`
@@ -173,6 +178,8 @@ Select a range of log lines                   :guilabel:`Left Mouse Drag`
 
 Select all lines                              :kbd:`Ctrl-a`
 Clear Selection                               :kbd:`Ctrl-c`
+
+Resize table columns                          :guilabel:`Left Mouse Drag`
 ============================================  =====================
 
 When making log line selections a popup will appear in the upper right of the log
@@ -481,32 +488,30 @@ under the :guilabel:`[Window]` menu.
 
 The active window can be moved and resized with the following keys. There are
 also menu options under :guilabel:`[View]` for the same actions. Additionally,
-windows can be resized with the mouse by click dragging on the :guilabel:`====`
-text on the far right side of any toolbar.
+windows can be resized with the mouse by click dragging on the :guilabel:`-==-`
+text on the far right side of any toolbar or on the window group splits.
 
 ============================================  =====================
 Function                                      Keys
 ============================================  =====================
-Enlarge window height                         :kbd:`Alt-=`
 Shrink window height                          :kbd:`Alt--`
                                               (:kbd:`Alt` and :kbd:`Minus`)
-Enlarge vertical split width                  :kbd:`Alt-,`
-Shrink vertical split width                   :kbd:`Alt-.`
+Grow window height                            :kbd:`Alt-=`
 Reset window sizes                            :kbd:`Ctrl-u`
 
-Move window up                                :kbd:`Ctrl-Alt-Up`
-Move window down                              :kbd:`Ctrl-Alt-Down`
-Move window left                              :kbd:`Ctrl-Alt-Left`
-Move window right                             :kbd:`Ctrl-Alt-Right`
+Move window up in group                       :kbd:`Ctrl-Alt-Up`
+Move window down in group                     :kbd:`Ctrl-Alt-Down`
+Move window to previous group                 :kbd:`Ctrl-Alt-Left`
+Move window to next group                     :kbd:`Ctrl-Alt-Right`
 ============================================  =====================
 
-Moving windows left and right will create a new vertical splits. Each vertical
-stack can contain multiple windows and show windows as a stack or tabbed
-view.
+Moving windows to different groups will create new vertical or horizontal
+splits. Each group can contain multiple windows and show windows as a stack or
+tabbed view.
 
-For example here we have 3 window panes in a single stack. If you focus on Log
-Window 1 and move it to the right a new stack is formed in a vertical
-split. This can be done repeatedly to form additional window stacks.
+For example here we have 3 window panes in a single group. If you focus on Log
+Window 1 and move it to the next group a new vertical split is created. This can
+be done repeatedly to form additional window groups.
 
 ::
 
@@ -525,6 +530,12 @@ split. This can be done repeatedly to form additional window stacks.
   |                                  |     |                |                 |
   | Python Input                     |     | Python Input   |                 |
   +----------------------------------+     +----------------+-----------------+
+
+::
+   Group 1                                  Group 1         | Group 2
+   1: Log Window 1                          1: Log Window 1 | 1: Log Window 1
+   2: Log Window 2                          2: Python Repl  |
+   3: Python Repl
 
 Color Depth
 -----------
@@ -625,8 +636,45 @@ Example Config
    # Default: dark
    ui_theme: high-contrast-dark
 
+   # Optional user defined UI themes.
+   # These are common color values that map to various TUI elements defined in:
+   # https://cs.opensource.google/pigweed/pigweed/+/main:pw_console/py/pw_console/style.py?q=pw_console_styles
+   #
+   # Colors values are strings of prompt_toolkit colors. Either hex '#RRGGBB' or
+   # values like 'ansired'. These strings should omit 'fg:' or 'bg:' as shown in
+   # prompt_toolkit documentation.
+   #
+   # See the docs page for more color examples:
+   # https://python-prompt-toolkit.readthedocs.io/en/latest/pages/advanced_topics/styling.html#style-strings
+   ui_themes:
+     # Unique theme name.
+     dark:
+       # Optional display name for use in the main menu.
+       display_name: 'dark'
+       default_bg: '#2e2e2e'
+       default_fg: '#eeeeee'
+       dim_bg: '#262626'
+       dim_fg: '#dfdfdf'
+       button_active_bg: '#626262'
+       button_inactive_bg: '#525252'
+       active_bg: '#525252'
+       active_fg: '#dfdfdf'
+       inactive_bg: '#3f3f3f'
+       inactive_fg: '#bfbfbf'
+       line_highlight_bg: '#525252'
+       selected_line_bg: '#626262'
+       dialog_bg: '#3c3c3c'
+       red_accent: '#ff6c6b'
+       orange_accent: '#da8548'
+       yellow_accent: '#ffcc66'
+       green_accent: '#98be65'
+       cyan_accent: '#66cccc'
+       blue_accent: '#6699cc'
+       purple_accent: '#a9a1e1'
+       magenta_accent: '#c678dd'
+
    # Default: pigweed-code
-   code_theme: material
+   code_theme: pigweed-code
 
    # Default: False
    swap_light_and_dark: False
@@ -646,31 +694,57 @@ Example Config
 
    # Do not re-style log messages. This will preserve any ansi escape sequences
    # for color.
+   # Default: True
    recolor_log_lines_to_match_level: False
 
-   # Show the Python file and line number responsible for creating log messages.
-   show_python_file: False
-   # Show the Python logger responsible for creating log messages.
-   show_python_logger: False
+   # Show the Python file and line number responsible for creating log
+   # messages. This appears as a 'py_file' metadata column.
+   # Default: False
+   show_python_file: True
+
+   # Show the Python logger responsible for creating log messages. This appears
+   # as a 'py_logger' metadata column.
+   # Default: False
+   show_python_logger: True
+
    # Show the 'file' metadata column.
-   show_source_file: False
+   # Default: False
+   show_source_file: True
 
    # Custom Column Ordering
    # By default columns are ordered as:
    #   time, level, metadata1, metadata2, ..., message
-   # The log message is always the last value and not required in this list.
+   # The log 'message' is always the last value and not required in this list.
    column_order:
-     # Column name
+     # Column name lowercase
      - time
      - level
      - metadata1
      - metadata2
+     - file
 
-   # If True, any metadata field not listed above in 'column_order'
-   # will be hidden in table view.
+   # Set default character widths for columns.
+   column_width:
+     metadata1: 20
+     metadata2: 15
+
+   # Set the default column visibility.
+   # Column name: Visible?
+   column_visibility:
+     metadata1: True
+     metadata2: false
+     py_file: False
+     py_logger: False
+     file: False
+
+   # Deprecated option, please use 'column_visibility' instead.
+   #
+   # If True, any field not listed above in 'column_order'
+   # will be hidden in table view. Note it is better to use
+   # Default: False
    column_order_omit_unspecified_columns: False
 
-   # Unique Colors for Column Values
+   # Apply custom colors for column values
    #   Color format: 'bg:#BG-HEX #FG-HEX STYLE'
    # All parts are optional.
    # Empty strings will leave styling unchanged.
@@ -690,19 +764,19 @@ Example Config
        APP: 'bg:#ff6c6b #000000 bold'
        WIFI: '#555555'
 
-   # Each window column is normally aligned side by side in vertical splits. You
+   # Each window group is normally aligned side by side in vertical splits. You
    # can change this to one group of windows on top of the other with horizontal
-   # splits using this method
+   # splits using this method.
 
    # Default: vertical
-   window_column_split_method: vertical
+   window_group_split_method: vertical
 
    # Window Layout
    windows:
-     # First window column (vertical split)
-     # Each split should have a unique name and include either
+     # First window group
+     # Each group should have a unique name and include either
      # 'stacked' or 'tabbed' to select a window pane display method.
-     Split 1 stacked:
+     Group 1 stacked:
        # Items here are window titles, each should be unique.
        # Window 1
        Device Logs:
@@ -715,8 +789,8 @@ Example Config
        Host Logs:
          hidden: True
 
-     # Second window column
-     Split 2 tabbed:
+     # Second window group
+     Group 2 tabbed:
        # This is a duplicate of the existing 'Device Logs' window.
        # The title is 'NEW DEVICE'
        NEW DEVICE:
@@ -737,8 +811,8 @@ Example Config
            all:
              string: 'FLASH'
 
-     # Third window column
-     Split 3 tabbed:
+     # Third window group
+     Group 3 tabbed:
        # This is a brand new log Window
        Keyboard Logs - IBM:
          loggers:
@@ -753,13 +827,18 @@ Example Config
          filters:
            all:
              regex: 'IBM Model M'
-       Keyboard Logs - Apple:
-         loggers:
-           my_cool_keyboard_device:
-             level: DEBUG
-         filters:
-           all:
-             regex: 'Apple.*USB'
+
+       # New log window that is populated by running a shell command.
+       Android Logs:
+         command: 'adb logcat'
+
+       # New log window that is populated by running a shell command.
+       Fuchsia Logs:
+         command: 'ffx --machine json log'
+         # Custom log parser name. These are located in the module:
+         #   'pw_console.background_command_log_parsers'
+         command_log_parser: 'fuchsia-json'
+
 
    # Command Runner dialog size and position
    command_runner:

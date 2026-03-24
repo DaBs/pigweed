@@ -23,6 +23,7 @@
 #include "fuchsia/bluetooth/gatt/cpp/fidl.h"
 #include "fuchsia/bluetooth/le/cpp/fidl.h"
 #include "lib/fidl/cpp/interface_request.h"
+#include "pw_bluetooth_sapphire/fake_lease_provider.h"
 #include "pw_bluetooth_sapphire/fuchsia/host/fidl/adapter_test_fixture.h"
 #include "pw_bluetooth_sapphire/fuchsia/host/fidl/fake_adapter_test_fixture.h"
 #include "pw_bluetooth_sapphire/fuchsia/host/fidl/helpers.h"
@@ -36,6 +37,21 @@ namespace {
 
 namespace fble = fuchsia::bluetooth::le;
 namespace fgatt = fuchsia::bluetooth::gatt;
+
+constexpr bt::PeerId kPeerId(2);
+
+constexpr bt::hci::SyncId kSyncId(1);
+
+constexpr uint8_t kAdvertisingSid = 3;
+
+constexpr bt::gap::PeriodicAdvertisingSyncManager::SyncParameters
+    kSyncParameters{
+        .peer_id = kPeerId,
+        .advertising_sid = kAdvertisingSid,
+        .interval = 2,
+        .phy = pw::bluetooth::emboss::LEPhy::LE_2M,
+        .subevents_count = 3,
+    };
 
 const bt::DeviceAddress kTestAddr(bt::DeviceAddress::Type::kLEPublic,
                                   {0x01, 0, 0, 0, 0, 0});
@@ -75,8 +91,11 @@ class LowEnergyCentralServerTest : public TestingBase {
     // Create a LowEnergyCentralServer and bind it to a local client.
     fidl::InterfaceHandle<fble::Central> handle;
     gatt_ = take_gatt();
-    server_ = std::make_unique<LowEnergyCentralServer>(
-        adapter(), handle.NewRequest(), gatt_->GetWeakPtr());
+    server_ = std::make_unique<LowEnergyCentralServer>(adapter(),
+                                                       handle.NewRequest(),
+                                                       gatt_->GetWeakPtr(),
+                                                       lease_provider_,
+                                                       dispatcher());
     proxy_.Bind(std::move(handle));
 
     bt::testing::FakeController::Settings settings;
@@ -127,6 +146,7 @@ class LowEnergyCentralServerTest : public TestingBase {
   }
 
  private:
+  pw::bluetooth_sapphire::testing::FakeLeaseProvider lease_provider_;
   std::unique_ptr<LowEnergyCentralServer> server_;
   fble::CentralPtr proxy_;
   std::unique_ptr<bt::gatt::GATT> gatt_;
@@ -143,8 +163,11 @@ class LowEnergyCentralServerTestFakeAdapter
     // Create a LowEnergyCentralServer and bind it to a local client.
     fidl::InterfaceHandle<fble::Central> handle;
     gatt_ = std::make_unique<bt::gatt::testing::FakeLayer>(pw_dispatcher());
-    server_ = std::make_unique<LowEnergyCentralServer>(
-        adapter()->AsWeakPtr(), handle.NewRequest(), gatt_->GetWeakPtr());
+    server_ = std::make_unique<LowEnergyCentralServer>(adapter()->AsWeakPtr(),
+                                                       handle.NewRequest(),
+                                                       gatt_->GetWeakPtr(),
+                                                       lease_provider_,
+                                                       dispatcher());
     proxy_.Bind(std::move(handle));
   }
 
@@ -160,6 +183,7 @@ class LowEnergyCentralServerTestFakeAdapter
   }
 
  private:
+  pw::bluetooth_sapphire::testing::FakeLeaseProvider lease_provider_;
   std::unique_ptr<LowEnergyCentralServer> server_;
   fble::CentralPtr proxy_;
   std::unique_ptr<bt::gatt::GATT> gatt_;
@@ -1398,6 +1422,168 @@ TEST_P(LowEnergyCentralServerTestFakeAdapterBoolParam,
   ASSERT_NE(conn_iter, connections.end());
   EXPECT_EQ(conn_iter->second.options.bondable_mode,
             bt::sm::BondableMode::Bondable);
+}
+
+TEST_F(LowEnergyCentralServerTestFakeAdapter,
+       SyncToPeriodicAdvertisementWithNoConfigSucceeds) {
+  fble::CentralSyncToPeriodicAdvertisingRequest request;
+  request.set_peer_id(::fuchsia::bluetooth::PeerId{kPeerId.value()});
+  request.set_advertising_sid(kAdvertisingSid);
+  fidl::InterfaceHandle<fble::PeriodicAdvertisingSync> sync_handle;
+  request.set_sync(sync_handle.NewRequest());
+
+  fidl::InterfacePtr<fble::PeriodicAdvertisingSync> sync_client =
+      sync_handle.Bind();
+  std::optional<zx_status_t> fidl_error;
+  sync_client.set_error_handler(
+      [&](zx_status_t status) { fidl_error = status; });
+  int on_established_count = 0;
+  sync_client.events().OnEstablished = [&](auto) { ++on_established_count; };
+  int on_error_count = 0;
+  sync_client.events().OnError = [&](auto) { ++on_error_count; };
+
+  central_proxy()->SyncToPeriodicAdvertising(std::move(request));
+  RunLoopUntilIdle();
+  ASSERT_FALSE(fidl_error.has_value());
+  EXPECT_EQ(on_established_count, 0);
+  EXPECT_EQ(on_error_count, 0);
+
+  ASSERT_EQ(adapter()->fake_le()->periodic_advertisement_syncs().size(), 1u);
+  const bt::gap::testing::FakeAdapter::FakeLowEnergy::PeriodicAdvertisementSync&
+      sync =
+          adapter()->fake_le()->periodic_advertisement_syncs().begin()->second;
+  EXPECT_EQ(sync.options.filter_duplicates, true);
+  sync.delegate.OnSyncEstablished(kSyncId, kSyncParameters);
+  RunLoopUntilIdle();
+  EXPECT_EQ(on_established_count, 1);
+  EXPECT_EQ(on_error_count, 0);
+
+  sync_client.Unbind();
+  RunLoopUntilIdle();
+  EXPECT_EQ(adapter()->fake_le()->periodic_advertisement_syncs().size(), 0u);
+}
+
+TEST_P(LowEnergyCentralServerTestFakeAdapterBoolParam,
+       SyncToPeriodicAdvertisementSuccessWithConfigSucceeds) {
+  bool expected_filter_duplicates = GetParam();
+
+  fble::CentralSyncToPeriodicAdvertisingRequest request;
+  request.set_peer_id(::fuchsia::bluetooth::PeerId{kPeerId.value()});
+  request.set_advertising_sid(kAdvertisingSid);
+  fidl::InterfaceHandle<fble::PeriodicAdvertisingSync> sync_handle;
+  request.set_sync(sync_handle.NewRequest());
+  fble::PeriodicAdvertisingSyncConfiguration config;
+  config.set_filter_duplicates(expected_filter_duplicates);
+  request.set_config(std::move(config));
+
+  fidl::InterfacePtr<fble::PeriodicAdvertisingSync> sync_client =
+      sync_handle.Bind();
+  std::optional<zx_status_t> fidl_error;
+  sync_client.set_error_handler(
+      [&](zx_status_t status) { fidl_error = status; });
+  int on_established_count = 0;
+  sync_client.events().OnEstablished = [&](auto) { ++on_established_count; };
+  int on_error_count = 0;
+  sync_client.events().OnError = [&](auto) { ++on_error_count; };
+
+  central_proxy()->SyncToPeriodicAdvertising(std::move(request));
+  RunLoopUntilIdle();
+  ASSERT_FALSE(fidl_error.has_value());
+  EXPECT_EQ(on_established_count, 0);
+  EXPECT_EQ(on_error_count, 0);
+
+  ASSERT_EQ(adapter()->fake_le()->periodic_advertisement_syncs().size(), 1u);
+  const bt::gap::testing::FakeAdapter::FakeLowEnergy::PeriodicAdvertisementSync&
+      sync =
+          adapter()->fake_le()->periodic_advertisement_syncs().begin()->second;
+  EXPECT_EQ(expected_filter_duplicates, sync.options.filter_duplicates);
+  sync.delegate.OnSyncEstablished(kSyncId, kSyncParameters);
+  RunLoopUntilIdle();
+  EXPECT_EQ(on_established_count, 1);
+  EXPECT_EQ(on_error_count, 0);
+
+  sync_client.Unbind();
+  RunLoopUntilIdle();
+}
+
+TEST_F(LowEnergyCentralServerTestFakeAdapter,
+       SyncToPeriodicAdvertisementRequestMissingPeerId) {
+  fble::CentralSyncToPeriodicAdvertisingRequest request;
+  request.set_advertising_sid(kAdvertisingSid);
+  fidl::InterfaceHandle<fble::PeriodicAdvertisingSync> sync_handle;
+  request.set_sync(sync_handle.NewRequest());
+
+  fidl::InterfacePtr<fble::PeriodicAdvertisingSync> sync_client =
+      sync_handle.Bind();
+  std::optional<zx_status_t> fidl_error;
+  sync_client.set_error_handler(
+      [&](zx_status_t status) { fidl_error = status; });
+
+  central_proxy()->SyncToPeriodicAdvertising(std::move(request));
+  RunLoopUntilIdle();
+  ASSERT_TRUE(fidl_error.has_value());
+  EXPECT_EQ(fidl_error.value(), ZX_ERR_INVALID_ARGS);
+}
+
+TEST_F(LowEnergyCentralServerTestFakeAdapter,
+       SyncToPeriodicAdvertisementRequestMissingSid) {
+  fble::CentralSyncToPeriodicAdvertisingRequest request;
+  request.set_peer_id(::fuchsia::bluetooth::PeerId{kPeerId.value()});
+  fidl::InterfaceHandle<fble::PeriodicAdvertisingSync> sync_handle;
+  request.set_sync(sync_handle.NewRequest());
+
+  fidl::InterfacePtr<fble::PeriodicAdvertisingSync> sync_client =
+      sync_handle.Bind();
+  std::optional<zx_status_t> fidl_error;
+  sync_client.set_error_handler(
+      [&](zx_status_t status) { fidl_error = status; });
+
+  central_proxy()->SyncToPeriodicAdvertising(std::move(request));
+  RunLoopUntilIdle();
+  ASSERT_TRUE(fidl_error.has_value());
+  EXPECT_EQ(fidl_error.value(), ZX_ERR_INVALID_ARGS);
+}
+
+TEST_F(LowEnergyCentralServerTestFakeAdapter,
+       SyncToPeriodicAdvertisementRequestMissingSync) {
+  fble::CentralSyncToPeriodicAdvertisingRequest request;
+  request.set_peer_id(::fuchsia::bluetooth::PeerId{kPeerId.value()});
+  request.set_advertising_sid(kAdvertisingSid);
+  central_proxy()->SyncToPeriodicAdvertising(std::move(request));
+  RunLoopUntilIdle();
+}
+
+TEST_F(LowEnergyCentralServerTestFakeAdapter,
+       SyncToPeriodicAdvertisementFailsOnServerCreation) {
+  adapter()->fake_le()->set_sync_to_periodic_advertisement_error(
+      bt::hci::Error(bt::HostError::kNotSupported));
+
+  fble::CentralSyncToPeriodicAdvertisingRequest request;
+  request.set_peer_id(::fuchsia::bluetooth::PeerId{kPeerId.value()});
+  request.set_advertising_sid(kAdvertisingSid);
+  fidl::InterfaceHandle<fble::PeriodicAdvertisingSync> sync_handle;
+  request.set_sync(sync_handle.NewRequest());
+
+  fidl::InterfacePtr<fble::PeriodicAdvertisingSync> sync_client =
+      sync_handle.Bind();
+  std::optional<zx_status_t> fidl_error;
+  sync_client.set_error_handler(
+      [&](zx_status_t status) { fidl_error = status; });
+  int on_established_count = 0;
+  sync_client.events().OnEstablished = [&](auto) { ++on_established_count; };
+  std::optional<fble::PeriodicAdvertisingSyncError> sync_error;
+  sync_client.events().OnError = [&](fble::PeriodicAdvertisingSyncError error) {
+    sync_error = error;
+  };
+
+  central_proxy()->SyncToPeriodicAdvertising(std::move(request));
+  RunLoopUntilIdle();
+  EXPECT_EQ(on_established_count, 0);
+  ASSERT_TRUE(sync_error.has_value());
+  EXPECT_EQ(sync_error.value(),
+            fble::PeriodicAdvertisingSyncError::NOT_SUPPORTED_LOCAL);
+  ASSERT_TRUE(fidl_error.has_value());
+  EXPECT_EQ(fidl_error.value(), ZX_ERR_NOT_SUPPORTED);
 }
 
 INSTANTIATE_TEST_SUITE_P(LowEnergyCentralServerTestFakeAdapterBoolParamTests,

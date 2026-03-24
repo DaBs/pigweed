@@ -14,12 +14,15 @@
 #pragma once
 
 #include "pw_async2/dispatcher.h"
+#include "pw_async2/value_future.h"
 #include "pw_bluetooth/gatt/client2.h"
 #include "pw_bluetooth/internal/raii_ptr.h"
 #include "pw_bluetooth/low_energy/channel.h"
 #include "pw_bluetooth/types.h"
 
 namespace pw::bluetooth::low_energy {
+
+/// @module{pw_bluetooth}
 
 /// Class that represents a connection to a peer. This can be used to interact
 /// with GATT services and establish LE L2CAP channels.
@@ -173,15 +176,15 @@ class Connection2 {
 
   /// Requests an update to the connection parameters.
   /// @returns Asynchronously returns the result of the request.
-  virtual async2::OnceReceiver<
-      pw::expected<void, ConnectionParameterUpdateError>>
+  virtual async2::ValueFuture<
+      std::optional<pw::expected<void, ConnectionParameterUpdateError>>>
   RequestParameterUpdate(RequestedConnectionParameters parameters) = 0;
 
   /// Connect to an L2CAP LE connection-oriented channel.
   /// @param parameters The parameters to configure the channel with.
   /// @return The result of the connection procedure. On success, contains a
   /// `Channel` that can be used to exchange data.
-  virtual async2::OnceReceiver<pw::Result<Channel::Ptr>> ConnectL2cap(
+  virtual async2::OptionalValueFuture<pw::Result<Channel::Ptr>> ConnectL2cap(
       ConnectL2capParameters parameters) = 0;
 
  private:

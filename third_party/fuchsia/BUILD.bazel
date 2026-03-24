@@ -16,6 +16,7 @@ load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("@rules_license//rules:license.bzl", "license")
 load("@rules_python//sphinxdocs:sphinx_docs_library.bzl", "sphinx_docs_library")
 load("//pw_build:compatibility.bzl", "incompatible_with_mcu")
+load("//pw_build:python.bzl", "pw_py_binary")
 
 package(
     default_applicable_licenses = [":license_fuchsia"],
@@ -97,4 +98,9 @@ sphinx_docs_library(
         "docs.rst",
     ],
     target_compatible_with = incompatible_with_mcu(),
+)
+
+pw_py_binary(
+    name = "generate_fuchsia_patch",
+    srcs = ["generate_fuchsia_patch.py"],
 )

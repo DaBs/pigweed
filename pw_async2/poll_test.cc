@@ -14,14 +14,21 @@
 
 #include "pw_async2/poll.h"
 
+#include <optional>
 #include <type_traits>
 
-#include "gtest/gtest.h"
 #include "pw_async2/try.h"
 #include "pw_result/result.h"
+#include "pw_unit_test/framework.h"
 
 namespace pw::async2 {
 namespace {
+
+static_assert(std::is_void_v<Poll<>::value_type>,
+              "Default Poll<> type is void");
+
+static_assert(std::is_same_v<Poll<Result<int>>, PollResult<int>>);
+static_assert(std::is_same_v<Poll<std::optional<int>>, PollOptional<int>>);
 
 class MoveOnly {
  public:
@@ -83,6 +90,7 @@ TEST(Poll, ConstructsPendingFromPendingType) {
 
 TEST(Poll, ConstructorInfersValueType) {
   auto res = Poll("hello");
+  static_assert(std::is_same_v<decltype(res)::value_type, const char*>);
   static_assert(std::is_same_v<decltype(res), Poll<const char*>>);
   EXPECT_TRUE(res.IsReady());
   EXPECT_STREQ(res.value(), "hello");
@@ -144,7 +152,7 @@ TEST(ReadyFunction, ConstructsReadyFromValueType) {
   EXPECT_EQ(mr->value(), 5);
 }
 
-Poll<Result<int>> EndToEndTest(int input) {
+PollResult<int> EndToEndTest(int input) {
   if (input == 0) {
     // Check that returning plain ``Status`` works.
     return Status::PermissionDenied();
@@ -174,32 +182,32 @@ Poll<Result<int>> EndToEndTest(int input) {
 }
 
 TEST(EndToEndTest, ReturnsStatus) {
-  Poll<Result<int>> result = EndToEndTest(0);
+  PollResult<int> result = EndToEndTest(0);
   ASSERT_TRUE(result.IsReady());
   EXPECT_EQ(result->status(), Status::PermissionDenied());
 }
 
 TEST(EndToEndTest, ReturnsPending) {
-  Poll<Result<int>> result = EndToEndTest(1);
+  PollResult<int> result = EndToEndTest(1);
   EXPECT_FALSE(result.IsReady());
 }
 
 TEST(EndToEndTest, ReturnsValue) {
-  Poll<Result<int>> result = EndToEndTest(3);
+  PollResult<int> result = EndToEndTest(3);
   ASSERT_TRUE(result.IsReady());
   ASSERT_TRUE(result->ok());
   EXPECT_EQ(**result, 3);
 }
 
 TEST(EndToEndTest, ReturnsReady) {
-  Poll<Result<int>> result = EndToEndTest(4);
+  PollResult<int> result = EndToEndTest(4);
   ASSERT_TRUE(result.IsReady());
   ASSERT_TRUE(result->ok());
   EXPECT_EQ(**result, 4);
 }
 
 TEST(EndToEndTest, ReturnsPollStatus) {
-  Poll<Result<int>> result = EndToEndTest(5);
+  PollResult<int> result = EndToEndTest(5);
   ASSERT_TRUE(result.IsReady());
   EXPECT_EQ(result->status(), Status::DataLoss());
 }

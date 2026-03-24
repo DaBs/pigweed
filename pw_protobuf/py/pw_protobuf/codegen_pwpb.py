@@ -13,6 +13,7 @@
 # the License.
 """This module defines the generated code for pw_protobuf C++ classes."""
 
+from __future__ import annotations
 import abc
 from dataclasses import dataclass
 import enum
@@ -41,6 +42,11 @@ PROTO_CC_EXTENSION = '.pwpb.cc'
 
 PROTOBUF_NAMESPACE = '::pw::protobuf'
 _INTERNAL_NAMESPACE = '::pw::protobuf::internal'
+_STREAM_ENCODER = f'{PROTOBUF_NAMESPACE}::StreamEncoder'
+
+
+def _encoder_cast(to_type: str) -> str:
+    return f'{PROTOBUF_NAMESPACE}::StreamEncoderCast<{to_type}>'
 
 
 @dataclass
@@ -82,38 +88,43 @@ class ClassType(enum.Enum):
     # MEMORY_DECODER = 3
     STREAMING_DECODER = 4
 
+    @staticmethod
+    def types_in_definition_order() -> Iterable[ClassType]:
+        """Returns all class types in the order they should be defined."""
+        # These classes have inter-dependencies, so they
+        # need to be defined in this order.
+        return (
+            ClassType.STREAMING_ENCODER,
+            ClassType.MEMORY_ENCODER,
+            ClassType.STREAMING_DECODER,
+        )
+
     def base_class_name(self) -> str:
         """Returns the base class used by this class type."""
-        if self is self.STREAMING_ENCODER:
-            return 'StreamEncoder'
-        if self is self.MEMORY_ENCODER:
-            return 'MemoryEncoder'
-        if self is self.STREAMING_DECODER:
-            return 'StreamDecoder'
-
-        raise ValueError('Unknown class type')
+        return {
+            ClassType.STREAMING_ENCODER: 'StreamEncoder',
+            ClassType.MEMORY_ENCODER: 'MemoryEncoder',
+            ClassType.STREAMING_DECODER: 'StreamDecoder',
+        }[self]
 
     def codegen_class_name(self) -> str:
         """Returns the base class used by this class type."""
-        if self is self.STREAMING_ENCODER:
-            return 'StreamEncoder'
-        if self is self.MEMORY_ENCODER:
-            return 'MemoryEncoder'
-        if self is self.STREAMING_DECODER:
-            return 'StreamDecoder'
-
-        raise ValueError('Unknown class type')
+        return {
+            ClassType.STREAMING_ENCODER: 'StreamEncoder',
+            ClassType.MEMORY_ENCODER: 'MemoryEncoder',
+            ClassType.STREAMING_DECODER: 'StreamDecoder',
+        }[self]
 
     def is_encoder(self) -> bool:
         """Returns True if this class type is an encoder."""
-        if self is self.STREAMING_ENCODER:
-            return True
-        if self is self.MEMORY_ENCODER:
-            return True
-        if self is self.STREAMING_DECODER:
-            return False
+        return {
+            ClassType.STREAMING_ENCODER: True,
+            ClassType.MEMORY_ENCODER: True,
+            ClassType.STREAMING_DECODER: False,
+        }[self]
 
-        raise ValueError('Unknown class type')
+    def is_decoder(self) -> bool:
+        return not self.is_encoder()
 
 
 # protoc captures stdout, so we need to printf debug to stderr.
@@ -220,6 +231,10 @@ class ProtoMethod(ProtoMember):
         super().__init__(codegen_options, field, scope, root)
         self._base_class: str = base_class
 
+    def template_id(self) -> str | None:  # pylint: disable=no-self-use
+        """A full template identifier, or None if not a template."""
+        return None
+
     @abc.abstractmethod
     def params(self) -> list[tuple[str, str]]:
         """Returns the parameters of the method as a list of (type, name) pairs.
@@ -266,6 +281,11 @@ class ProtoMethod(ProtoMember):
 
     def param_string(self) -> str:
         return ', '.join([f'{type} {name}' for type, name in self.params()])
+
+    def _encoder_type(self, from_root: bool = False) -> str:
+        return '{}::StreamEncoder'.format(
+            self._relative_type_namespace(from_root)
+        )
 
 
 class WriteMethod(ProtoMethod):
@@ -717,18 +737,48 @@ class SubMessageEncoderMethod(ProtoMethod):
         return 'Get{}Encoder'.format(self._field.name())
 
     def return_type(self, from_root: bool = False) -> str:
-        return '{}::StreamEncoder'.format(
-            self._relative_type_namespace(from_root)
-        )
+        return self._encoder_type(from_root)
 
     def params(self) -> list[tuple[str, str]]:
         return []
 
     def body(self) -> list[str]:
-        line = 'return {}::StreamEncoder({}::GetNestedEncoder({}));'.format(
-            self._relative_type_namespace(), self._base_class, self.field_cast()
+        line = 'return {}({}::GetNestedEncoder({}));'.format(
+            self._encoder_type(), self._base_class, self.field_cast()
         )
         return [line]
+
+    # Submessage methods are not defined within the class itself because the
+    # submessage class may not yet have been defined.
+    def in_class_definition(self) -> bool:
+        return False
+
+
+class WriteNestedMessageMethod(ProtoMethod):
+    """Method which writes a sub-message via a two-pass sub-message encode."""
+
+    def name(self) -> str:
+        return 'Write{}Message'.format(self._field.name())
+
+    def template_id(self) -> str | None:
+        return 'template <typename WriteFunc>'
+
+    def return_type(self, from_root: bool = False) -> str:
+        return '::pw::Status'
+
+    def params(self) -> list[tuple[str, str]]:
+        return [('WriteFunc', 'write_message')]
+
+    def body(self) -> list[str]:
+        encoder_cast_func = _encoder_cast(self._encoder_type())
+        return [
+            f'return {self._base_class}::WriteNestedMessage(',
+            f'    {self.field_cast()},',
+            f'    [&write_message]({_STREAM_ENCODER}& encoder) {{',
+            f'      return write_message({encoder_cast_func}(encoder));',
+            '    }',
+            ');',
+        ]
 
     # Submessage methods are not defined within the class itself because the
     # submessage class may not yet have been defined.
@@ -2216,6 +2266,22 @@ class BytesWriteMethod(WriteMethod):
         return 'WriteBytes'
 
 
+class BytesCallbackWriteMethod(WriteMethod):
+    """Method which writes a proto bytes value using a callback"""
+
+    def params(self) -> list[tuple[str, str]]:
+        return [
+            ('size_t', 'num_bytes'),
+            (
+                'const pw::Function<pw::Status(pw::stream::Writer&)>&',
+                'write_fn',
+            ),
+        ]
+
+    def _encoder_fn(self) -> str:
+        return 'WriteBytes'
+
+
 class BytesReadMethod(ReadMethod):
     """Method which reads a proto bytes value."""
 
@@ -2701,12 +2767,18 @@ PROTO_FIELD_WRITE_METHODS: dict[int, list] = {
         PackedBoolWriteMethod,
         PackedBoolWriteVectorMethod,
     ],
-    descriptor_pb2.FieldDescriptorProto.TYPE_BYTES: [BytesWriteMethod],
+    descriptor_pb2.FieldDescriptorProto.TYPE_BYTES: [
+        BytesWriteMethod,
+        BytesCallbackWriteMethod,
+    ],
     descriptor_pb2.FieldDescriptorProto.TYPE_STRING: [
         StringLenWriteMethod,
         StringWriteMethod,
     ],
-    descriptor_pb2.FieldDescriptorProto.TYPE_MESSAGE: [SubMessageEncoderMethod],
+    descriptor_pb2.FieldDescriptorProto.TYPE_MESSAGE: [
+        SubMessageEncoderMethod,
+        WriteNestedMessageMethod,
+    ],
     descriptor_pb2.FieldDescriptorProto.TYPE_ENUM: [
         EnumWriteMethod,
         PackedEnumWriteMethod,
@@ -2964,7 +3036,7 @@ def generate_class_for_message(
             output.write_line(
                 f'operator {stream_type}&() '
                 f' {{ return static_cast<{stream_type}&>('
-                f'*static_cast<{PROTOBUF_NAMESPACE}::StreamEncoder*>(this));}}'
+                f'*static_cast<{_STREAM_ENCODER}*>(this));}}'
             )
 
         # Add a typed Field() member to StreamDecoder
@@ -2983,7 +3055,7 @@ def generate_class_for_message(
             output.write_line('}')
 
         # Generate entry for message table read or write methods.
-        if class_type == ClassType.STREAMING_DECODER:
+        if class_type.is_decoder():
             output.write_line()
             output.write_line('::pw::Status Read(Message& message) {')
             with output.indent():
@@ -2993,10 +3065,7 @@ def generate_class_for_message(
                     'kMessageFields);'
                 )
             output.write_line('}')
-        elif class_type in (
-            ClassType.STREAMING_ENCODER,
-            ClassType.MEMORY_ENCODER,
-        ):
+        elif class_type.is_encoder():
             output.write_line()
             output.write_line('::pw::Status Write(const Message& message) {')
             with output.indent():
@@ -3020,6 +3089,9 @@ def generate_class_for_message(
                     f'{method.return_type()} '
                     f'{method.name()}({method.param_string()})'
                 )
+
+                if template_id := method.template_id():
+                    output.write_line(template_id)
 
                 if not method.in_class_definition():
                     # Method will be defined outside of the class at the end of
@@ -3070,6 +3142,8 @@ def define_not_in_class_methods(
                 f'inline {method.return_type(from_root=True)} '
                 f'{class_name}::{method.name()}({method.param_string()})'
             )
+            if template_id := method.template_id():
+                output.write_line(template_id)
             output.write_line(f'{method_signature} {{')
             with output.indent():
                 for line in method.body():
@@ -3164,19 +3238,54 @@ def generate_to_string_for_enum(
     enum_name = proto_enum.cpp_namespace(root=root)
     output.write_line(
         f'// Returns string names for {enum_name}; '
-        'returns "" for invalid enum values.'
+        'returns `invalid` (defaults to "") for invalid enum values.'
     )
     output.write_line(
-        f'constexpr const char* {enum_name}ToString({enum_name} value) {{'
+        f'constexpr const char* {enum_name}ToString('
+        + f'{enum_name} value, const char* invalid = "") {{'
     )
     with output.indent():
         output.write_line('switch (value) {')
         with output.indent():
             for name, _ in proto_enum.values():
                 output.write_line(f'case {enum_name}::{name}: return "{name}";')
-            output.write_line('default: return "";')
+            output.write_line('default: return invalid;')
         output.write_line('}')
     output.write_line('}')
+
+
+def generate_values_array_for_enum(
+    proto_enum: ProtoEnum, root: ProtoNode, output: OutputFile
+) -> None:
+    """Creates a C++ array of all values for a proto enum."""
+    assert proto_enum.type() == ProtoNode.Type.ENUM
+
+    enum_name = proto_enum.cpp_namespace(root=root)
+    num_values = len(proto_enum.values())
+    array_type = f'std::array<{enum_name}, {num_values}>'
+    var_name = f'k{enum_name}Values'
+
+    output.write_line(f'// An array of all {enum_name} values.')
+    output.write_line(f'inline constexpr {array_type} {var_name} = {{')
+    with output.indent():
+        for name, _ in proto_enum.values():
+            output.write_line(f'{enum_name}::{name},')
+    output.write_line('};')
+
+
+def generate_all_for_enum(
+    proto_enum: ProtoEnum, root: ProtoNode, output: OutputFile
+) -> None:
+    """Creates all C++ code for a proto enum."""
+    generate_funcs = (
+        generate_code_for_enum,
+        generate_function_for_enum,
+        generate_to_string_for_enum,
+        generate_values_array_for_enum,
+    )
+    for generate in generate_funcs:
+        output.write_line()
+        generate(proto_enum, root, output)
 
 
 def forward_declare(
@@ -3211,7 +3320,7 @@ def forward_declare(
         max_size = prop.max_size()
         if max_size:
             output.write_line(
-                f'static constexpr size_t {prop.max_size_constant_name()} '
+                f'inline constexpr size_t {prop.max_size_constant_name()} '
                 f'= {max_size};'
             )
 
@@ -3231,12 +3340,7 @@ def forward_declare(
     # Declare the message's enums.
     for child in message.children():
         if child.type() == ProtoNode.Type.ENUM:
-            output.write_line()
-            generate_code_for_enum(cast(ProtoEnum, child), message, output)
-            output.write_line()
-            generate_function_for_enum(cast(ProtoEnum, child), message, output)
-            output.write_line()
-            generate_to_string_for_enum(cast(ProtoEnum, child), message, output)
+            generate_all_for_enum(cast(ProtoEnum, child), message, output)
 
     output.write_line(f'}}  // namespace {namespace}')
 
@@ -3426,23 +3530,6 @@ def generate_sizes_for_message(
     if len(statically_known_property_sizes) == len(all_property_sizes):
         output.write_line('inline constexpr size_t kMaxEncodedSizeBytes =')
         sum_sizes(all_property_sizes)
-    else:
-        # TODO: b/379868242 - Temporarily keep the old `kMaxEncodedSizeBytes`
-        # definition to allow projects to migrate to using
-        # `kMaxEncodedSizeBytesWithoutValues` where appropriate.
-        # This else block should be removed following migration.
-        output.write_line(
-            '// This size is misleading as this generated struct contains '
-            'callback-based'
-        )
-        output.write_line('// fields, whose value sizes are unconstrained.')
-        output.write_line(
-            '// Future versions of pw_protobuf will not generate this constant '
-            'for this struct.'
-        )
-        output.write_line('// Use `kMaxEncodedSizeBytesWithoutValues` instead.')
-        output.write_line('inline constexpr size_t kMaxEncodedSizeBytes =')
-        sum_sizes(all_property_sizes)
 
     output.write_line(
         'inline constexpr size_t kMaxEncodedSizeBytesWithoutValues ='
@@ -3498,6 +3585,24 @@ def generate_find_functions_for_message(
             output.write_line('}')
 
     output.write_line(f'}}  // namespace {namespace}')
+
+
+def generate_all_for_message(
+    message: ProtoMessage,
+    root: ProtoNode,
+    output: OutputFile,
+    codegen_options: GeneratorOptions,
+) -> None:
+    """Creates C++ code for a protobuf message."""
+    generate_funcs = (
+        generate_struct_for_message,
+        generate_table_for_message,
+        generate_sizes_for_message,
+        generate_find_functions_for_message,
+    )
+    for generate in generate_funcs:
+        output.write_line()
+        generate(message, root, output, codegen_options)
 
 
 def generate_is_trivially_comparable_specialization(
@@ -3616,79 +3721,35 @@ def generate_code_for_package(
     # Define all top-level enums.
     for node in package.children():
         if node.type() == ProtoNode.Type.ENUM:
-            output.write_line()
-            generate_code_for_enum(cast(ProtoEnum, node), package, output)
-            output.write_line()
-            generate_function_for_enum(cast(ProtoEnum, node), package, output)
-            output.write_line()
-            generate_to_string_for_enum(cast(ProtoEnum, node), package, output)
+            generate_all_for_enum(cast(ProtoEnum, node), package, output)
+
+    messages = list(dependency_sorted_messages(package))
 
     # Run through all messages, generating structs and classes for each.
-    messages = []
-    for message in dependency_sorted_messages(package):
-        output.write_line()
-        generate_struct_for_message(message, package, output, codegen_options)
-        output.write_line()
-        generate_table_for_message(message, package, output, codegen_options)
-        output.write_line()
-        generate_sizes_for_message(message, package, output, codegen_options)
-        output.write_line()
-        generate_find_functions_for_message(
-            message,
-            package,
-            output,
-            codegen_options,
-        )
-        output.write_line()
-        generate_class_for_message(
-            message,
-            package,
-            output,
-            codegen_options,
-            ClassType.STREAMING_ENCODER,
-        )
-        output.write_line()
-        generate_class_for_message(
-            message,
-            package,
-            output,
-            codegen_options,
-            ClassType.MEMORY_ENCODER,
-        )
-        output.write_line()
-        generate_class_for_message(
-            message,
-            package,
-            output,
-            codegen_options,
-            ClassType.STREAMING_DECODER,
-        )
-        messages.append(message)
+    for message in messages:
+        generate_all_for_message(message, package, output, codegen_options)
+
+        for class_type in ClassType.types_in_definition_order():
+            output.write_line()
+            generate_class_for_message(
+                message,
+                package,
+                output,
+                codegen_options,
+                class_type,
+            )
 
     # Run a second pass through the messages, this time defining all of the
     # methods which were previously only declared.
     for message in messages:
-        define_not_in_class_methods(
-            message,
-            package,
-            output,
-            codegen_options,
-            ClassType.STREAMING_ENCODER,
-        )
-        define_not_in_class_methods(
-            message,
-            package,
-            output,
-            codegen_options,
-            ClassType.MEMORY_ENCODER,
-        )
-        define_not_in_class_methods(
-            message,
-            package,
-            output,
-            codegen_options,
-            ClassType.STREAMING_DECODER,
-        )
+        for class_type in ClassType.types_in_definition_order():
+            define_not_in_class_methods(
+                message,
+                package,
+                output,
+                codegen_options,
+                class_type,
+            )
 
     if package.cpp_namespace():
         output.write_line(f'\n}}  // namespace {package.cpp_namespace()}')

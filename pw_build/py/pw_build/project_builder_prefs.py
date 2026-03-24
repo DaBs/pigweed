@@ -209,11 +209,11 @@ class ProjectBuilderPrefs(yaml_config_loader_mixin.YamlConfigLoaderMixin):
                 if build_dir not in changed_settings['build_system_commands']:
                     # Build dir has no defined build system command. Set the
                     # fallback default.
-                    changed_settings['build_system_commands'][
-                        'default'
-                    ] = fallback_build_config['build_system_commands'][
-                        'default'
-                    ]
+                    changed_settings['build_system_commands']['default'] = (
+                        fallback_build_config['build_system_commands'][
+                            'default'
+                        ]
+                    )
 
         # If no targets are on the command line, set them via the fallback.
         if (

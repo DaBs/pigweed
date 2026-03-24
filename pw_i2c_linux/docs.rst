@@ -8,15 +8,17 @@ pw_i2c_linux
 
 ``pw_i2c_linux`` implements the ``pw_i2c`` interface using the Linux userspace
 ``i2c-dev`` driver. Transfers are executed using blocking ``ioctl`` calls.
-Write+read transactions are implemented atomically using a single system call,
-and a retry mechanism is used to support bus arbitration between multiple
+Arbitrary-order read and write messages are supported by one underlying system
+call. A retry mechanism is used to support bus arbitration between multiple
 controllers.
+
+Support for ten-bit addresses and the no-start flag is enabled but depends
+on underlying support by the linux-managed device.
 
 -------------
 API reference
 -------------
-.. doxygenclass:: pw::i2c::LinuxInitiator
-   :members:
+Moved: :cc:`pw_i2c_linux`
 
 --------
 Examples
@@ -82,9 +84,36 @@ can be done by initializing a function-local static variable with a lambda:
    pw::i2c::Device device(*initiator, address);
    // Use device to talk to address.
 
--------
-Caveats
--------
-Only 7-bit addresses are supported right now, but it should be possible to add
-support for 10-bit addresses with minimal changes - as long as the Linux driver
-supports 10-bit addresses.
+.. _module-pw_i2c_linux-cli:
+
+----------------------
+Command-line interface
+----------------------
+This module also provides a tool also named ``pw_i2c_linux_cli`` which
+provides a basic command-line interface to the library.
+
+Usage:
+
+.. code-block:: none
+
+   Usage: pw_i2c_linux_cli -D DEVICE -A|-a ADDR [flags]
+
+   Required flags:
+     -A/--addr10   Target address, 0x prefix allowed (10-bit i2c extension)
+     -a/--address  Target address, 0x prefix allowed (7-bit standard i2c)
+     -D/--device   I2C device path (e.g. /dev/i2c-0)
+
+   Optional flags:
+     -h/--human    Human-readable output (default: binary, unless output to stdout tty)
+     -i/--input    Input file, or - for stdin
+                   If not given, no data is sent.
+     -l/--lsb      LSB first (default: MSB first)
+     -o/--output   Output file (default: stdout)
+     -r/--rx-count Number of bytes to receive (defaults to size of input)
+
+Example:
+
+.. code-block:: none
+
+   # Read register 0x0950 (Write two bytes then read one byte)
+   $ echo -en "\\x9\\x50" | pw_i2c_linux_cli -D /dev/i2c-2 -a 0x09 -i - -r 1

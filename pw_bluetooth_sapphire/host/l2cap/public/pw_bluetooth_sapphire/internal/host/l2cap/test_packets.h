@@ -96,6 +96,12 @@ DynamicByteBuffer AclLeCreditBasedConnectionRsp(
     uint16_t credits,
     LECreditBasedConnectionResult result);
 
+DynamicByteBuffer AclFlowControlCreditInd(
+    l2cap::CommandId id,
+    hci_spec::ConnectionHandle link_handle,
+    l2cap::ChannelId cid,
+    uint16_t credits);
+
 // S-Frame Packets
 
 DynamicByteBuffer AclSFrame(hci_spec::ConnectionHandle link_handle,
@@ -109,8 +115,8 @@ inline DynamicByteBuffer AclSFrameReceiverReady(
     hci_spec::ConnectionHandle link_handle,
     l2cap::ChannelId channel_id,
     uint8_t receive_seq_num,
-    bool is_poll_request,
-    bool is_poll_response) {
+    bool is_poll_request = false,
+    bool is_poll_response = false) {
   return AclSFrame(link_handle,
                    channel_id,
                    internal::SupervisoryFunction::ReceiverReady,
@@ -140,6 +146,17 @@ DynamicByteBuffer AclIFrame(hci_spec::ConnectionHandle link_handle,
                             uint8_t receive_seq_num,
                             uint8_t tx_seq,
                             bool is_poll_response,
+                            const ByteBuffer& payload);
+// K-Frame Packets
+
+DynamicByteBuffer AclKFrame(hci_spec::ConnectionHandle link_handle,
+                            l2cap::ChannelId channel_id,
+                            const ByteBuffer& payload);
+
+// B-Frame Packets
+
+DynamicByteBuffer AclBFrame(hci_spec::ConnectionHandle link_handle,
+                            l2cap::ChannelId channel_id,
                             const ByteBuffer& payload);
 
 }  // namespace bt::l2cap::testing

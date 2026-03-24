@@ -39,6 +39,10 @@ class NanopbUnaryResponseClientCall : public UnaryResponseClientCall {
                         Function<void(Status)>&& on_error,
                         const Request&... request)
       PW_LOCKS_EXCLUDED(rpc_lock()) {
+    PW_ASSERT(PW_RPC_ALLOW_INVOCATIONS_ON_STACK);  // RPC client calls on the
+                                                   // stack are not allowed. Use
+                                                   // DynamicClient instead.
+
     rpc_lock().lock();
     CallType call(
         client.ClaimLocked(), channel_id, service_id, method_id, serde);
@@ -131,6 +135,10 @@ class NanopbStreamResponseClientCall : public StreamResponseClientCall {
                         Function<void(Status)>&& on_error,
                         const Request&... request)
       PW_LOCKS_EXCLUDED(rpc_lock()) {
+    PW_ASSERT(PW_RPC_ALLOW_INVOCATIONS_ON_STACK);  // RPC client calls on the
+                                                   // stack are not allowed. Use
+                                                   // DynamicClient instead.
+
     rpc_lock().lock();
     CallType call(
         client.ClaimLocked(), channel_id, service_id, method_id, serde);
@@ -223,6 +231,7 @@ class NanopbClientReaderWriter
 
   using internal::Call::active;
   using internal::Call::channel_id;
+  using internal::Call::MaxWriteSizeBytes;
 
   using internal::ClientCall::id;
 
@@ -297,6 +306,7 @@ class NanopbClientReader
 
   using internal::Call::active;
   using internal::Call::channel_id;
+  using internal::Call::MaxWriteSizeBytes;
 
   using internal::ClientCall::id;
 
@@ -342,6 +352,7 @@ class NanopbClientWriter
 
   using internal::Call::active;
   using internal::Call::channel_id;
+  using internal::Call::MaxWriteSizeBytes;
 
   using internal::ClientCall::id;
 
@@ -391,6 +402,7 @@ class NanopbUnaryReceiver
 
   using internal::Call::active;
   using internal::Call::channel_id;
+  using internal::Call::MaxWriteSizeBytes;
 
   using internal::ClientCall::id;
 

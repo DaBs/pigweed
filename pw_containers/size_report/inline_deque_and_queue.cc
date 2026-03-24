@@ -13,7 +13,8 @@
 // the License.
 
 #include "pw_bloat/bloat_this_binary.h"
-#include "pw_containers/size_report/inline_deque.h"
+#include "pw_containers/inline_deque.h"
+#include "pw_containers/size_report/deque.h"
 #include "pw_containers/size_report/inline_queue.h"
 
 namespace pw::containers::size_report {
@@ -21,7 +22,8 @@ namespace pw::containers::size_report {
 int Measure() {
   volatile uint32_t mask = bloat::kDefaultMask;
   auto& items = GetItems<V1>();
-  return MeasureInlineDeque<V1>(items.begin(), items.end(), mask) +
+  auto& inline_deque = GetContainer<InlineDeque<V1, kNumItems>>();
+  return MeasureDeque(inline_deque, items.begin(), items.end(), mask) +
          MeasureInlineQueue<V1>(items.begin(), items.end(), mask);
 }
 

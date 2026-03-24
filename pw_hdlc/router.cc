@@ -14,27 +14,39 @@
 
 #include "pw_hdlc/router.h"
 
-#include <inttypes.h>
-
 #include <algorithm>
+#include <cinttypes>
 
 #include "pw_hdlc/encoder.h"
 #include "pw_log/log.h"
 #include "pw_multibuf/multibuf.h"
-#include "pw_multibuf/stream.h"
+#include "pw_multibuf/v1/stream.h"
 #include "pw_result/result.h"
 #include "pw_stream/null_stream.h"
+
+// TODO: b/416564319 - There is an issue with the newlib configuration in one of
+// Pigweed's stm32 builds which results in it not defining the PRIu64 macro.
+// This workaround truncates printed addresses on those systems.
+#if defined(__NEWLIB__) && !defined(PRIu64)
+#define PW_HDLC_ADDR_FMT() "u"
+#define PW_HDLC_ADDR_CAST(addr) static_cast<unsigned>(addr)
+#else
+#define PW_HDLC_ADDR_FMT() PRIu64
+#define PW_HDLC_ADDR_CAST(addr) (addr)
+#endif
 
 namespace pw::hdlc {
 
 using ::pw::async2::Context;
 using ::pw::async2::Pending;
 using ::pw::async2::Poll;
+using ::pw::async2::PollOptional;
+using ::pw::async2::PollResult;
 using ::pw::async2::Ready;
 using ::pw::channel::ByteReaderWriter;
 using ::pw::channel::DatagramReaderWriter;
-using ::pw::multibuf::Chunk;
 using ::pw::multibuf::MultiBuf;
+using ::pw::multibuf::v1::Chunk;
 using ::pw::stream::CountingNullStream;
 
 namespace {
@@ -145,9 +157,10 @@ Poll<> Router::PollDeliverIncomingFrame(Context& cx, const Frame& frame) {
   uint64_t address = frame.address();
   ChannelData* channel = FindChannelForReceiveAddress(address);
   if (channel == nullptr) {
-    PW_LOG_ERROR("Received incoming HDLC packet with address %" PRIu64
-                 ", but no channel with that incoming address is registered.",
-                 address);
+    PW_LOG_ERROR("Received incoming HDLC packet with address %"
+                 PW_HDLC_ADDR_FMT() ", but no channel with that incoming "
+                 "address is registered.",
+                 PW_HDLC_ADDR_CAST(address));
     return Ready();
   }
   Poll<Status> ready_to_write = channel->channel->PendReadyToWrite(cx);
@@ -155,13 +168,13 @@ Poll<> Router::PollDeliverIncomingFrame(Context& cx, const Frame& frame) {
     return Pending();
   }
   if (!ready_to_write->ok()) {
-    PW_LOG_ERROR("Channel at incoming HDLC address %" PRIu64
+    PW_LOG_ERROR("Channel at incoming HDLC address %" PW_HDLC_ADDR_FMT()
                  " became unwriteable. Status: %d",
-                 channel->receive_address,
+                 PW_HDLC_ADDR_CAST(channel->receive_address),
                  ready_to_write->code());
     return Ready();
   }
-  Poll<std::optional<MultiBuf>> buffer =
+  PollOptional<MultiBuf> buffer =
       channel->channel->PendAllocateWriteBuffer(cx, data.size());
   if (buffer.IsPending()) {
     return Pending();
@@ -169,9 +182,9 @@ Poll<> Router::PollDeliverIncomingFrame(Context& cx, const Frame& frame) {
   if (!buffer->has_value()) {
     PW_LOG_ERROR(
         "Unable to allocate a buffer of size %zu destined for incoming "
-        "HDLC address %" PRIu64 ". Packet will be discarded.",
+        "HDLC address %" PW_HDLC_ADDR_FMT() ". Packet will be discarded.",
         data.size(),
-        frame.address());
+        PW_HDLC_ADDR_CAST(frame.address()));
     return Ready();
   }
   std::copy(frame.data().begin(), frame.data().end(), (**buffer).begin());
@@ -179,9 +192,9 @@ Poll<> Router::PollDeliverIncomingFrame(Context& cx, const Frame& frame) {
   if (!write_status.ok()) {
     PW_LOG_ERROR(
         "Failed to write a buffer of size %zu destined for incoming HDLC "
-        "address %" PRIu64 ". Status: %d",
+        "address %" PW_HDLC_ADDR_FMT() ". Status: %d",
         data.size(),
-        channel->receive_address,
+        PW_HDLC_ADDR_CAST(channel->receive_address),
         write_status.code());
   }
   return Ready();
@@ -198,7 +211,7 @@ void Router::DecodeAndWriteIncoming(Context& cx) {
     }
 
     while (incoming_data_.empty()) {
-      Poll<Result<MultiBuf>> incoming = io_channel_.PendRead(cx);
+      PollResult<MultiBuf> incoming = io_channel_.PendRead(cx);
       if (incoming.IsPending()) {
         return;
       }
@@ -225,15 +238,15 @@ void Router::TryFillBufferToEncodeAndSend(Context& cx) {
   for (size_t i = 0; i < channel_datas_.size(); ++i) {
     ChannelData& cd =
         channel_datas_[(next_first_read_index_ + i) % channel_datas_.size()];
-    Poll<Result<MultiBuf>> buf_result = cd.channel->PendRead(cx);
+    PollResult<MultiBuf> buf_result = cd.channel->PendRead(cx);
     if (buf_result.IsPending()) {
       continue;
     }
     if (!buf_result->ok()) {
       if (buf_result->status().IsUnimplemented()) {
-        PW_LOG_ERROR("Channel registered for outgoing HDLC address %" PRIu64
-                     " is not readable.",
-                     cd.send_address);
+        PW_LOG_ERROR("Channel registered for outgoing HDLC address %"
+                     PW_HDLC_ADDR_FMT() " is not readable.",
+                     PW_HDLC_ADDR_CAST(cd.send_address));
       }
       // We ignore FAILED_PRECONDITION (closed) because it will be handled
       // elsewhere. OUT_OF_RANGE just means we have finished writing. No
@@ -246,10 +259,10 @@ void Router::TryFillBufferToEncodeAndSend(Context& cx) {
     if (!encoded_size.ok()) {
       PW_LOG_ERROR(
           "Unable to compute size of encoded packet for outgoing buffer of "
-          "size %zu destined for outgoing HDLC address %" PRIu64
+          "size %zu destined for outgoing HDLC address %" PW_HDLC_ADDR_FMT()
           ". Packet will be discarded.",
           buf.size(),
-          target_address);
+          PW_HDLC_ADDR_CAST(target_address));
       continue;
     }
     buffer_to_encode_and_send_ =
@@ -265,8 +278,11 @@ void Router::TryFillBufferToEncodeAndSend(Context& cx) {
 }
 
 void Router::WriteOutgoingMessages(Context& cx) {
-  while (io_channel_.is_write_open() &&
-         io_channel_.PendReadyToWrite(cx).IsReady()) {
+  while (io_channel_.is_write_open()) {
+    io_channel_.PendWrite(cx).IgnorePoll();
+    if (io_channel_.PendReadyToWrite(cx).IsPending()) {
+      return;
+    }
     TryFillBufferToEncodeAndSend(cx);
     if (!buffer_to_encode_and_send_.has_value()) {
       // No channels have new data to send.
@@ -274,7 +290,7 @@ void Router::WriteOutgoingMessages(Context& cx) {
     }
     uint64_t target_address = buffer_to_encode_and_send_->target_address;
     size_t hdlc_encoded_size = buffer_to_encode_and_send_->hdlc_encoded_size;
-    Poll<std::optional<MultiBuf>> maybe_write_buffer =
+    PollOptional<MultiBuf> maybe_write_buffer =
         io_channel_.PendAllocateWriteBuffer(cx, hdlc_encoded_size);
     if (maybe_write_buffer.IsPending()) {
       // Channel cannot write any further messages until we can allocate.
@@ -286,9 +302,9 @@ void Router::WriteOutgoingMessages(Context& cx) {
       // Sadly, we have to throw the frame away.
       PW_LOG_ERROR(
           "Unable to allocate a buffer of size %zu destined for outgoing "
-          "HDLC address %" PRIu64 ". Packet will be discarded.",
+          "HDLC address %" PW_HDLC_ADDR_FMT() ". Packet will be discarded.",
           hdlc_encoded_size,
-          target_address);
+          PW_HDLC_ADDR_CAST(target_address));
       buffer_to_encode_and_send_ = std::nullopt;
       continue;
     }
@@ -296,13 +312,13 @@ void Router::WriteOutgoingMessages(Context& cx) {
     Status encode_status =
         WriteMultiBufUIFrame(target_address,
                              buffer_to_encode_and_send_->buffer,
-                             pw::multibuf::Stream(write_buffer));
+                             pw::multibuf::v1::Stream(write_buffer));
     buffer_to_encode_and_send_ = std::nullopt;
     if (!encode_status.ok()) {
       PW_LOG_ERROR(
           "Failed to encode a buffer destined for outgoing HDLC address "
-          "%" PRIu64 ". Status: %d",
-          target_address,
+          "%" PW_HDLC_ADDR_FMT() ". Status: %d",
+          PW_HDLC_ADDR_CAST(target_address),
           encode_status.code());
       continue;
     }
@@ -310,9 +326,9 @@ void Router::WriteOutgoingMessages(Context& cx) {
     if (!write_status.ok()) {
       PW_LOG_ERROR(
           "Failed to write a buffer of size %zu destined for outgoing HDLC "
-          "address %" PRIu64 ". Status: %d",
+          "address %" PW_HDLC_ADDR_FMT() ". Status: %d",
           hdlc_encoded_size,
-          target_address,
+          PW_HDLC_ADDR_CAST(target_address),
           write_status.code());
     }
   }

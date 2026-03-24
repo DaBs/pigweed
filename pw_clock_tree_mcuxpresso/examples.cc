@@ -23,14 +23,15 @@
 PW_CONSTINIT pw::clock_tree::ClockMcuxpressoFro fro_div4(kCLOCK_FroDiv4OutEn);
 
 // Define FRG0 configuration
-const clock_frg_clk_config_t g_frg0Config_BOARD_BOOTCLOCKRUN = {
+constexpr clock_frg_clk_config_t kFrg0Config = {
     .num = 0,
     .sfg_clock_src = _clock_frg_clk_config::kCLOCK_FrgFroDiv4,
     .divider = 255U,
-    .mult = 144};
+    .mult = 144,
+};
 
-PW_CONSTINIT pw::clock_tree::ClockMcuxpressoFrgNonBlocking frg_0(
-    fro_div4, g_frg0Config_BOARD_BOOTCLOCKRUN);
+PW_CONSTINIT pw::clock_tree::ClockMcuxpressoFrgNonBlocking frg_0(fro_div4,
+                                                                 kFrg0Config);
 
 // Define clock source selector FLEXCOMM0
 PW_CONSTINIT pw::clock_tree::ClockMcuxpressoSelectorNonBlocking
@@ -128,33 +129,43 @@ PW_CONSTINIT pw::clock_tree::ClockMcuxpressoAudioPllNonBlocking
 
 // DOCSTAG: [pw_clock_tree_mcuxpresso-examples-ClockTreeElemDefs-AudioPllBypass]
 
+// DOCSTAG: [pw_clock_tree_mcuxpresso-examples-ClockTreeElemDefs-SysPll]
+
+// SysPLL configuration with ClkIn pin as clock source
+const clock_sys_pll_config_t kSysPllConfig = {
+    .sys_pll_src = kCLOCK_SysPllXtalIn, /* OSC clock */
+    .numerator = 0, /* Numerator of the SYSPLL0 fractional loop divider is 0 */
+    .denominator =
+        1, /* Denominator of the SYSPLL0 fractional loop divider is 1 */
+    .sys_pll_mult = kCLOCK_SysPllMult20 /* Divide by 20 */
+};
+
+// Define Sys PLL sourced by ClkIn pin clock source
+PW_CONSTINIT pw::clock_tree::ClockMcuxpressoSysPllNonBlocking sys_pll(
+    clk_in, kSysPllConfig, 18, 0, 0, 0);
+
+// DOCSTAG: [pw_clock_tree_mcuxpresso-examples-ClockTreeElemDefs-SysPll]
+
 PW_CONSTINIT pw::clock_tree::ClockMcuxpressoRtcNonBlocking rtc(
     clock_source_no_op);
-
-// DOCSTAG: [pw_clock_tree_mcuxpresso-examples-ClockTreeDef]
-
-// Create the clock tree
-pw::clock_tree::ClockTree clock_tree;
-
-// DOCSTAG: [pw_clock_tree_mcuxpresso-examples-ClockTreeDef]
 
 TEST(ClockTreeMcuxpresso, UseExample) {
   // DOCSTAG: [pw_clock_tree_mcuxpresso-examples-UseExample]
 
   // Enable the low-power oscillator
-  clock_tree.Acquire(lp_osc_clk);
+  lp_osc_clk.Acquire();
 
   // Enable the i3c0
-  clock_tree.Acquire(i3c0);
+  i3c0.Acquire();
 
   // Change the i3c0_divider value
-  clock_tree.SetDividerValue(i3c0_divider, 24);
+  i3c0_divider.SetDivider(24);
 
   // Enable the flexcomm0 interface
-  clock_tree.Acquire(flexcomm_0);
+  flexcomm_0.Acquire();
 
   // Disable the low-power oscillator
-  clock_tree.Release(lp_osc_clk);
+  lp_osc_clk.Release();
 
   // DOCSTAG: [pw_clock_tree_mcuxpresso-examples-UseExample]
 }
@@ -166,21 +177,34 @@ TEST(ClockTreeMcuxpresso, AudioPll) {
   // is enabled while enabling the audio PLL. If FRO_DIV8 wasn't enabled
   // before, it will only be enabled while configuring the audio PLL
   // and be disabled afterward to save power.
-  PW_TEST_EXPECT_OK(clock_tree.AcquireWith(audio_pll, fro_div8));
+  PW_TEST_EXPECT_OK(audio_pll.AcquireWith(fro_div8));
 
   // Do something while audio PLL is enabled.
 
   // Release audio PLL to save power.
-  clock_tree.Release(audio_pll);
+  audio_pll.Release();
   // DOCSTAG:[pw_clock_tree_mcuxpresso-examples-Use-AudioPll]
 }
 
+TEST(ClockTreeMcuxpresso, SysPll) {
+  // DOCSTAG:[pw_clock_tree_mcuxpresso-examples-Use-SysPll]
+
+  // Enable sys PLL.
+  sys_pll.Acquire();
+
+  // Do something while sys PLL is enabled.
+
+  // Release audio PLL to save power.
+  sys_pll.Release();
+  // DOCSTAG:[pw_clock_tree_mcuxpresso-examples-Use-sysPll]
+}
+
 TEST(ClockTreeMcuxpresso, AudioPllBypass) {
-  clock_tree.Acquire(audio_pll_bypass);
-  clock_tree.Release(audio_pll_bypass);
+  audio_pll_bypass.Acquire();
+  audio_pll_bypass.Release();
 }
 
 TEST(ClockTreeMcuxpresso, Rtc) {
-  clock_tree.Acquire(rtc);
-  clock_tree.Release(rtc);
+  rtc.Acquire();
+  rtc.Release();
 }

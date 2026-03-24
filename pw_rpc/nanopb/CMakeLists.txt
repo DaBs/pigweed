@@ -23,6 +23,7 @@ pw_add_library(pw_rpc.nanopb.server_api STATIC
     public
   PUBLIC_DEPS
     pw_bytes
+    pw_containers.storage
     pw_rpc.config
     pw_rpc.nanopb.common
     pw_rpc.raw.server_api

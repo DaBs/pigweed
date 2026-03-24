@@ -59,6 +59,14 @@ function formatDate(dt: Date) {
 
 // New LogSource to consume pw-console log json messages
 class PwConsoleLogSource extends LogSource {
+  start() {
+    // Implementation not needed as this is controlled externally.
+  }
+
+  stop() {
+    // Implementation not needed as this is controlled externally.
+  }
+
   // @ts-ignore
   appendLog(data) {
     const fields = [

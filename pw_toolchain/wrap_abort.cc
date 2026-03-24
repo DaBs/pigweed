@@ -13,7 +13,7 @@
 // the License.
 
 // This file provides an implementation of std::abort that can be used with ld's
-// --wrap option. This should be used for embedded tooclahisnt that don't have a
+// --wrap option. This should be used for embedded toolchains that don't have a
 // proper implementation of std::abort.
 
 #include "pw_assert/check.h"

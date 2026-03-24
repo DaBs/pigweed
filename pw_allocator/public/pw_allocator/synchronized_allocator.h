@@ -19,8 +19,11 @@
 #include "pw_allocator/allocator.h"
 #include "pw_sync/borrow.h"
 #include "pw_sync/lock_annotations.h"
+#include "pw_sync/no_lock.h"
 
 namespace pw::allocator {
+
+/// @submodule{pw_allocator,forwarding}
 
 /// Wraps an `Allocator` with a lock to synchronize access.
 ///
@@ -93,6 +96,13 @@ class SynchronizedAllocator : public Allocator {
     return allocator_.GetAllocated();
   }
 
+  /// @copydoc Allocator::DoMeasureFragmentation
+  std::optional<allocator::Fragmentation> DoMeasureFragmentation()
+      const override {
+    std::lock_guard lock(lock_);
+    return allocator_.MeasureFragmentation();
+  }
+
   /// @copydoc Deallocator::GetInfo
   Result<Layout> DoGetInfo(InfoType info_type, const void* ptr) const override {
     std::lock_guard lock(lock_);
@@ -108,9 +118,8 @@ class SynchronizedAllocator : public Allocator {
 ///
 /// This can be useful with allocator parameters for module configuration, e.g.
 /// PW_MALLOC_LOCK_TYPE.
-struct NoSync {
-  constexpr void lock() {}
-  constexpr void unlock() {}
-};
+using NoSync = pw::sync::NoLock;
+
+/// @}
 
 }  // namespace pw::allocator

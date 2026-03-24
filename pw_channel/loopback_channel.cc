@@ -21,10 +21,11 @@ namespace pw::channel {
 using ::pw::async2::Context;
 using ::pw::async2::Pending;
 using ::pw::async2::Poll;
+using ::pw::async2::PollResult;
 using ::pw::async2::Ready;
 using ::pw::multibuf::MultiBuf;
 
-Poll<Result<MultiBuf>> LoopbackChannel<DataType::kDatagram>::DoPendRead(
+PollResult<MultiBuf> LoopbackChannel<DataType::kDatagram>::DoPendRead(
     Context& cx) {
   if (!queue_.has_value()) {
     PW_ASYNC_STORE_WAKER(
@@ -33,7 +34,7 @@ Poll<Result<MultiBuf>> LoopbackChannel<DataType::kDatagram>::DoPendRead(
   }
   MultiBuf data = std::move(*queue_);
   queue_ = std::nullopt;
-  std::move(waker_).Wake();
+  waker_.Wake();
   return data;
 }
 
@@ -52,7 +53,7 @@ Poll<Status> LoopbackChannel<DataType::kDatagram>::DoPendReadyToWrite(
 Status LoopbackChannel<DataType::kDatagram>::DoStageWrite(MultiBuf&& data) {
   PW_DASSERT(!queue_.has_value());
   queue_ = std::move(data);
-  std::move(waker_).Wake();
+  waker_.Wake();
   return OkStatus();
 }
 
@@ -67,8 +68,7 @@ async2::Poll<Status> LoopbackChannel<DataType::kDatagram>::DoPendClose(
   return OkStatus();
 }
 
-Poll<Result<MultiBuf>> LoopbackChannel<DataType::kByte>::DoPendRead(
-    Context& cx) {
+PollResult<MultiBuf> LoopbackChannel<DataType::kByte>::DoPendRead(Context& cx) {
   if (queue_.empty()) {
     PW_ASYNC_STORE_WAKER(
         cx, read_waker_, "LoopbackChannel is waiting for incoming data");
@@ -82,7 +82,7 @@ Status LoopbackChannel<DataType::kByte>::DoStageWrite(MultiBuf&& data) {
     bool was_empty = queue_.empty();
     queue_.PushSuffix(std::move(data));
     if (was_empty) {
-      std::move(read_waker_).Wake();
+      read_waker_.Wake();
     }
   }
   return OkStatus();

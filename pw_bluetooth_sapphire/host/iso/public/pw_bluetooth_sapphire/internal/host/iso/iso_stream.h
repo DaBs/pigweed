@@ -63,22 +63,23 @@ class IsoStream : public hci::IsoDataChannel::ConnectionInterface {
       uint8_t cig_id,
       uint8_t cis_id,
       hci_spec::ConnectionHandle cis_handle,
+      hci::Transport::WeakPtr hci,
       CisEstablishedCallback on_established_cb,
-      hci::CommandChannel::WeakPtr cmd,
       pw::Callback<void()> on_closed_cb,
-      hci::IsoDataChannel* data_channel);
+      pw::bluetooth_sapphire::LeaseProvider& wake_lease_provider,
+      pw::chrono::VirtualSystemClock& clock);
 
   // Used by the client to check for queued frames. If none are present the
   // incoming data available callback will be called the next time a frame is
   // available. This allows for a 'hanging get' style interface (request a frame
   // whenever the client is ready to process one and then wait for a
   // notification) or a client-buffered interface (every time the client wants
-  // more frames request them until it receives a nullptr, and then wait for a
+  // more frames request them until it receives a nullopt, and then wait for a
   // callback to indicate that the next frame(s) are available). It is important
   // to note that the client cannot simply rely on notifications: until a read
   // attempt is unfulfilled the stream will buffer frames waiting for a read
   // from the client.
-  virtual std::unique_ptr<IsoDataPacket> ReadNextQueuedIncomingPacket() = 0;
+  virtual std::optional<IsoDataPacket> ReadNextQueuedIncomingPacket() = 0;
 
   // Send a packet over the stream. If the packet is too large then it will be
   // fragmented.

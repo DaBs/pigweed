@@ -1843,6 +1843,79 @@ class TransferManagerTest(unittest.TestCase):
         self.assertEqual(exception.resource_id, 43)
         self.assertEqual(exception.status, Status.DATA_LOSS)
 
+    def test_v2_read_transfer_restarts_on_stream_error(self) -> None:
+        """Tests that a transfer restarts if a stream error occurs."""
+        manager = pw_transfer.Manager(
+            self._service,
+            default_response_timeout_s=DEFAULT_TIMEOUT_S,
+            default_protocol_version=ProtocolVersion.VERSION_TWO,
+        )
+
+        # Enqueue a stream error, then a valid transfer sequence.
+        self._enqueue_server_error(_Method.READ, Status.FAILED_PRECONDITION)
+        self._enqueue_server_responses(
+            _Method.READ,
+            (
+                (
+                    transfer_pb2.Chunk(
+                        resource_id=39,
+                        session_id=_FIRST_SESSION_ID,
+                        type=transfer_pb2.Chunk.Type.START_ACK,
+                        protocol_version=ProtocolVersion.VERSION_TWO.value,
+                    ),
+                ),
+                (
+                    transfer_pb2.Chunk(
+                        session_id=_FIRST_SESSION_ID,
+                        type=transfer_pb2.Chunk.Type.DATA,
+                        offset=0,
+                        data=b'version two',
+                        remaining_bytes=0,
+                    ),
+                ),
+                (
+                    transfer_pb2.Chunk(
+                        session_id=_FIRST_SESSION_ID,
+                        type=transfer_pb2.Chunk.Type.COMPLETION_ACK,
+                    ),
+                ),
+            ),
+        )
+
+        data = manager.read(39)
+        self.assertEqual(data, b'version two')
+
+        start_chunk = transfer_pb2.Chunk(
+            transfer_id=39,
+            resource_id=39,
+            desired_session_id=_FIRST_SESSION_ID,
+            pending_bytes=1024,
+            max_chunk_size_bytes=1024,
+            window_end_offset=1024,
+            type=transfer_pb2.Chunk.Type.START,
+            protocol_version=ProtocolVersion.VERSION_TWO.value,
+        )
+
+        self.assertEqual(
+            self._sent_chunks,
+            [
+                start_chunk,  # Initial start chunk
+                start_chunk,  # Restarted after stream error
+                transfer_pb2.Chunk(
+                    session_id=_FIRST_SESSION_ID,
+                    type=transfer_pb2.Chunk.Type.START_ACK_CONFIRMATION,
+                    max_chunk_size_bytes=1024,
+                    window_end_offset=1024,
+                    protocol_version=ProtocolVersion.VERSION_TWO.value,
+                ),
+                transfer_pb2.Chunk(
+                    session_id=_FIRST_SESSION_ID,
+                    type=transfer_pb2.Chunk.Type.COMPLETION,
+                    status=Status.OK.value,
+                ),
+            ],
+        )
+
     def test_v2_timeout_during_opening_handshake(self) -> None:
         """Tests a timeout occurring during the opening handshake."""
         manager = pw_transfer.Manager(

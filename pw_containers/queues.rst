@@ -9,55 +9,80 @@ Queues
 A queue is an ordered collection designed to add items at one end and remove
 them from the other. This allows "first in, first out", or FIFO, behavior.
 Pigweed provides both single and double-ended queues that are backed by fixed
-storage.
+or dynamic storage.
 
----------------
-pw::InlineDeque
----------------
-.. doxygentypedef:: pw::InlineDeque
+Pigweed provides many queue and deque implementations to meet different needs.
 
-.. TODO: b/394341806 - Add missing examples
-.. Example
-.. =======
-.. .. literalinclude:: examples/inline_deque.cc
-..    :language: cpp
-..    :linenos:
-..    :start-after: [pw_containers-inline_deque]
-..    :end-before: [pw_containers-inline_deque]
+-------------------------------------------
+``std::deque`` & ``std::queue`` equivalents
+-------------------------------------------
+``pw_containers`` provides a family of deques and queues that implement the
+``std:deque`` or ``std::queue`` API, but offer much more control with
+significantly smaller code size.
 
-API reference
-=============
-.. doxygenclass:: pw::BasicInlineDeque
-   :members:
+The ``std::deque``-like containers are:
 
----------------
-pw::InlineQueue
----------------
-.. doxygentypedef:: pw::InlineQueue
+- :cc:`pw::Deque` -- uses a fixed-capacity external storage buffer
+- :cc:`pw::FixedDeque` -- uses a fixed-capacity storage buffer, which is
+  optionally owned and may be statically or dynamically allocated
+- :cc:`pw::DynamicDeque` -- dynamically allocates a storage buffer using a
+  :cc:`pw::Allocator`
+- :cc:`pw::InlineDeque` -- uses an inline, statically allocated storage buffer
 
-.. TODO: b/394341806 - Add missing examples
-.. Example
-.. =======
-.. .. literalinclude:: examples/inline_deque.cc
-..    :language: cpp
-..    :linenos:
-..    :start-after: [pw_containers-inline_deque]
-..    :end-before: [pw_containers-inline_deque]
+Equivalent ``std::queue``-like classes are also provided:
 
-API reference
-=============
-.. doxygenclass:: pw::BasicInlineQueue
-   :members:
+- :cc:`pw::Queue`
+- :cc:`pw::FixedQueue`
+- :cc:`pw::DynamicQueue`
+- :cc:`pw::InlineQueue`
 
-.. _module-pw_containers-queues-inline_var_len_entry_queue:
+.. _module-pw_containers-inlinevarlenentryqueue:
 
 --------------------------
 pw::InlineVarLenEntryQueue
 --------------------------
-.. doxygenfile:: pw_containers/inline_var_len_entry_queue.h
-   :sections: detaileddescription
+:cc:`InlineVarLenEntryQueue` is a queue of inline variable-length binary
+entries. It is implemented as a ring (circular) buffer and supports operations
+to append entries and overwrite if necessary. Entries may be zero bytes up to
+the maximum size supported by the queue.
 
-.. TODO: b/394341806 - Move code to compiled examples
+``InlineVarLenEntryQueue`` has a few interesting properties:
+
+- Data and metadata are stored inline in a contiguous block of
+  ``uint32_t``-aligned memory.
+- The data structure is trivially copyable.
+- All state changes are accomplished with a single update to a ``uint32_t``.
+  The memory is always in a valid state and may be parsed offline.
+
+This data structure is a much simpler version of ``PrefixedEntryRingBuffer``.
+Prefer this sized-entry ring buffer to ``PrefixedEntryRingBuffer`` when:
+
+- A simple ring buffer of variable-length entries is needed. Advanced
+  features like multiple readers and a user-defined preamble are not
+  required.
+- A consistent, parsable, in-memory representation is required (e.g. to
+  decode the buffer from a block of memory).
+- C support is required.
+
+``InlineVarLenEntryQueue`` is implemented in C and provides complete C and C++
+APIs. The ``InlineVarLenEntryQueue`` C++ class is structured similarly to
+:cc:`pw::InlineQueue` and :cc:`pw::Vector`.
+
+Queue vs. deque
+===============
+This module provides
+:ref:`module-pw_containers-inlinevarlenentryqueue`, but no
+corresponding ``InlineVarLenEntryDeque`` class. Following the C++ Standard
+Library style, the deque class would provide ``push_front()`` and ``pop_back()``
+operations in addition to ``push_back()`` and ``pop_front()`` (equivalent to a
+queue's ``push()`` and ``pop()``).
+
+There is no ``InlineVarLenEntryDeque`` class because there is no efficient way
+to implement ``push_front()`` and ``pop_back()``. These operations would
+necessarily be ``O(n)``, since each entry knows the position of the next entry,
+but not the previous, as in a single-linked list. Given that these operations
+would be inefficient and unlikely to be used, they are not implemented, and only
+a queue class is provided.
 
 Example
 =======
@@ -72,34 +97,38 @@ Example
 
       .. code-block:: c++
 
-         // Declare a queue with capacity sufficient for one 10-byte entry or
-         // multiple smaller entries.
-         pw::InlineVarLenEntryQueue<10> queue;
+         void GenericCapacityQueue() {
+           // Declare a queue with capacity sufficient for one 10-byte entry or
+           // multiple smaller entries.
+           pw::InlineVarLenEntryQueue<10> queue;
 
-         // Push an entry, asserting if the entry does not fit.
-         queue.push(queue, data)
+           // Push an entry, asserting if the entry does not fit.
+           queue.push(queue, data);
 
-         // Use push_overwrite() to push entries, overwriting older entries
-         // as needed.
-         queue.push_overwrite(queue, more_data)
+           // Use push_overwrite() to push entries, overwriting older entries
+           // as needed.
+           queue.push_overwrite(queue, more_data);
 
-         // Remove an entry.
-         queue.pop();
+           // Remove an entry.
+           queue.pop();
+         }
 
       Alternately, a ``InlineVarLenEntryQueue`` may be initialized in an
       existing ``uint32_t`` array.
 
       .. code-block:: c++
 
-         // Initialize a InlineVarLenEntryQueue.
-         uint32_t buffer[32];
-         auto& queue = pw::InlineVarLenEntryQueue<>::Init(buffer);
+         void InitFromArray() {
+           // Initialize a InlineVarLenEntryQueue.
+           uint32_t buffer[32];
+           auto& queue = pw::InlineVarLenEntryQueue<>::Init(buffer);
 
-         // Largest supported entry is 114 B (13 B overhead + 1 B prefix)
-         assert(queue.max_size_bytes() == 114u);
+           // Largest supported entry is 114 B (13 B overhead + 1 B prefix)
+           assert(queue.max_size_bytes() == 114u);
 
-         // Write data
-         queue.push_overwrite(data);
+           // Write data
+           queue.push_overwrite(data);
+         }
 
    .. tab-item:: C
       :sync: c
@@ -138,64 +167,29 @@ Example
          // Write some data
          pw_InlineVarLenEntryQueue_PushOverwrite(buffer, "123", 3);
 
-API reference
-=============
-C++
----
-.. doxygengroup:: inline_var_len_entry_queue_cpp_api
-   :content-only:
-   :members:
-
-C
--
-.. doxygengroup:: inline_var_len_entry_queue_c_api
-   :content-only:
-
-Python
-------
+Python API reference
+====================
 .. automodule:: pw_containers.inline_var_len_entry_queue
    :members:
 
-Queue vs. deque
-===============
-This module provides
-:ref:`module-pw_containers-queues-inline_var_len_entry_queue`, but no
-corresponding ``InlineVarLenEntryDeque`` class. Following the C++ Standard
-Library style, the deque class would provide ``push_front()`` and ``pop_back()``
-operations in addition to ``push_back()`` and ``pop_front()`` (equivalent to a
-queue's ``push()`` and ``pop()``).
-
-There is no ``InlineVarLenEntryDeque`` class because there is no efficient way
-to implement ``push_front()`` and ``pop_back()``. These operations would
-necessarily be ``O(n)``, since each entry knows the position of the next entry,
-but not the previous, as in a single-linked list. Given that these operations
-would be inefficient and unlikely to be used, they are not implemented, and only
-a queue class is provided.
-
+------------
 Size reports
 ------------
-The tables below illustrate the following scenarios:
+The tables below illustrate the memory and code size costs for various queue and
+deque implementations, with ``std::deque`` serving as a baseline. The size
+reports generally cover:
+
+* The cost of a single instance.
+* The cost of instantiating a second container of the same class with a
+  different element type, showing the impact of templates on code size.
+* The cost of using related classes, such as :cc:`pw::InlineQueue` and
+  :cc:`pw::InlineDeque` or static and dynamic :cc:`pw::FixedDeque`\s.
 
 .. TODO: b/394341806 - Add size report for InlineVarLenEntryQueue.
 
-* Scenarios related to ``InlineDeque``:
+.. include:: queues_size_report
 
-  * The memory and code size cost incurred by a adding a single ``InlineDeque``.
-  * The memory and code size cost incurred by adding another ``InlineDeque``
-    with a different type. As ``InlineDeque`` is templated on type, this
-    results in additional code being generated.
-
-* Scenarios related to ``InlineQueue``:
-
-  * The memory and code size cost incurred by a adding a single ``InlineQueue``.
-  * The memory and code size cost incurred by adding another ``InlineQueue``
-    with a different type. As ``InlineQueue`` is templated on type, this results
-    in additional code being generated.
-
-* The memory and code size cost incurred by a adding both an ``InlineDeque`` and
-  an ``InlineQueue`` of the same type. These types reuse code, so the combined
-  sum is less than the sum of its parts.
-
-.. TODO: b/388905812 - Re-enable the size report.
-.. .. include:: queues_size_report
-.. include:: ../size_report_notice
+-------------
+API reference
+-------------
+Moved: :cc:`pw_containers_queues`

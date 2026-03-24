@@ -11,11 +11,13 @@
 // WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
 // License for the specific language governing permissions and limitations under
 // the License.
-
 #pragma once
-#include <pw_assert/check.h>
 
+#include <type_traits>
+
+#include "pw_assert/check.h"
 #include "pw_random/random.h"
+
 namespace bt {
 
 // Returns the global random number generator. This returns nullptr until it is
@@ -31,7 +33,7 @@ T Random() {
   static_assert(std::is_trivial_v<T> && !std::is_pointer_v<T>,
                 "Type cannot be filled with random bytes");
   PW_DCHECK(random_generator());
-  T t;
+  T t = T{};
   random_generator()->Get({reinterpret_cast<std::byte*>(&t), sizeof(T)});
   return t;
 }

@@ -241,8 +241,7 @@ class ReplPane(WindowPane):
         desired_max_height = 10
         # Check number of line breaks in the input buffer.
         input_line_count = self.pw_ptpython_repl.line_break_count()
-        if input_line_count > desired_max_height:
-            desired_max_height = input_line_count
+        desired_max_height = max(desired_max_height, input_line_count)
         # Check if it's taller than the available space
         if desired_max_height > self.current_pane_height:
             # Leave space for minimum of
@@ -356,6 +355,7 @@ class ReplPane(WindowPane):
         self,
     ) -> list[tuple[str, Callable | None]]:
         return [
+            ('-', None),
             (
                 'Python Input > Paste',
                 self.paste_system_clipboard_to_input_buffer,

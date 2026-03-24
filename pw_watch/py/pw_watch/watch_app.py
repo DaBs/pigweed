@@ -66,7 +66,7 @@ from pw_console.log_pane import LogPane
 from pw_console.plugin_mixin import PluginMixin
 import pw_console.python_logging
 from pw_console.quit_dialog import QuitDialog
-from pw_console.style import generate_styles, get_theme_colors
+from pw_console.style import generate_styles
 from pw_console.pigweed_code_style import PigweedCodeStyle
 from pw_console.widgets import (
     FloatingWindowPane,
@@ -93,7 +93,7 @@ Mouse Keys
 
 - Click on a line in the bottom progress bar to switch to that tab.
 - Click on any tab, or button to activate.
-- Scroll wheel in the the log windows moves back through the history.
+- Scroll wheel in the log windows moves back through the history.
 
 
 Global Keys
@@ -219,10 +219,6 @@ class WatchAppPrefs(ProjectBuilderPrefs):
         self._config['ui_theme'] = new_ui_theme
 
     @property
-    def theme_colors(self):
-        return get_theme_colors(self.ui_theme)
-
-    @property
     def swap_light_and_dark(self) -> bool:
         return self._config.get('swap_light_and_dark', False)
 
@@ -275,6 +271,18 @@ class WatchAppPrefs(ProjectBuilderPrefs):
         default='',
     ) -> str:
         return default
+
+    @property
+    def recolor_log_lines_to_match_level(self) -> bool:
+        return False
+
+    @property
+    def column_width(self) -> dict[str, int]:
+        return {'time': 8}
+
+    @property
+    def column_visibility(self) -> dict[str, bool]:
+        return {}
 
     @property
     def show_python_file(self) -> bool:
@@ -577,9 +585,9 @@ class WatchApp(PluginMixin):
         def _next_error(_event):
             self.jump_to_error()
 
-        existing_log_bindings: (
-            KeyBindingsBase | None
-        ) = new_log_pane.log_content_control.key_bindings
+        existing_log_bindings: KeyBindingsBase | None = (
+            new_log_pane.log_content_control.key_bindings
+        )
 
         key_binding_list: list[KeyBindingsBase] = []
         if existing_log_bindings:

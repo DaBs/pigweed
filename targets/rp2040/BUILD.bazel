@@ -50,7 +50,7 @@ platform(
         "//pw_build/constraints/rtos:freertos",
         "//pw_cpu_exception:enabled",
         "//pw_interrupt_cortex_m:backend",
-        "@rust_crates//:no_std",
+        "//pw_build/constraints/rust:no_std",
         "@platforms//os:none",
     ],
     flags = flags_from_dict(RP2_SYSTEM_FLAGS),
@@ -134,7 +134,7 @@ cc_library(
     hdrs = [
         "config/FreeRTOSConfig.h",
     ],
-    includes = ["config/"],
+    strip_include_prefix = "config",
     target_compatible_with = [":freertos_config_cv"],
     deps = [
         "//third_party/freertos:config_assert",
@@ -157,6 +157,8 @@ cc_library(
         ":pre_init",
         "//pw_status",
         "//pw_system",
+        "//pw_thread:thread",
+        "//pw_thread_freertos:thread",
         "//pw_unit_test:rpc_service",
     ],
     alwayslink = True,
@@ -179,8 +181,12 @@ cc_library(
     hdrs = ["config/pigweed_module_config.h"],
     defines = [
         # LINT.IfChange
-        "PW_THREAD_FREERTOS_CONFIG_JOINING_ENABLED=1",
         "PW_ASSERT_BASIC_ACTION=PW_ASSERT_BASIC_ACTION_EXIT",
+        "PW_THREAD_FREERTOS_CONFIG_JOINING_ENABLED=1",
+        # TestThreadContextNative in pw_thread_freertos uses a 32Kb stack,
+        # increasing the size of test fixtures such as some in
+        # pw_bluetooth_proxy which use it by that amount.
+        "PW_UNIT_TEST_CONFIG_MEMORY_POOL_SIZE=49152",
         # LINT.ThenChange(//targets/rp2040/config/pigweed_module_config.h)
     ],
 )
@@ -232,7 +238,6 @@ pw_cc_binary(
         "//pw_multibuf:testing",
         "//pw_system:async",
         "//third_party/freertos:support",
-        "@freertos",
         "@pico-sdk//src/rp2_common/pico_stdlib",
     ],
 )

@@ -14,13 +14,16 @@
 #pragma once
 
 #include <algorithm>
+#include <atomic>
 #include <initializer_list>
 #include <limits>
 
-#include "pw_containers/intrusive_list.h"
+#include "pw_memory/no_destructor.h"
+#include "pw_metric/list.h"
 #include "pw_preprocessor/arguments.h"
 #include "pw_tokenizer/tokenize.h"
 
+/// Lightweight manual instrumentation library
 namespace pw::metric {
 
 // Currently, this is for tokens, but later may be a char* when non-tokenized
@@ -40,7 +43,7 @@ using tokenizer::Token;
 // parent groups, which would enable (1) safe destruction and (2) safe static
 // initialization, but at the cost of an additional 4 bytes per metric and 4
 // bytes per group..
-class Metric : public IntrusiveList<Metric>::Item {
+class Metric : public MetricList::Item {
  public:
   Token name() const { return name_and_type_ & kTokenMask; }
 
@@ -54,6 +57,8 @@ class Metric : public IntrusiveList<Metric>::Item {
   float as_float() const;
   uint32_t as_int() const;
 
+  ~Metric();
+
   // Dump a metric or metrics to logs. Level determines the indentation
   // indent_level up to a maximum of 4. Example output:
   //
@@ -62,7 +67,7 @@ class Metric : public IntrusiveList<Metric>::Item {
   // Note the base64-encoded token name. Detokenization tools are necessary to
   // convert this to human-readable form.
   void Dump(int indent_level, bool last) const;
-  static void Dump(const IntrusiveList<Metric>& metrics, int indent_level = 0);
+  static void Dump(const MetricList& metrics, int indent_level = 0);
 
  protected:
   constexpr Metric(Token name, float value)
@@ -71,8 +76,8 @@ class Metric : public IntrusiveList<Metric>::Item {
   constexpr Metric(Token name, uint32_t value)
       : name_and_type_((name & kTokenMask) | kTypeInt), uint_(value) {}
 
-  Metric(Token name, float value, IntrusiveList<Metric>& metrics);
-  Metric(Token name, uint32_t value, IntrusiveList<Metric>& metrics);
+  Metric(Token name, float value, MetricList& metrics);
+  Metric(Token name, uint32_t value, MetricList& metrics);
 
   // Hide mutation methods, and only offer write access through the specialized
   // TypedMetric below. This makes it impossible to call metric.Increment() on
@@ -89,13 +94,15 @@ class Metric : public IntrusiveList<Metric>::Item {
   void SetFloat(float value);
 
  private:
+  friend MetricList;
+
   // The name of this metric as a token; from PW_TOKENIZE_STRING("my_metric").
   // Last bit of the token is used to store int or float; 0 == int, 1 == float.
   Token name_and_type_;
 
   union {
-    float float_;
-    uint32_t uint_;
+    std::atomic<float> float_;
+    std::atomic<uint32_t> uint_;
   };
 
   enum : uint32_t {
@@ -118,7 +125,7 @@ template <>
 class TypedMetric<float> : public Metric {
  public:
   constexpr TypedMetric(Token name, float value) : Metric(name, value) {}
-  TypedMetric(Token name, float value, IntrusiveList<Metric>& metrics)
+  TypedMetric(Token name, float value, MetricList& metrics)
       : Metric(name, value, metrics) {}
 
   void Set(float value) { SetFloat(value); }  // namespace pw::metric
@@ -135,7 +142,7 @@ template <>
 class TypedMetric<uint32_t> : public Metric {
  public:
   constexpr TypedMetric(Token name, uint32_t value) : Metric(name, value) {}
-  TypedMetric(Token name, uint32_t value, IntrusiveList<Metric>& metrics)
+  TypedMetric(Token name, uint32_t value, MetricList& metrics)
       : Metric(name, value, metrics) {}
 
   void Increment(uint32_t amount = 1u) { Metric::Increment(amount); }
@@ -152,10 +159,10 @@ class TypedMetric<uint32_t> : public Metric {
 // A metric tree; consisting of children groups and leaf metrics.
 //
 // Size: 16 bytes/128 bits - next, name, metrics, children.
-class Group : public IntrusiveList<Group>::Item {
+class Group : public GroupList::Item {
  public:
-  constexpr Group(Token name) : name_(name) {}
-  Group(Token name, IntrusiveList<Group>& groups);
+  Group(Token name);
+  Group(Token name, GroupList& groups);
 
   Token name() const { return name_; }
 
@@ -163,14 +170,16 @@ class Group : public IntrusiveList<Group>::Item {
   Group(Group const&) = delete;
   void operator=(const Group&) = delete;
 
-  void Add(Metric& metric) { metrics_.push_front(metric); }
-  void Add(Group& group) { children_.push_front(group); }
+  ~Group();
 
-  IntrusiveList<Metric>& metrics() { return metrics_; }
-  IntrusiveList<Group>& children() { return children_; }
+  void Add(Metric& metric) { metrics_.list().push_front(metric); }
+  void Add(Group& group) { children_.list().push_front(group); }
 
-  const IntrusiveList<Metric>& metrics() const { return metrics_; }
-  const IntrusiveList<Group>& children() const { return children_; }
+  MetricList& metrics() { return metrics_; }
+  GroupList& children() { return children_; }
+
+  const MetricList& metrics() const { return metrics_; }
+  const GroupList& children() const { return children_; }
 
   // Dump a metric group or groups to logs. Level determines the indentation
   // indent_level up to a maximum of 4. Example output:
@@ -189,16 +198,18 @@ class Group : public IntrusiveList<Group>::Item {
   // Note the base64-encoded token name. Detokenization tools are necessary to
   // convert this to human-readable form.
   void Dump() const;
-  static void Dump(const IntrusiveList<Group>& groups, int indent_level = 0);
+  static void Dump(const GroupList& groups, int indent_level = 0);
 
  private:
+  friend GroupList;
+
   void Dump(int indent_level, bool last) const;
 
   // The name of this group as a token; from PW_TOKENIZE_STRING("my_group").
   Token name_;
 
-  IntrusiveList<Metric> metrics_;
-  IntrusiveList<Group> children_;
+  MetricList metrics_;
+  GroupList children_;
 };
 
 // Declare a metric, optionally adding it to a group. Use:
@@ -253,7 +264,7 @@ class Group : public IntrusiveList<Group>::Item {
 // register in a single place.
 #define PW_METRIC(...) PW_DELEGATE_BY_ARG_COUNT(_PW_METRIC_, , __VA_ARGS__)
 #define PW_METRIC_STATIC(...) \
-  PW_DELEGATE_BY_ARG_COUNT(_PW_METRIC_, static, __VA_ARGS__)
+  PW_DELEGATE_BY_ARG_COUNT(_PW_METRIC_STATIC_, static, __VA_ARGS__)
 
 // Force conversion to uint32_t for non-float types, no matter what the
 // platform uses as the "u" suffix literal. This enables dispatching to the
@@ -284,6 +295,27 @@ class Group : public IntrusiveList<Group>::Item {
   static_def ::pw::metric::TypedMetric<_PW_METRIC_FLOAT_OR_UINT32(init)>  \
       variable_name = {variable_name##_token, init, group.metrics()}
 
+// Case: PW_METRIC_STATIC(name, initial_value)
+#define _PW_METRIC_STATIC_4(static_def, variable_name, metric_name, init) \
+  static constexpr uint32_t variable_name##_token =                       \
+      PW_METRIC_TOKEN(metric_name);                                       \
+  static_def ::pw::NoDestructor<                                          \
+      ::pw::metric::TypedMetric<_PW_METRIC_FLOAT_OR_UINT32(init)>>        \
+      variable_name##_storage(variable_name##_token, init);               \
+  static_def ::pw::metric::TypedMetric<_PW_METRIC_FLOAT_OR_UINT32(init)>& \
+      variable_name [[maybe_unused]] = *variable_name##_storage
+
+// Case: PW_METRIC_STATIC(group, name, initial_value)
+#define _PW_METRIC_STATIC_5(                                                 \
+    static_def, group, variable_name, metric_name, init)                     \
+  static constexpr uint32_t variable_name##_token =                          \
+      PW_METRIC_TOKEN(metric_name);                                          \
+  static_def ::pw::NoDestructor<                                             \
+      ::pw::metric::TypedMetric<_PW_METRIC_FLOAT_OR_UINT32(init)>>           \
+      variable_name##_storage(variable_name##_token, init, group.metrics()); \
+  static_def ::pw::metric::TypedMetric<_PW_METRIC_FLOAT_OR_UINT32(init)>&    \
+      variable_name [[maybe_unused]] = *variable_name##_storage
+
 // Define a metric group. Works like PW_METRIC, and works in the same contexts.
 //
 // Example:
@@ -308,7 +340,7 @@ class Group : public IntrusiveList<Group>::Item {
 #define PW_METRIC_GROUP(...) \
   PW_DELEGATE_BY_ARG_COUNT(_PW_METRIC_GROUP_, , __VA_ARGS__)
 #define PW_METRIC_GROUP_STATIC(...) \
-  PW_DELEGATE_BY_ARG_COUNT(_PW_METRIC_GROUP_, static, __VA_ARGS__)
+  PW_DELEGATE_BY_ARG_COUNT(_PW_METRIC_GROUP_STATIC_, static, __VA_ARGS__)
 
 #define _PW_METRIC_GROUP_3(static_def, variable_name, group_name) \
   static constexpr uint32_t variable_name##_token =               \
@@ -320,5 +352,33 @@ class Group : public IntrusiveList<Group>::Item {
       PW_TOKENIZE_STRING_DOMAIN("metrics", group_name);                   \
   static_def ::pw::metric::Group variable_name = {variable_name##_token,  \
                                                   parent.children()}
+
+#define _PW_METRIC_GROUP_STATIC_3(static_def, variable_name, group_name)      \
+  static constexpr uint32_t variable_name##_token =                           \
+      PW_TOKENIZE_STRING_DOMAIN("metrics", group_name);                       \
+  static_def ::pw::NoDestructor<::pw::metric::Group> variable_name##_storage( \
+      variable_name##_token);                                                 \
+  static_def ::pw::metric::Group& variable_name [[maybe_unused]] =            \
+      *variable_name##_storage
+
+#define _PW_METRIC_GROUP_STATIC_4(                                            \
+    static_def, parent, variable_name, group_name)                            \
+  static constexpr uint32_t variable_name##_token =                           \
+      PW_TOKENIZE_STRING_DOMAIN("metrics", group_name);                       \
+  static_def ::pw::NoDestructor<::pw::metric::Group> variable_name##_storage( \
+      variable_name##_token, parent.children());                              \
+  static_def ::pw::metric::Group& variable_name [[maybe_unused]] =            \
+      *variable_name##_storage
+
+// Similar to PW_TOKENIZE_STRING_EXPR, converts a string literal to a
+// ``uint32_t`` token within an expression.
+// Requires C++.
+//
+//   // Tokenizes a string literal in the metric domain within an expression.
+//   DoSomethingWithToken(PW_METRIC_TOKEN_EXPR("Succeed"));
+//
+// @endcode
+#define PW_METRIC_TOKEN_EXPR(metric_name) \
+  PW_TOKENIZE_STRING_MASK_EXPR("metrics", _PW_METRIC_TOKEN_MASK, metric_name)
 
 }  // namespace pw::metric

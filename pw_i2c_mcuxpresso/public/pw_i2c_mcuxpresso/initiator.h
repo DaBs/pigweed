@@ -15,6 +15,7 @@
 
 #include "fsl_clock.h"
 #include "fsl_i2c.h"
+#include "pw_clock_tree/clock_tree.h"
 #include "pw_i2c/initiator.h"
 #include "pw_sync/interrupt_spin_lock.h"
 #include "pw_sync/lock_annotations.h"
@@ -31,28 +32,52 @@ class McuxpressoInitiator final : public Initiator {
     uint32_t flexcomm_address;
     clock_name_t clock_name;
     uint32_t baud_rate_bps;
+
+    // Automatically restart the I2C interface when a transaction has timed
+    // out. This usually indicates the host interface has become stuck and
+    // will require a restart.
+    bool auto_restart_interface = false;
   };
 
+  McuxpressoInitiator(const Config& config,
+                      pw::clock_tree::Element& clock_tree_element)
+      : Initiator(Initiator::Feature::kStandard),
+        config_(config),
+        base_(reinterpret_cast<I2C_Type*>(config_.flexcomm_address)),
+        clock_tree_element_(clock_tree_element) {}
+
   McuxpressoInitiator(const Config& config)
-      : config_(config),
+      : Initiator(Initiator::Feature::kStandard),
+        config_(config),
         base_(reinterpret_cast<I2C_Type*>(config_.flexcomm_address)) {}
 
   // Should be called before attempting any transfers.
   void Enable() PW_LOCKS_EXCLUDED(mutex_);
   void Disable() PW_LOCKS_EXCLUDED(mutex_);
 
+  // Returns a pointer to the underlying MCUXpresso I2C peripheral base address
+  // structure. This can be used for direct interaction with the I2C hardware
+  // register.
+  I2C_Type* base() const { return base_; }
+
   ~McuxpressoInitiator() final;
 
  private:
-  Status DoWriteReadFor(Address device_address,
-                        ConstByteSpan tx_buffer,
-                        ByteSpan rx_buffer,
-                        chrono::SystemClock::duration timeout) override
+  void EnableLocked() PW_EXCLUSIVE_LOCKS_REQUIRED(mutex_);
+  void DisableLocked() PW_EXCLUSIVE_LOCKS_REQUIRED(mutex_);
+  void ResetLocked() PW_EXCLUSIVE_LOCKS_REQUIRED(mutex_);
+
+  Status DoTransferFor(span<const Message> messages,
+                       chrono::SystemClock::duration timeout) override
       PW_LOCKS_EXCLUDED(mutex_);
 
+  Status TransferSequenceUntilLocked(span<const Message> messages,
+                                     chrono::SystemClock::time_point deadline)
+      PW_EXCLUSIVE_LOCKS_REQUIRED(mutex_);
+
   // inclusive-language: disable
-  Status InitiateNonBlockingTransfer(chrono::SystemClock::duration rw_timeout,
-                                     i2c_master_transfer_t* transfer)
+  Status InitiateNonBlockingTransferUntil(
+      chrono::SystemClock::time_point deadline, i2c_master_transfer_t* transfer)
       PW_LOCKS_EXCLUDED(callback_isl_);
 
   // Non-blocking I2C transfer callback.
@@ -60,12 +85,13 @@ class McuxpressoInitiator final : public Initiator {
                                        i2c_master_handle_t* handle,
                                        status_t status,
                                        void* initiator_ptr)
-      PW_GUARDED_BY(callback_isl_);
+      PW_LOCKS_EXCLUDED(callback_isl_);
   // inclusive-language: enable
 
   sync::Mutex mutex_;
   Config const config_;
   I2C_Type* const base_;
+  pw::clock_tree::OptionalElement clock_tree_element_;
   bool enabled_ PW_GUARDED_BY(mutex_);
 
   // Transfer completion status for non-blocking I2C transfer.

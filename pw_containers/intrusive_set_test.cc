@@ -207,6 +207,37 @@ TEST_F(IntrusiveSetTest, ReverseIterator) {
   EXPECT_EQ(iter, set.crbegin());
 }
 
+TEST_F(IntrusiveSetTest, IteratorIsDefaultConstructible) {
+  IntrusiveSet::iterator iter;
+  EXPECT_NE(iter, set_.begin());
+  EXPECT_NE(iter, set_.begin());
+  EXPECT_EQ(iter, IntrusiveSet::iterator());
+}
+
+TEST_F(IntrusiveSetTest, IteratorIsCopyConstructible) {
+  IntrusiveSet::iterator iter1 = set_.begin();
+  IntrusiveSet::iterator iter2(iter1);
+  EXPECT_EQ(iter2, set_.begin());
+}
+
+TEST_F(IntrusiveSetTest, IteratorCopyAssignable) {
+  IntrusiveSet::iterator iter1 = set_.begin();
+  IntrusiveSet::iterator iter2 = iter1;
+  EXPECT_EQ(iter2, set_.begin());
+}
+
+TEST_F(IntrusiveSetTest, IteratorisMoveConstructible) {
+  IntrusiveSet::iterator iter1 = set_.begin();
+  IntrusiveSet::iterator iter2(std::move(iter1));
+  EXPECT_EQ(iter2, set_.begin());
+}
+
+TEST_F(IntrusiveSetTest, IteratorMoveAssignable) {
+  IntrusiveSet::iterator iter1 = set_.begin();
+  IntrusiveSet::iterator iter2 = std::move(iter1);
+  EXPECT_EQ(iter2, set_.begin());
+}
+
 TEST_F(IntrusiveSetTest, ConstIterator_CompareNonConst) {
   EXPECT_EQ(set_.end(), set_.cend());
 }
@@ -493,6 +524,14 @@ TEST_F(IntrusiveSetTest, Erase_Range) {
   EXPECT_EQ(set_.size(), 2U);
   EXPECT_TRUE(std::is_sorted(set_.begin(), set_.end()));
   EXPECT_EQ(iter->key(), 55U);
+}
+
+TEST_F(IntrusiveSetTest, Erase_AllRange) {
+  auto first = set_.begin();
+  auto last = set_.end();
+  auto iter = set_.erase(first, last);
+  EXPECT_TRUE(set_.empty());
+  EXPECT_EQ(iter, set_.end());
 }
 
 TEST_F(IntrusiveSetTest, Erase_MissingItem) {

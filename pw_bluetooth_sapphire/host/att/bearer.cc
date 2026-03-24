@@ -35,8 +35,8 @@ namespace {
 
 // Returns the security level that is required to resolve the given ATT error
 // code and the current security properties of the link, according to the table
-// in v5.0, Vol 3, Part C, 10.3.2 (table 10.2). A security upgrade is not
-// required if the returned value equals sm::SecurityLevel::kNoSecurity.
+// in the Core Spec v5.0, Vol 3, Part C, 10.3.2 (table 10.2). A security upgrade
+// is not required if the returned value equals sm::SecurityLevel::kNoSecurity.
 // TODO(armansito): Supporting requesting Secure Connections in addition to the
 // inclusive-language: ignore
 // encrypted/MITM dimensions.
@@ -667,12 +667,12 @@ void Bearer::HandleEndTransaction(TransactionQueue* tq,
         }
 
         // TODO(armansito): Notify the upper layer to re-initiate service
-        // discovery and other necessary procedures (see Vol 3, Part C,
-        // 10.3.2).
+        // discovery and other necessary procedures (see the Core Spec v5.0, Vol
+        // 3, Part C, 10.3.2).
 
-        // Re-send the request as described in Vol 3, Part G, 8.1. Since |t| was
-        // originally resolved with an Error Response, it must have come out of
-        // |request_queue_|.
+        // Re-send the request as described in the Core Spec v5.0, Vol 3, Part
+        // G, 8.1. Since |t| was originally resolved with an Error Response, it
+        // must have come out of |request_queue_|.
         PW_DCHECK(GetMethodType(t->opcode) == MethodType::kRequest);
         t->security_retry_level = security_requirement;
         self->request_queue_.Enqueue(std::move(t));

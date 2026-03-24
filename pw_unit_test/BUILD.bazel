@@ -13,8 +13,8 @@
 # the License.
 
 load("@com_google_protobuf//bazel:proto_library.bzl", "proto_library")
+load("@com_google_protobuf//bazel:py_proto_library.bzl", "py_proto_library")
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
-load("@rules_python//python:proto.bzl", "py_proto_library")
 load("@rules_python//sphinxdocs:sphinx_docs_library.bzl", "sphinx_docs_library")
 load("//pw_build:compatibility.bzl", "incompatible_with_mcu")
 load("//pw_build:pw_cc_binary.bzl", "pw_cc_binary")
@@ -82,19 +82,34 @@ config_setting(
     },
 )
 
+config_setting(
+    name = "backend_is_light",
+    testonly = True,
+    flag_values = {
+        ":backend": ":light",
+    },
+)
+
 cc_library(
     name = "light",
+    testonly = True,
+    hdrs = [
+        "public_overrides/gtest/gtest.h",
+    ],
+    strip_include_prefix = "public_overrides",
+    deps = [":light_private"],
+)
+
+cc_library(
+    name = "light_private",
     testonly = True,
     srcs = ["framework_light.cc"],
     hdrs = [
         "light_public_overrides/pw_unit_test/framework_backend.h",
-        "public_overrides/gtest/gtest.h",
     ],
     implementation_deps = ["//pw_assert:check"],
-    includes = [
-        "light_public_overrides",
-        "public_overrides",
-    ],
+    strip_include_prefix = "light_public_overrides",
+    visibility = ["//visibility:private"],
     deps = [
         ":config",
         ":event_handler",
@@ -114,7 +129,7 @@ cc_library(
     hdrs = [
         "googletest_public_overrides/pw_unit_test/framework_backend.h",
     ],
-    includes = ["googletest_public_overrides"],
+    strip_include_prefix = "googletest_public_overrides",
     # TODO: b/310957361 - gtest not supported on device
     target_compatible_with = incompatible_with_mcu(),
     deps = [
@@ -124,31 +139,6 @@ cc_library(
         "//pw_status",
         "@com_google_googletest//:gtest",
     ],
-)
-
-# Identifies when the light framework is being used.
-config_setting(
-    name = "light_setting",
-    testonly = True,
-    flag_values = {
-        "//pw_unit_test:backend": "//pw_unit_test:light",
-    },
-    # Do not depend on this config_setting outside upstream Pigweed. Config
-    # settings based on label flags are unreliable. See
-    # https://github.com/bazelbuild/bazel/issues/21189.
-    visibility = ["//:__subpackages__"],
-)
-
-config_setting(
-    name = "gtest_setting",
-    testonly = True,
-    flag_values = {
-        "//pw_unit_test:backend": "//pw_unit_test:googletest",
-    },
-    # Do not depend on this config_setting outside upstream Pigweed. Config
-    # settings based on label flags are unreliable. See
-    # https://github.com/bazelbuild/bazel/issues/21189.
-    visibility = ["//:__subpackages__"],
 )
 
 cc_library(
@@ -211,6 +201,10 @@ cc_library(
 pw_cc_test(
     name = "googletest_test_matchers_test",
     srcs = ["googletest_test_matchers_test.cc"],
+    target_compatible_with = select({
+        ":backend_is_googletest": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
     deps = [
         ":googletest_test_matchers",
     ],
@@ -289,7 +283,7 @@ cc_library(
     ],
 )
 
-pw_cc_binary(
+cc_library(
     name = "logging_main",
     testonly = True,
     srcs = [
@@ -309,7 +303,7 @@ pw_cc_binary(
 cc_library(
     name = "constexpr",
     hdrs = ["public/pw_unit_test/constexpr.h"],
-    includes = ["public"],
+    strip_include_prefix = "public",
     deps = [
         "//pw_preprocessor",
         "//third_party/fuchsia:stdcompat",
@@ -319,9 +313,9 @@ cc_library(
 pw_cc_test(
     name = "constexpr_test",
     srcs = ["constexpr_test.cc"],
+    has_nc_test = True,
     deps = [
         ":constexpr",
-        "//pw_compilation_testing:negative_compilation_testing",
     ],
 )
 
@@ -361,6 +355,7 @@ cc_library(
 pw_cc_test(
     name = "test_record_event_handler_test",
     srcs = ["test_record_event_handler_test.cc"],
+    features = ["-conversion_warnings"],
     deps = [
         ":test_record_event_handler",
         "//pw_assert:assert",
@@ -392,22 +387,23 @@ cc_library(
     name = "rpc_service",
     testonly = True,
     srcs = ["unit_test_service.cc"] + select({
-        ":light_setting": ["rpc_light_event_handler.cc"],
+        ":backend_is_light": ["rpc_light_event_handler.cc"],
         "//conditions:default": [":rpc_gtest_event_handler.cc"],
     }),
     hdrs = [
         "public/pw_unit_test/config.h",
         "public/pw_unit_test/unit_test_service.h",
     ] + select({
-        ":light_setting": [
+        ":backend_is_light": [
             "rpc_light_public/pw_unit_test/internal/rpc_event_handler.h",
         ],
         "//conditions:default": [
             "rpc_gtest_public/pw_unit_test/internal/rpc_event_handler.h",
         ],
     }),
+    features = ["-conversion_warnings"],
     includes = ["public"] + select({
-        ":light_setting": ["rpc_light_public"],
+        ":backend_is_light": ["rpc_light_public"],
         "//conditions:default": ["rpc_gtest_public"],
     }),
     deps = [
@@ -418,23 +414,11 @@ cc_library(
         ":unit_test_raw_rpc",
         "//pw_log",
         "//pw_span",
-    ],
-)
-
-cc_library(
-    name = "rpc_main",
-    testonly = True,
-    srcs = [
-        "rpc_main.cc",
-    ],
-    implementation_deps = ["//pw_assert:check"],
-    deps = [
-        ":pw_unit_test",
-        ":rpc_service",
-        "//pw_hdlc:default_addresses",
-        "//pw_log",
-        "//pw_rpc",
-        "//pw_rpc/system_server",
+        "//pw_string:util",
+        "//pw_sync:lock_annotations",
+        "//pw_sync:mutex",
+        "//pw_sync:thread_notification",
+        "//pw_thread:thread_core",
     ],
 )
 
@@ -446,7 +430,7 @@ cc_library(
     strip_include_prefix = "public",
     # This library only works with the light backend
     target_compatible_with = select({
-        ":light_setting": [],
+        ":backend_is_light": [],
         "//conditions:default": ["@platforms//:incompatible"],
     }),
     deps = [":pw_unit_test"],
@@ -477,6 +461,7 @@ pw_cc_test(
 pw_cc_test(
     name = "framework_test",
     srcs = ["framework_test.cc"],
+    features = ["-conversion_warnings"],
     # TODO: https://pwbug.dev/325509758 - Passes but hangs on cleanup.
     target_compatible_with = select({
         "//pw_build/constraints/chipset:rp2040": ["@platforms//:incompatible"],
@@ -493,7 +478,7 @@ pw_cc_test(
     name = "framework_light_test",
     srcs = ["framework_light_test.cc"],
     target_compatible_with = select({
-        ":light_setting": [],
+        ":backend_is_light": [],
         "//conditions:default": ["@platforms//:incompatible"],
     }),
     deps = [
@@ -502,16 +487,28 @@ pw_cc_test(
     ],
 )
 
-# TODO(hepler): Build this as a cc_binary and use it in integration tests.
-filegroup(
+# This executable is used to test pw_unit_test/golden_test.py.
+pw_cc_binary(
+    name = "run_and_compare_test_executable",
+    testonly = True,
+    srcs = ["run_and_compare_test_executable.cc"],
+    target_compatible_with = incompatible_with_mcu(),
+    visibility = [":__subpackages__"],
+)
+
+pw_cc_binary(
     name = "test_rpc_server",
+    testonly = True,
     srcs = ["test_rpc_server.cc"],
-    # deps = [
-    #     ":pw_unit_test",
-    #     ":rpc_service",
-    #     "//pw_log",
-    #     "//pw_rpc/system_server",
-    # ],
+    target_compatible_with = incompatible_with_mcu(),
+    deps = [
+        ":pw_unit_test",
+        ":rpc_service",
+        "//pw_log",
+        "//pw_rpc/system_server",
+        "//pw_thread:thread",
+        "//pw_thread_stl:thread",
+    ],
 )
 
 filegroup(
@@ -538,6 +535,7 @@ sphinx_docs_library(
     srcs = [
         "constexpr_test.cc",
         "docs.rst",
+        "//pw_unit_test/py:BUILD.bazel",
     ],
     prefix = "pw_unit_test/",
     target_compatible_with = incompatible_with_mcu(),

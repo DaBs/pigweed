@@ -23,7 +23,9 @@ TEST(TimerTest, DurationIsPositive) {
   ASSERT_TRUE(TimerPrepare());
 
   Timestamp start = GetCurrentTimestamp();
-  for (volatile int i = 0; i < 1000; i = i + 1) {
+  volatile size_t i = 0;
+  while (i < 1000) {
+    i = i + 1;
   }
   Timestamp end = GetCurrentTimestamp();
   int64_t duration = GetDuration(start, end);

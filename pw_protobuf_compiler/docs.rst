@@ -284,6 +284,10 @@ executable and ``pw_protobuf_compiler_PROTOC_BINARY`` to the path, relative to
 For all ``protoc`` invocations, the build will add a dependency on that target
 and will invoke that executable.
 
+If your build specifies ``dir_pw_protobuf_compiler``, then this is used as the
+base directory of your protobuf repository. Otherwise, it is assumed to be the
+same as the ``pw_protobuf_compiler_PROTOC_TARGET`` label.
+
 .. _module-pw_protobuf_compiler-cmake:
 
 CMake
@@ -380,14 +384,6 @@ These rules build the corresponding firmware code; there are no rules for
 generating Python libraries. The Bazel rules differ slightly compared to the GN
 build to be more in line with what would be considered idiomatic in Bazel.
 
-To use Pigweeds Protobuf rules you must first pull in the required dependencies
-into your Bazel WORKSPACE file. e.g.
-
-.. code-block:: python
-
-   # WORKSPACE ...
-   load("@pigweed//pw_protobuf_compiler:deps.bzl", "pw_protobuf_dependencies")
-   pw_protobuf_dependencies()
 
 Bazel uses a different set of rules to manage proto files than it does to
 compile them. e.g.
@@ -473,7 +469,6 @@ e.g.
    #include "my_protos/bar.raw_rpc.pb.h
    // or
    #include "my_protos/bar.nanopb_rpc.pb.h"
-
 
 Why isn't there one rule to generate all the code?
 --------------------------------------------------

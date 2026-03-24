@@ -160,14 +160,11 @@ class TransferThread : public thread::ThreadCore {
   /// If the thread has an existing active client read stream, closes it and
   /// terminates any transfers running on it.
   void SetClientReadStream(rpc::RawClientReaderWriter& read_stream,
-                           Function<void(ConstByteSpan)>&& on_next) {
-    // Clear the existing callback to prevent incoming chunks from blocking on
-    // the transfer thread and preventing the call's cleanup.
-    client_read_stream_.set_on_next(nullptr);
-    staged_client_stream_ = std::move(read_stream);
-    staged_client_on_next_ = std::move(on_next);
-    SetStream(TransferStream::kClientRead);
-  }
+                           Client* client,
+                           Function<void(ConstByteSpan)>&& on_next,
+                           internal::SetStreamBehavior behavior);
+
+  void CloseClientReadStream(Client* client);
 
   /// Updates the transfer thread's client write stream.
   ///
@@ -178,14 +175,11 @@ class TransferThread : public thread::ThreadCore {
   /// If the thread has an existing active client write stream, closes it and
   /// terminates any transfers running on it.
   void SetClientWriteStream(rpc::RawClientReaderWriter& write_stream,
-                            Function<void(ConstByteSpan)>&& on_next) {
-    // Clear the existing callback to prevent incoming chunks from blocking on
-    // the transfer thread and preventing the call's cleanup.
-    client_write_stream_.set_on_next(nullptr);
-    staged_client_stream_ = std::move(write_stream);
-    staged_client_on_next_ = std::move(on_next);
-    SetStream(TransferStream::kClientWrite);
-  }
+                            Client* client,
+                            Function<void(ConstByteSpan)>&& on_next,
+                            internal::SetStreamBehavior behavior);
+
+  void CloseClientWriteStream(Client* client);
 
   /// Updates the transfer thread's server read stream.
   ///
@@ -196,14 +190,7 @@ class TransferThread : public thread::ThreadCore {
   /// If the thread has an existing active server read stream, closes it and
   /// terminates any transfers running on it.
   void SetServerReadStream(rpc::RawServerReaderWriter& read_stream,
-                           Function<void(ConstByteSpan)>&& on_next) {
-    // Clear the existing callback to prevent incoming chunks from blocking on
-    // the transfer thread and preventing the call's cleanup.
-    server_read_stream_.set_on_next(nullptr);
-    staged_server_stream_ = std::move(read_stream);
-    staged_server_on_next_ = std::move(on_next);
-    SetStream(TransferStream::kServerRead);
-  }
+                           Function<void(ConstByteSpan)>&& on_next);
 
   /// Updates the transfer thread's server write stream.
   ///
@@ -214,17 +201,15 @@ class TransferThread : public thread::ThreadCore {
   /// If the thread has an existing active server write stream, closes it and
   /// terminates any transfers running on it.
   void SetServerWriteStream(rpc::RawServerReaderWriter& write_stream,
-                            Function<void(ConstByteSpan)>&& on_next) {
-    // Clear the existing callback to prevent incoming chunks from blocking on
-    // the transfer thread and preventing the call's cleanup.
-    server_write_stream_.set_on_next(nullptr);
-    staged_server_stream_ = std::move(write_stream);
-    staged_server_on_next_ = std::move(on_next);
-    SetStream(TransferStream::kServerWrite);
-  }
+                            Function<void(ConstByteSpan)>&& on_next);
 
   bool AddTransferHandler(Handler& handler) {
-    return TransferHandlerEvent(EventType::kAddTransferHandler, handler);
+    if (!TransferHandlerEvent(EventType::kAddTransferHandler, handler)) {
+      return false;
+    }
+    // Wait for handler to be fully registered before returning.
+    WaitUntilEventIsProcessed();
+    return true;
   }
 
   bool RemoveTransferHandler(Handler& handler) {
@@ -265,10 +250,6 @@ class TransferThread : public thread::ThreadCore {
  private:
   friend class transfer::Client;
   friend class Context;
-
-  // Maximum amount of time between transfer thread runs.
-  static constexpr chrono::SystemClock::duration kMaxTimeout =
-      std::chrono::seconds(2);
 
   void UpdateClientTransfer(uint32_t handle_id, size_t transfer_size_bytes);
 
@@ -334,21 +315,7 @@ class TransferThread : public thread::ThreadCore {
 
   void HandleTimeouts();
 
-  rpc::Writer& stream_for(TransferStream stream) {
-    switch (stream) {
-      case TransferStream::kClientRead:
-        return client_read_stream_.as_writer();
-      case TransferStream::kClientWrite:
-        return client_write_stream_.as_writer();
-      case TransferStream::kServerRead:
-        return server_read_stream_.as_writer();
-      case TransferStream::kServerWrite:
-        return server_write_stream_.as_writer();
-    }
-    // An unknown TransferStream value was passed, which means this function
-    // was passed an invalid enum value.
-    PW_ASSERT(false);
-  }
+  rpc::Writer& stream_for(TransferStream stream);
 
   bool TryWaitForEventToProcess() {
     if constexpr (cfg::kWaitForEventProcessingIndefinitely) {
@@ -358,8 +325,8 @@ class TransferThread : public thread::ThreadCore {
     return next_event_ownership_.try_acquire_for(cfg::kEventProcessingTimeout);
   }
 
-  // Returns the earliest timeout among all active transfers, up to kMaxTimeout.
-  chrono::SystemClock::time_point GetNextTransferTimeout() const;
+  // Returns the earliest timeout among all active transfers, if any.
+  std::optional<chrono::SystemClock::time_point> GetNextTransferTimeout() const;
 
   uint32_t AssignSessionId();
 
@@ -391,8 +358,8 @@ class TransferThread : public thread::ThreadCore {
                    Status status,
                    bool send_status_chunk);
 
-  void SetStream(TransferStream stream);
-  void HandleSetStreamEvent(TransferStream stream);
+  void HandleSetStreamEvent(TransferStream stream,
+                            internal::SetStreamBehavior behavior);
 
   bool TransferHandlerEvent(EventType type, Handler& handler);
 
@@ -409,9 +376,16 @@ class TransferThread : public thread::ThreadCore {
   Event next_event_;
   Function<void(Status)> staged_on_completion_;
 
-  rpc::RawClientReaderWriter client_read_stream_;
-  rpc::RawClientReaderWriter client_write_stream_;
-  rpc::RawClientReaderWriter staged_client_stream_;
+  struct OwnedClientStream {
+    rpc::RawClientReaderWriter stream;
+    Client* client{nullptr};
+  };
+
+  void CancelExistingStream(OwnedClientStream& stream, TransferType type);
+
+  OwnedClientStream client_read_stream_;
+  OwnedClientStream client_write_stream_;
+  OwnedClientStream staged_client_stream_;
   Function<void(ConstByteSpan)> staged_client_on_next_;
 
   rpc::RawServerReaderWriter server_read_stream_;

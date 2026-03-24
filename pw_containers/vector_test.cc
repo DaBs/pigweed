@@ -17,7 +17,7 @@
 #include <cstddef>
 
 #include "pw_compilation_testing/negative_compilation.h"
-#include "pw_containers_private/test_helpers.h"
+#include "pw_containers/internal/test_helpers.h"
 #include "pw_unit_test/framework.h"
 
 namespace pw {
@@ -27,6 +27,9 @@ using namespace std::literals::string_view_literals;
 using containers::test::CopyOnly;
 using containers::test::Counter;
 using containers::test::MoveOnly;
+
+static_assert(!std::is_constructible_v<pw::Vector<int>>,
+              "Cannot construct generic capacity container");
 
 // Since pw::Vector<T, N> downcasts to a pw::Vector<T, 0>, ensure that the
 // alignment doesn't change.
@@ -102,7 +105,7 @@ TEST(Vector, Construct_Move) {
 
   // NOLINTNEXTLINE(bugprone-use-after-move)
   for (unsigned short i = 0; i < origin_vector.size(); ++i) {
-    EXPECT_EQ(origin_vector[i].value, MoveOnly::kDeleted);
+    EXPECT_EQ(origin_vector[i].value, MoveOnly::kMoved);
   }
 }
 
@@ -272,7 +275,7 @@ TEST(Vector, Assign_Move) {
 
   // NOLINTNEXTLINE(bugprone-use-after-move)
   for (unsigned short i = 0; i < origin_vector.size(); ++i) {
-    EXPECT_EQ(origin_vector[i].value, MoveOnly::kDeleted);
+    EXPECT_EQ(origin_vector[i].value, MoveOnly::kMoved);
   }
 }
 
@@ -711,10 +714,7 @@ TEST(Vector, DeleteAndDestructionDisallowedOnDynamicCapacity) {
 }
 
 // Test that Vector<T> is trivially destructible when its type is.
-static_assert(std::is_trivially_destructible_v<Vector<int, 4>>);
-
-static_assert(std::is_trivially_destructible_v<MoveOnly>);
-static_assert(std::is_trivially_destructible_v<Vector<MoveOnly, 1>>);
+static_assert(std::is_trivially_destructible_v<Vector<int, 1>>);
 
 static_assert(std::is_trivially_destructible_v<CopyOnly>);
 static_assert(std::is_trivially_destructible_v<Vector<CopyOnly, 99>>);

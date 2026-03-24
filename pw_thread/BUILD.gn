@@ -17,7 +17,6 @@ import("//build_overrides/pigweed.gni")
 import("$dir_pw_build/facade.gni")
 import("$dir_pw_build/module_config.gni")
 import("$dir_pw_build/target_types.gni")
-import("$dir_pw_docgen/docs.gni")
 import("$dir_pw_protobuf_compiler/proto.gni")
 import("$dir_pw_unit_test/test.gni")
 import("backend.gni")
@@ -142,7 +141,7 @@ pw_source_set("generic_priority") {
   public_configs = [ ":public_include_path" ]
   public_deps = [
     "$dir_pw_numeric:integer_division",
-    "$dir_pw_third_party/fuchsia:stdcompat",
+    "$pw_external_fuchsia:stdcompat",
     dir_pw_assert,
     dir_pw_polyfill,
   ]
@@ -161,7 +160,10 @@ pw_test("priority_test") {
 
 pw_test("thread_creation_test") {
   sources = [ "thread_creation_test.cc" ]
-  deps = [ ":thread" ]
+  deps = [
+    ":thread",
+    "$dir_pw_sync:binary_semaphore",
+  ]
   negative_compilation_tests = true
 
   # TODO: b/388048843 - Build on Windows when the toolchain is updated.
@@ -198,6 +200,16 @@ pw_source_set("snapshot") {
   deps = [
     ":config",
     dir_pw_log,
+  ]
+}
+
+pw_source_set("checker") {
+  public_configs = [ ":public_include_path" ]
+  public = [ "public/pw_thread/checker.h" ]
+  public_deps = [
+    ":config",
+    ":thread",
+    "$dir_pw_sync:lock_annotations",
   ]
 }
 
@@ -353,13 +365,4 @@ pw_proto_library("protos") {
     "pw_thread_protos/thread_snapshot_service.proto",
   ]
   deps = [ "$dir_pw_tokenizer:proto" ]
-}
-
-pw_doc_group("docs") {
-  inputs =
-      [ "$dir_pw_thread_stl/public/pw_thread_stl/test_thread_context_native.h" ]
-  sources = [
-    "backends.rst",
-    "docs.rst",
-  ]
 }

@@ -13,8 +13,8 @@
 # the License.
 
 load("@com_google_protobuf//bazel:proto_library.bzl", "proto_library")
+load("@com_google_protobuf//bazel:py_proto_library.bzl", "py_proto_library")
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
-load("@rules_python//python:proto.bzl", "py_proto_library")
 load("@rules_python//sphinxdocs:sphinx_docs_library.bzl", "sphinx_docs_library")
 load("//pw_build:compatibility.bzl", "incompatible_with_mcu")
 load("//pw_build:pw_facade.bzl", "pw_facade")
@@ -255,6 +255,7 @@ cc_library(
     deps = [
         ":cortex_m_constants",
         ":cpu_state",
+        "//pw_containers:storage",
     ],
 )
 
@@ -272,7 +273,7 @@ pw_cc_test(
         ":cpu_state",
         "//pw_cpu_exception:handler",
         "//pw_cpu_exception:support",
-        "//pw_toolchain:infinite_loop",
+        "//pw_toolchain:busy_wait_forever",
     ],
 )
 

@@ -25,10 +25,18 @@
 #include "pw_bluetooth_sapphire/internal/host/gatt/local_service_manager.h"
 #include "pw_bluetooth_sapphire/internal/host/gatt/mock_server.h"
 #include "pw_bluetooth_sapphire/internal/host/l2cap/fake_channel.h"
+#include "pw_bluetooth_sapphire/internal/host/testing/inspect_util.h"
 #include "pw_bluetooth_sapphire/internal/host/testing/test_helpers.h"
 
 namespace bt::gatt::internal {
 namespace {
+
+#ifndef NINSPECT
+using namespace inspect::testing;
+using bt::testing::GetInspectValue;
+using bt::testing::ReadInspect;
+#endif
+
 constexpr PeerId kPeerId0(0);
 constexpr PeerId kPeerId1(1);
 constexpr PeerId kPeerId(10);
@@ -62,6 +70,7 @@ class GattTest : public pw::async::test::FakeDispatcherFixture {
     fake_client_weak_ = client->AsFakeWeakPtr();
     client_ = std::move(client);
     gatt_ = GATT::Create();
+    gatt_->AttachInspect(gatt_inspector_.GetRoot(), "gatt");
   }
 
   void TearDown() override {
@@ -111,10 +120,22 @@ class GattTest : public pw::async::test::FakeDispatcherFixture {
   testing::FakeClient::WeakPtr fake_client() const { return fake_client_weak_; }
   std::unique_ptr<Client> take_client() { return std::move(client_); }
 
+#ifndef NINSPECT
+  inspect::Hierarchy ReadGattInspect() { return ReadInspect(gatt_inspector_); }
+
+  uint64_t InspectProfileDiscoveryFailureCount() {
+    std::optional<uint64_t> val = GetInspectValue<inspect::UintPropertyValue>(
+        gatt_inspector_, {"gatt", "profile_discovery_failure_count"});
+    PW_CHECK(val);
+    return *val;
+  }
+#endif
+
  private:
   std::unique_ptr<GATT> gatt_;
   std::unique_ptr<Client> client_;
   testing::FakeClient::WeakPtr fake_client_weak_;
+  inspect::Inspector gatt_inspector_;
 
   BT_DISALLOW_COPY_AND_ASSIGN_ALLOW_MOVE(GattTest);
 };
@@ -175,6 +196,9 @@ TEST_F(GattTest, RemoteServiceWatcherNotifiesAddedModifiedAndRemovedService) {
   ASSERT_EQ(1u, svc_watcher_data[0].added.size());
   EXPECT_EQ(kPeerId, svc_watcher_data[0].peer_id);
   EXPECT_EQ(kGattSvcStartHandle, svc_watcher_data[0].added[0]->handle());
+#ifndef NINSPECT
+  EXPECT_EQ(InspectProfileDiscoveryFailureCount(), 0u);
+#endif
 
   // Add, modify, and remove a service.
   const att::Handle kSvc1StartHandle(5);
@@ -403,8 +427,29 @@ TEST_F(GattTest, ServiceDiscoveryFailureShutsDownConnection) {
   EXPECT_FALSE(mock_server->was_shut_down());
   gatt()->InitializeClient(kPeerId, std::vector<UUID>{});
   RunUntilIdle();
+
+#ifndef NINSPECT
+  EXPECT_EQ(InspectProfileDiscoveryFailureCount(), 1u);
+#endif
   EXPECT_TRUE(mock_server->was_shut_down());
 }
+
+#ifndef NINSPECT
+TEST_F(GattTest, ServiceDiscoveryFailureIsAggregated) {
+  for (int i = 0; i < 10; i++) {
+    auto client = std::make_unique<testing::FakeClient>(dispatcher());
+    client->set_discover_services_callback([](ServiceKind) {
+      return ToResult(att::ErrorCode::kRequestNotSupported);
+    });
+    PeerId peer(i);
+    gatt()->AddConnection(peer, std::move(client), CreateMockServer);
+    gatt()->InitializeClient(peer, std::vector<UUID>{});
+    RunUntilIdle();
+
+    EXPECT_EQ(InspectProfileDiscoveryFailureCount(), i + 1);
+  }
+}
+#endif
 
 TEST_F(GattTest, SendIndicationNoConnectionFails) {
   att::Result<> res = fit::ok();

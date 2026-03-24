@@ -21,6 +21,8 @@
 
 namespace pw::allocator {
 
+/// @submodule{pw_allocator,bucket}
+
 /// Intrusive item type corresponding to a `FastSortedBucket`.
 ///
 /// When free blocks are added to a bucket, their usable space is used to store
@@ -85,6 +87,13 @@ class FastSortedBucket
   void DoAdd(BlockType& block) {
     auto* item = new (block.UsableSpace()) FastSortedItem<BlockType>();
     items_.insert(*item);
+  }
+
+  /// @copydoc `BucketBase::FindLargest`
+  const BlockType* DoFindLargest() const {
+    auto iter = items_.end();
+    --iter;
+    return BlockType::FromUsableSpace(&(*iter));
   }
 
   /// @copydoc `BucketBase::RemoveAny`
@@ -154,6 +163,12 @@ class ReverseFastSortedBucket
   /// @copydoc `BucketBase::Add`
   void DoAdd(BlockType& block) { impl_.DoAdd(block); }
 
+  /// @copydoc `BucketBase::FindLargest`
+  const BlockType* DoFindLargest() const {
+    auto iter = impl_.items_.begin();
+    return BlockType::FromUsableSpace(&(*iter));
+  }
+
   /// @copydoc `BucketBase::RemoveAny`
   BlockType* DoRemoveAny() {
     auto iter = items_.begin();
@@ -173,5 +188,7 @@ class ReverseFastSortedBucket
   FastSortedBucket<BlockType> impl_;
   IntrusiveMultiMap<size_t, FastSortedItem<BlockType>>& items_;
 };
+
+/// @}
 
 }  // namespace pw::allocator

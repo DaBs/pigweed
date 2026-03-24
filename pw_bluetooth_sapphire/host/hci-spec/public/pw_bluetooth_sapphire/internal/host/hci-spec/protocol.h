@@ -50,6 +50,9 @@ using EventCode = uint8_t;
 // Data Connection Handle used for ACL and SCO logical link connections.
 using ConnectionHandle = uint16_t;
 
+// Handle used to identify a periodic advertising sync.
+using SyncHandle = uint16_t;
+
 // Handle used to identify an advertising set used in the 5.0 Extended
 // Advertising feature.
 using AdvertisingHandle = uint8_t;
@@ -248,6 +251,26 @@ inline constexpr OpCode kEnhancedSetupSynchronousConnection =
 // Enhanced Accept Synchronous Connection Request Command (BR/EDR)
 inline constexpr OpCode kEnhancedAcceptSynchronousConnectionRequest =
     LinkControlOpCode(0x003E);
+
+// ======= Link Policy Commands ======
+// Core Spec v6.0 Vol 4, Part E, Section 7.2
+inline constexpr uint8_t kLinkPolicyOGF = 0x02;
+constexpr OpCode LinkPolicyOpCode(const uint16_t ocf) {
+  return DefineOpCode(kLinkPolicyOGF, ocf);
+}
+
+// =========================
+// Sniff Mode Command (v1.1)
+inline constexpr OpCode kSniffMode = LinkPolicyOpCode(0x0003);
+
+// ==============================
+// Exit Sniff Mode Command (v1.1)
+inline constexpr OpCode kExitSniffMode = LinkPolicyOpCode(0x0004);
+
+// =========================================
+// Write Default Link Policy Settings (v1.1)
+inline constexpr OpCode kWriteDefaultLinkPolicySettings =
+    LinkPolicyOpCode(0x000F);
 
 // ======= Controller & Baseband Commands =======
 // Core Spec v5.0 Vol 2, Part E, Section 7.3
@@ -463,6 +486,18 @@ inline constexpr OpCode kReadDataBlockSize = InformationalParamsOpCode(0x000A);
 inline constexpr OpCode kReadLocalSupportedControllerDelay =
     InformationalParamsOpCode(0x000F);
 
+// ======= Testing Commands =======
+// Core Spec v6.1 Vol 4, Part E, Section 7.6
+inline constexpr uint8_t kTestingCommandsOGF = 0x06;
+constexpr OpCode TestingCommandsOpCode(const uint16_t ocf) {
+  return DefineOpCode(kTestingCommandsOGF, ocf);
+}
+
+// ====================================================
+// Write Simple Pairing Debug Mode Command (v2.1 + EDR)
+inline constexpr OpCode kWriteSimplePairingDebugMode =
+    TestingCommandsOpCode(0x0004);
+
 // ======= Events =======
 // Core Spec v5.0 Vol 2, Part E, Section 7.7
 
@@ -534,6 +569,10 @@ inline constexpr EventCode kRoleChangeEventCode = 0x12;
 // ========================================
 // Number Of Completed Packets Event (v1.1)
 inline constexpr EventCode kNumberOfCompletedPacketsEventCode = 0x13;
+
+// ========================
+// Mode Change Event (v1.1)
+inline constexpr EventCode kModeChangeEventCode = 0x14;
 
 // ======================================
 // PIN Code Request Event (v1.1) (BR/EDR)
@@ -1086,6 +1125,14 @@ inline constexpr OpCode kLESetupISODataPath = LEControllerCommandOpCode(0x006E);
 // =======================================
 // LE Set Host Feature Command (v5.2) (LE)
 inline constexpr OpCode kLESetHostFeature = LEControllerCommandOpCode(0x0074);
+
+// =========================================
+// LE Set CIG Parameters Command (v5.2) (LE)
+inline constexpr OpCode kLESetCIGParameters = LEControllerCommandOpCode(0x0062);
+
+// =================================
+// LE Create CIS Command (v5.2) (LE)
+inline constexpr OpCode kLECreateCIS = LEControllerCommandOpCode(0x0064);
 
 // =========================================
 // LE Accept CIS Request Command (v5.2) (LE)

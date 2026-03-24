@@ -17,7 +17,10 @@ load("//pw_unit_test:pw_cc_test.bzl", "pw_cc_test")
 
 package(
     default_visibility = ["//visibility:public"],
-    features = ["-layering_check"],
+    features = [
+        "-layering_check",
+        "-ctad_warnings",
+    ],
 )
 
 cc_library(
@@ -38,6 +41,7 @@ cc_library(
     copts = [
         "-Wno-unused-parameter",
     ],
+    features = ["-conversion_warnings"],
     implementation_deps = [
         ":test_helpers",
     ],
@@ -48,10 +52,12 @@ cc_library(
         "//pw_async:heap_dispatcher",
         "//pw_bluetooth",
         "//pw_bluetooth_sapphire:config",
+        "//pw_bluetooth_sapphire:fake_lease_provider",
         "//pw_bluetooth_sapphire/fuchsia/lib/inspect_testing",
         "//pw_bluetooth_sapphire/host/common",
         "//pw_bluetooth_sapphire/host/gap:definitions",
         "//pw_bluetooth_sapphire/host/hci-spec",
+        "//pw_bluetooth_sapphire/host/iso",
         "//pw_bluetooth_sapphire/host/l2cap",
         "//pw_bluetooth_sapphire/host/transport",
     ],
@@ -63,6 +69,7 @@ cc_library(
     hdrs = [
         "public/pw_bluetooth_sapphire/internal/host/testing/test_helpers.h",
     ],
+    features = ["-conversion_warnings"],
     strip_include_prefix = "public",
     deps = [
         "//pw_bluetooth_sapphire/host/common",
@@ -98,6 +105,7 @@ cc_library(
     copts = [
         "-Wno-unused-parameter",
     ],
+    features = ["-conversion_warnings"],
     strip_include_prefix = "public",
     deps = [
         "//pw_async:heap_dispatcher",
@@ -115,6 +123,8 @@ cc_library(
     ],
     copts = [
         "-Wno-unused-parameter",
+        # TODO: https://pwbug.dev/464024322 - Fix warnings.
+        "-Wno-shadow",
     ],
     implementation_deps = [
         ":gtest_helpers",
@@ -154,7 +164,10 @@ cc_library(
     ],
     copts = [
         "-Wno-unused-parameter",
+        # TODO: https://pwbug.dev/464024322 - Fix warnings.
+        "-Wno-shadow",
     ],
+    features = ["-conversion_warnings"],
     implementation_deps = [
         "//pw_bluetooth:emboss_hci_android",
         "//pw_bluetooth:emboss_hci_data",
@@ -181,6 +194,7 @@ cc_library(
     name = "gtest_main",
     testonly = True,
     srcs = ["run_all_unittests.cc"],
+    features = ["-conversion_warnings"],
     implementation_deps = [
         ":testing",
         "//pw_bluetooth_sapphire/host/common",
@@ -199,6 +213,7 @@ cc_library(
     hdrs = [
         "public/pw_bluetooth_sapphire/internal/host/testing/peer_fuzzer.h",
     ],
+    features = ["-conversion_warnings"],
     strip_include_prefix = "public",
     tags = ["noclangtidy"],
     deps = ["//pw_bluetooth_sapphire/host/gap"],
@@ -233,6 +248,11 @@ pw_cc_test(
         "inspect_util_test.cc",
         "parse_args_test.cc",
     ],
+    copts = [
+        # TODO: https://pwbug.dev/464024322 - Fix warnings.
+        "-Wno-shadow",
+    ],
+    features = ["-conversion_warnings"],
     test_main = "//pw_bluetooth_sapphire/host/testing:gtest_main",
     deps = [
         ":fake_controller",

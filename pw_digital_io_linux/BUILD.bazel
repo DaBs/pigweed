@@ -20,7 +20,6 @@ load("//pw_unit_test:pw_cc_test.bzl", "pw_cc_test")
 
 package(
     default_visibility = ["//visibility:public"],
-    features = ["-layering_check"],
 )
 
 licenses(["notice"])
@@ -37,6 +36,7 @@ cc_library(
         "public/pw_digital_io_linux/internal/owned_fd.h",
         "public/pw_digital_io_linux/notifier.h",
     ],
+    features = ["-conversion_warnings"],
     implementation_deps = ["//pw_assert:check"],
     strip_include_prefix = "public",
     target_compatible_with = ["@platforms//os:linux"],
@@ -57,10 +57,12 @@ cc_binary(
     srcs = [
         "digital_io_cli.cc",
     ],
+    features = ["-conversion_warnings"],
     deps = [
         ":pw_digital_io_linux",
         "//pw_build:default_link_extra_lib",
         "//pw_log",
+        "//pw_status",
     ],
 )
 
@@ -82,6 +84,7 @@ pw_cc_test(
     srcs = [
         "digital_io_test.cc",
     ],
+    features = ["-conversion_warnings"],
     linkopts = [
         "-Wl,--wrap=close",
         "-Wl,--wrap=ioctl",
@@ -91,9 +94,11 @@ pw_cc_test(
         ":mock_vfs",
         ":pw_digital_io_linux",
         "//pw_log",
+        "//pw_result",
         "//pw_sync:mutex",
         "//pw_sync:timed_thread_notification",
         "//pw_thread:thread",
+        "//pw_thread_stl:options",
         "//pw_thread_stl:thread",
     ],
 )
@@ -104,6 +109,7 @@ pw_cc_test(
         "log_errno.h",
         "notifier_test.cc",
     ],
+    features = ["-conversion_warnings"],
     target_compatible_with = ["@platforms//os:linux"],
     deps = [
         ":pw_digital_io_linux",
@@ -111,6 +117,7 @@ pw_cc_test(
         "//pw_log",
         "//pw_sync:counting_semaphore",
         "//pw_thread:thread",
+        "//pw_thread_stl:options",
         "//pw_thread_stl:thread",
     ],
 )

@@ -17,7 +17,10 @@ load("@rules_cc//cc:cc_library.bzl", "cc_library")
 
 package(
     default_visibility = ["//visibility:public"],
-    features = ["-layering_check"],
+    features = [
+        "-layering_check",
+        "-ctad_warnings",
+    ],
 )
 
 cc_library(
@@ -50,15 +53,23 @@ cc_library(
         "public/pw_bluetooth_sapphire/internal/host/transport/slab_allocators.h",
         "public/pw_bluetooth_sapphire/internal/host/transport/transport.h",
     ],
+    features = ["-conversion_warnings"],
     strip_include_prefix = "public",
     tags = ["noclangtidy"],
     deps = [
+        "//pw_allocator",
+        "//pw_allocator:libc_allocator",
         "//pw_async:dispatcher",
         "//pw_async:task",
         "//pw_bluetooth",
         "//pw_bluetooth:emboss_hci_common",
+        "//pw_bluetooth_sapphire:lease",
         "//pw_bluetooth_sapphire/host/common",
         "//pw_bluetooth_sapphire/host/hci-spec",
+        "//pw_bytes",
+        "//pw_multibuf",
+        "//pw_result",
+        "//pw_status",
         "//third_party/fuchsia:fit",
     ],
 )
@@ -75,6 +86,7 @@ cc_library(
         "public/pw_bluetooth_sapphire/internal/host/transport/fake_sco_data_channel.h",
         "public/pw_bluetooth_sapphire/internal/host/transport/mock_acl_data_channel.h",
     ],
+    features = ["-conversion_warnings"],
     strip_include_prefix = "public",
     tags = ["noclangtidy"],
     deps = [
@@ -95,13 +107,20 @@ pw_cc_test(
         "slab_allocators_test.cc",
         "transport_test.cc",
     ],
+    copts = [
+        # TODO: https://pwbug.dev/464024322 - Fix warnings.
+        "-Wno-shadow",
+    ],
+    features = ["-conversion_warnings"],
     test_main = "//pw_bluetooth_sapphire/host/testing:gtest_main",
     deps = [
         ":testing",
         ":transport",
+        "//pw_allocator:testing",
         "//pw_bluetooth:emboss_hci_test",
         "//pw_bluetooth_sapphire/host/testing",
         "//pw_bluetooth_sapphire/host/testing:mock_controller",
         "//pw_bluetooth_sapphire/host/testing:test_helpers",
+        "//pw_multibuf",
     ],
 )

@@ -16,7 +16,7 @@
 
 #include "pw_allocator/testing.h"
 #include "pw_assert/check.h"
-#include "pw_async2/dispatcher.h"
+#include "pw_async2/dispatcher_for_test.h"
 #include "pw_bytes/suffix.h"
 #include "pw_channel/channel.h"
 #include "pw_multibuf/simple_allocator_for_test.h"
@@ -25,7 +25,8 @@
 namespace {
 
 using ::pw::async2::Context;
-using ::pw::async2::Dispatcher;
+using ::pw::async2::DispatcherForTest;
+
 using ::pw::async2::Pending;
 using ::pw::async2::Poll;
 using ::pw::async2::Ready;
@@ -71,16 +72,16 @@ TEST(LoopbackDatagramChannel, LoopsEmptyDatagrams) {
   LoopbackDatagramChannel channel(alloc);
   ReaderTask<DatagramReader> read_task(channel.channel());
 
-  Dispatcher dispatcher;
+  DispatcherForTest dispatcher;
   dispatcher.Post(read_task);
-  EXPECT_EQ(dispatcher.RunUntilStalled(), Pending());
+  EXPECT_TRUE(dispatcher.RunUntilStalled());
   EXPECT_EQ(read_task.poll_count, 1);
   EXPECT_EQ(read_task.read_count, 0);
   EXPECT_EQ(read_task.bytes_read_count, 0);
 
   PW_TEST_EXPECT_OK(channel.StageWrite(alloc.BufWith({})));
 
-  EXPECT_EQ(dispatcher.RunUntilStalled(), Pending());
+  EXPECT_TRUE(dispatcher.RunUntilStalled());
   EXPECT_EQ(read_task.poll_count, 2);
   EXPECT_EQ(read_task.read_count, 1);
   EXPECT_EQ(read_task.bytes_read_count, 0);
@@ -91,16 +92,16 @@ TEST(LoopbackDatagramChannel, LoopsDatagrams) {
   LoopbackDatagramChannel channel(alloc);
   ReaderTask<DatagramReader> read_task(channel.channel());
 
-  Dispatcher dispatcher;
+  DispatcherForTest dispatcher;
   dispatcher.Post(read_task);
-  EXPECT_EQ(dispatcher.RunUntilStalled(), Pending());
+  EXPECT_TRUE(dispatcher.RunUntilStalled());
   EXPECT_EQ(read_task.poll_count, 1);
   EXPECT_EQ(read_task.read_count, 0);
   EXPECT_EQ(read_task.bytes_read_count, 0);
 
   PW_TEST_EXPECT_OK(channel.StageWrite(alloc.BufWith({1_b, 2_b, 3_b})));
 
-  EXPECT_EQ(dispatcher.RunUntilStalled(), Pending());
+  EXPECT_TRUE(dispatcher.RunUntilStalled());
   EXPECT_EQ(read_task.poll_count, 2);
   EXPECT_EQ(read_task.read_count, 1);
   EXPECT_EQ(read_task.bytes_read_count, 3);
@@ -111,16 +112,16 @@ TEST(LoopbackByteChannel, IgnoresEmptyWrites) {
   LoopbackByteChannel channel(alloc);
   ReaderTask<ReliableByteReader> read_task(channel.channel());
 
-  Dispatcher dispatcher;
+  DispatcherForTest dispatcher;
   dispatcher.Post(read_task);
-  EXPECT_EQ(dispatcher.RunUntilStalled(), Pending());
+  EXPECT_TRUE(dispatcher.RunUntilStalled());
   EXPECT_EQ(read_task.poll_count, 1);
   EXPECT_EQ(read_task.read_count, 0);
   EXPECT_EQ(read_task.bytes_read_count, 0);
 
   PW_TEST_EXPECT_OK(channel.StageWrite(alloc.BufWith({})));
 
-  EXPECT_EQ(dispatcher.RunUntilStalled(), Pending());
+  EXPECT_TRUE(dispatcher.RunUntilStalled());
   EXPECT_EQ(read_task.poll_count, 1);
   EXPECT_EQ(read_task.read_count, 0);
   EXPECT_EQ(read_task.bytes_read_count, 0);
@@ -131,16 +132,16 @@ TEST(LoopbackByteChannel, LoopsData) {
   LoopbackByteChannel channel(alloc);
   ReaderTask<ReliableByteReader> read_task(channel.channel());
 
-  Dispatcher dispatcher;
+  DispatcherForTest dispatcher;
   dispatcher.Post(read_task);
-  EXPECT_EQ(dispatcher.RunUntilStalled(), Pending());
+  EXPECT_TRUE(dispatcher.RunUntilStalled());
   EXPECT_EQ(read_task.poll_count, 1);
   EXPECT_EQ(read_task.read_count, 0);
   EXPECT_EQ(read_task.bytes_read_count, 0);
 
   PW_TEST_EXPECT_OK(channel.StageWrite(alloc.BufWith({1_b, 2_b, 3_b})));
 
-  EXPECT_EQ(dispatcher.RunUntilStalled(), Pending());
+  EXPECT_TRUE(dispatcher.RunUntilStalled());
   EXPECT_EQ(read_task.poll_count, 2);
   EXPECT_EQ(read_task.read_count, 1);
   EXPECT_EQ(read_task.bytes_read_count, 3);

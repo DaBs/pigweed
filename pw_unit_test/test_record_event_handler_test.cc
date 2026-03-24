@@ -124,6 +124,7 @@ TEST(TestRecordFunctionality, HandleSkipMacro) {
   TestExpectation skip_expectation = {
       pw::unit_test::json_impl::kSkipMacroIndicator,
       pw::unit_test::json_impl::kSkipMacroIndicator,
+      "",
       0,
       true};
   RunTestsSummary run_tests_summary = {0, 0, 1, 0};

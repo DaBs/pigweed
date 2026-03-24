@@ -15,6 +15,7 @@
 .cipd
 .presubmit
 .environment
+.vscode
 environment
 node_modules
 out
@@ -23,4 +24,4 @@ bazel-out
 bazel-pigweed
 bazel-testlogs
 outbazel
-third_party/crates_io/rust_crates
+pw_web/node_modules

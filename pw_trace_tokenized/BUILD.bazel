@@ -13,11 +13,12 @@
 # the License.
 
 load("@com_google_protobuf//bazel:proto_library.bzl", "proto_library")
+load("@com_google_protobuf//bazel:py_proto_library.bzl", "py_proto_library")
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
-load("@rules_python//python:proto.bzl", "py_proto_library")
 load("@rules_python//sphinxdocs:sphinx_docs_library.bzl", "sphinx_docs_library")
 load("//pw_build:compatibility.bzl", "incompatible_with_mcu")
 load("//pw_build:pw_cc_binary.bzl", "pw_cc_binary")
+load("//pw_build:pw_facade.bzl", "pw_facade")
 load(
     "//pw_protobuf_compiler:pw_proto_library.bzl",
     "nanopb_proto_library",
@@ -25,6 +26,7 @@ load(
     "pw_proto_filegroup",
     "pwpb_proto_library",
     "pwpb_rpc_proto_library",
+    "raw_rpc_proto_library",
 )
 load("//pw_unit_test:pw_cc_test.bzl", "pw_cc_test")
 
@@ -48,6 +50,15 @@ cc_library(
     ],
     strip_include_prefix = "public",
     tags = ["noclangtidy"],
+    deps = [
+        ":config_backend",
+        "//pw_varint",
+    ],
+)
+
+label_flag(
+    name = "config_backend",
+    build_setting_default = "//pw_build:default_module_config",
 )
 
 cc_library(
@@ -61,21 +72,83 @@ cc_library(
         "public/pw_trace_tokenized/trace_tokenized.h",
         "public_overrides/pw_trace_backend/trace_backend.h",
     ],
+    features = ["-conversion_warnings"],
+    implementation_deps = [
+        ":lock",
+        ":trace_time",
+        "//pw_trace:facade",
+        "//pw_varint",
+    ],
     includes = [
         "public",
         "public_overrides",
     ],
     deps = [
         ":config",
-        "//pw_log",
+        "//pw_preprocessor",
+        "//pw_span",
         "//pw_status",
         "//pw_tokenizer",
-        "//pw_trace:facade",
-        "//pw_varint",
-    ] + select({
-        "@platforms//os:none": [":pw_trace_tokenized_fake_time"],
-        "//conditions:default": [":pw_trace_host_trace_time"],
+    ],
+)
+
+pw_facade(
+    name = "lock",
+    hdrs = ["public/pw_trace_tokenized/internal/lock.h"],
+    backend = ":lock_backend",
+    strip_include_prefix = "public",
+)
+
+label_flag(
+    name = "lock_backend",
+    build_setting_default = ":interrupt_spin_lock",
+)
+
+cc_library(
+    name = "interrupt_spin_lock",
+    hdrs = [
+        "interrupt_spin_lock_public_overrides/pw_trace_tokenized_backend/lock_native.h",
+    ],
+    strip_include_prefix = "interrupt_spin_lock_public_overrides",
+    deps = [":interrupt_spin_lock_native"],
+)
+
+cc_library(
+    name = "interrupt_spin_lock_native",
+    hdrs = ["public/pw_trace_tokenized/internal/interrupt_spin_lock_native.h"],
+    strip_include_prefix = "public",
+    deps = ["//pw_sync:interrupt_spin_lock"],
+)
+
+cc_library(
+    name = "no_lock",
+    hdrs = [
+        "no_lock_public_overrides/pw_trace_tokenized_backend/lock_native.h",
+    ],
+    strip_include_prefix = "no_lock_public_overrides",
+    deps = [":no_lock_native"],
+)
+
+cc_library(
+    name = "no_lock_native",
+    hdrs = ["public/pw_trace_tokenized/internal/no_lock_native.h"],
+    strip_include_prefix = "public",
+    deps = ["//pw_sync:no_lock"],
+)
+
+label_flag(
+    name = "trace_time",
+    build_setting_default = ":default_trace_time",
+    features = ["-conversion_warnings"],
+)
+
+alias(
+    name = "default_trace_time",
+    actual = select({
+        "@platforms//os:none": ":pw_trace_tokenized_fake_time",
+        "//conditions:default": ":pw_trace_host_trace_time",
     }),
+    features = ["-conversion_warnings"],
 )
 
 cc_library(
@@ -86,11 +159,15 @@ cc_library(
     hdrs = [
         "public/pw_trace_tokenized/base_trace_service.h",
     ],
+    features = ["-conversion_warnings"],
+    implementation_deps = [
+        ":buffer",
+        "//pw_log",
+    ],
     strip_include_prefix = "public",
     deps = [
-        ":buffer",
         ":pw_trace_tokenized",
-        "//pw_ring_buffer",
+        "//pw_status",
         "//pw_stream",
     ],
 )
@@ -103,11 +180,11 @@ cc_library(
     hdrs = [
         "public/pw_trace_tokenized/trace_service_pwpb.h",
     ],
+    features = ["-conversion_warnings"],
     strip_include_prefix = "public",
     deps = [
         ":base_trace_service",
         ":protos_pwpb_rpc",
-        "//pw_chrono:system_clock",
     ],
 )
 
@@ -119,12 +196,15 @@ cc_library(
     hdrs = [
         "public/pw_trace_tokenized/trace_rpc_service_nanopb.h",
     ],
+    features = ["-conversion_warnings"],
+    implementation_deps = [
+        ":buffer",
+        ":pw_trace_tokenized",
+        "//pw_log",
+    ],
     strip_include_prefix = "public",
     deps = [
-        ":buffer",
         ":protos_nanopb_rpc",
-        "//pw_log",
-        "//pw_trace",
     ],
 )
 
@@ -136,11 +216,17 @@ cc_library(
     hdrs = [
         "public/pw_trace_tokenized/trace_buffer.h",
     ],
+    features = ["-conversion_warnings"],
+    implementation_deps = [
+        ":pw_trace_tokenized",
+        "//pw_span",
+    ],
     strip_include_prefix = "public",
     deps = [
-        ":pw_trace_tokenized",
+        ":config",
         "//pw_bytes",
-        "//pw_ring_buffer",
+        "//pw_containers:algorithm",
+        "//pw_containers:inline_var_len_entry_queue",
         "//pw_status",
     ],
 )
@@ -153,11 +239,40 @@ cc_library(
     hdrs = [
         "public/pw_trace_tokenized/trace_buffer_log.h",
     ],
-    deps = [
+    features = ["-conversion_warnings"],
+    implementation_deps = [
         ":buffer",
+        ":config",
+        ":pw_trace_tokenized",
         "//pw_base64",
         "//pw_log",
         "//pw_string",
+        "//pw_trace",
+    ],
+    strip_include_prefix = "public",
+    deps = ["//pw_status"],
+)
+
+cc_library(
+    name = "decoder",
+    srcs = [
+        "decoder.cc",
+    ],
+    hdrs = [
+        "public/pw_trace_tokenized/decoder.h",
+    ],
+    strip_include_prefix = "public",
+    deps = [
+        ":pw_trace_tokenized",
+        "//pw_bytes",
+        "//pw_log",
+        "//pw_result",
+        "//pw_status",
+        "//pw_stream",
+        "//pw_string",
+        "//pw_tokenizer:decoder",
+        "//pw_varint:stream",
+        "//third_party/fuchsia:stdcompat",
     ],
 )
 
@@ -194,8 +309,29 @@ pw_proto_filegroup(
     ],
 )
 
+filegroup(
+    name = "doxygen",
+    srcs = [
+        "public/pw_trace_tokenized/base_trace_service.h",
+        "public/pw_trace_tokenized/config.h",
+        "public/pw_trace_tokenized/decoder.h",
+        "public/pw_trace_tokenized/trace_buffer.h",
+        "public/pw_trace_tokenized/trace_buffer_log.h",
+        "public/pw_trace_tokenized/trace_callback.h",
+        "public/pw_trace_tokenized/trace_rpc_service_nanopb.h",
+        "public/pw_trace_tokenized/trace_service_pwpb.h",
+        "public/pw_trace_tokenized/trace_tokenized.h",
+        "public/pw_trace_tokenized/transfer_handler.h",
+    ],
+)
+
 pwpb_proto_library(
     name = "protos_pwpb",
+    deps = [":protos"],
+)
+
+raw_rpc_proto_library(
+    name = "protos_raw_rpc",
     deps = [":protos"],
 )
 
@@ -222,6 +358,42 @@ py_proto_library(
 )
 
 cc_library(
+    name = "transfer_handler",
+    srcs = [
+        "transfer_handler.cc",
+    ],
+    hdrs = [
+        "public/pw_trace_tokenized/transfer_handler.h",
+    ],
+    implementation_deps = [
+        ":buffer",
+        "//pw_assert:check",
+        "//pw_containers:inline_var_len_entry_queue",
+        "//pw_containers:var_len_entry_queue",
+        "//pw_log",
+    ],
+    strip_include_prefix = "public",
+    deps = [
+        ":config",
+        "//pw_transfer",
+    ],
+)
+
+pw_cc_test(
+    name = "transfer_handler_test",
+    srcs = ["transfer_handler_test.cc"],
+    deps = [
+        ":buffer",
+        ":decoder",
+        ":pw_trace_tokenized",
+        ":transfer_handler",
+        "//pw_string:builder",
+        "//pw_tokenizer:decoder",
+        "//pw_trace",
+    ],
+)
+
+cc_library(
     name = "pw_trace_tokenized_fake_time",
     srcs = [
         "fake_trace_time.cc",
@@ -240,13 +412,13 @@ pw_cc_test(
     srcs = [
         "trace_test.cc",
     ],
-    includes = [
-        "pw_trace_test",
-        "pw_trace_test/public_overrides",
-    ],
+    features = ["-conversion_warnings"],
     deps = [
+        ":pw_trace_host_trace_time",
         ":pw_trace_tokenized",
+        "//pw_thread:sleep",
         "//pw_trace",
+        "//pw_varint",
     ],
 )
 
@@ -255,22 +427,38 @@ pw_cc_test(
     srcs = [
         "trace_buffer_test.cc",
     ],
+    features = ["-conversion_warnings"],
     deps = [
         ":buffer",
         ":pw_trace_tokenized",
         "//pw_preprocessor",
+        "//pw_trace",
     ],
 )
 
 pw_cc_test(
     name = "buffer_log_test",
-    srcs = [
-        "trace_buffer_log_test.cc",
-    ],
+    srcs = ["trace_buffer_log_test.cc"],
+    features = ["-conversion_warnings"],
     deps = [
         ":buffer_log",
         ":pw_trace_tokenized",
-        "//pw_preprocessor",
+        "//pw_trace",
+    ],
+)
+
+pw_cc_test(
+    name = "decoder_test",
+    srcs = [
+        "decoder_test.cc",
+    ],
+    deps = [
+        ":decoder",
+        "//pw_assert:check",
+        "//pw_log",
+        "//pw_stream",
+        "//pw_tokenizer:decoder",
+        "//pw_trace",
     ],
 )
 
@@ -279,6 +467,7 @@ pw_cc_test(
     srcs = [
         "trace_service_pwpb_test.cc",
     ],
+    features = ["-conversion_warnings"],
     # TODO: b/343778108 - update to run on all compatible devices
     target_compatible_with = incompatible_with_mcu(),
     deps = [
@@ -293,7 +482,7 @@ pw_cc_test(
 cc_library(
     name = "pw_trace_host_trace_time",
     srcs = ["host_trace_time.cc"],
-    includes = ["example/public"],
+    features = ["-conversion_warnings"],
     target_compatible_with = incompatible_with_mcu(),
     deps = [":config"],
 )
@@ -301,7 +490,8 @@ cc_library(
 cc_library(
     name = "pw_trace_example_to_file",
     hdrs = ["example/public/pw_trace_tokenized/example/trace_to_file.h"],
-    includes = ["example/public"],
+    features = ["-conversion_warnings"],
+    strip_include_prefix = "example/public",
     deps = [
         ":pw_trace_tokenized",
         "//pw_trace",
@@ -311,6 +501,7 @@ cc_library(
 pw_cc_binary(
     name = "trace_tokenized_example_basic",
     srcs = ["example/basic.cc"],
+    features = ["-conversion_warnings"],
     deps = [
         ":pw_trace_example_to_file",
         "//pw_log",
@@ -322,6 +513,7 @@ pw_cc_binary(
 pw_cc_binary(
     name = "trace_tokenized_example_trigger",
     srcs = ["example/trigger.cc"],
+    features = ["-conversion_warnings"],
     deps = [
         ":pw_trace_example_to_file",
         "//pw_log",
@@ -333,6 +525,7 @@ pw_cc_binary(
 pw_cc_binary(
     name = "trace_tokenized_example_filter",
     srcs = ["example/filter.cc"],
+    features = ["-conversion_warnings"],
     deps = [
         ":pw_trace_example_to_file",
         "//pw_log",
@@ -344,9 +537,11 @@ pw_cc_binary(
 cc_library(
     name = "trace_tokenized_example_rpc",
     srcs = ["example/rpc.cc"],
-    implementation_deps = ["//pw_assert:check"],
-    deps = [
+    features = ["-conversion_warnings"],
+    implementation_deps = [
+        ":pw_trace_tokenized",
         ":trace_rpc_service",
+        "//pw_assert:check",
         "//pw_hdlc",
         "//pw_log",
         "//pw_rpc",
@@ -359,6 +554,7 @@ cc_library(
 cc_library(
     name = "trace_tokenized_example_linux_group_by_tid",
     srcs = ["example/linux_group_by_tid.cc"],
+    features = ["-conversion_warnings"],
     target_compatible_with = select({
         "@platforms//os:linux": [],
         "//conditions:default": ["@platforms//:incompatible"],

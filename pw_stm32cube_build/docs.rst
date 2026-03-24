@@ -32,7 +32,7 @@ components. The details are build-system dependent.
 GN build
 --------
 The primary ``pw_source_set`` for this integration is
-``$dir_pw_third_party/stm32cube:stm32cube``. This source set includes all of
+``$pw_external_stm32cube:stm32cube``. This source set includes all of
 the HAL, init code, and templates, depending on the value of the `GN args`_.
 
 Directory setup
@@ -60,7 +60,7 @@ generate the ``files.txt``.
 
 Headers
 =======
-``$dir_pw_third_party/stm32cube:stm32cube`` contains the following primary
+``$pw_external_stm32cube:stm32cube`` contains the following primary
 headers that external targets / applications would care about.
 
 ``{family}.h``
@@ -93,7 +93,7 @@ should be included and implemented by target init code.
 GN args
 =======
 The stm32cube GN build arguments are defined in
-``$dir_pw_third_party/stm32cube/stm32cube.gni``.
+``$pw_external_stm32cube/stm32cube.gni``.
 
 ``dir_pw_third_party_stm32cube_xx``
 -----------------------------------
@@ -267,8 +267,8 @@ from STM. So, if your project builds firmware for more than one MCU family, you
 will need to configure separate sets of the three [#]_ STM repositories for each MCU
 family. To do so,
 
-1.  Add the appropriate repositories to your WORKSPACE under different names,
-    eg. ``@stm32f4xx_hal_driver`` and ``@stm32h7xx_hal_driver``.
+1.  Add the appropriate repositories to your ``MODULE.bazel`` under different
+    names, eg. ``@stm32f4xx_hal_driver`` and ``@stm32h7xx_hal_driver``.
 2.  Set the corresponding :ref:`module-pw_stm32cube_build-bazel-label-flags` as
     part of the platform definition for your embedded target platforms.
 

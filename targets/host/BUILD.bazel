@@ -15,6 +15,7 @@
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("@rules_python//sphinxdocs:sphinx_docs_library.bzl", "sphinx_docs_library")
 load("//pw_build:compatibility.bzl", "incompatible_with_mcu")
+load("//pw_build:merge_flags.bzl", "flags_from_dict")
 
 package(
     default_visibility = ["//visibility:public"],
@@ -26,6 +27,7 @@ licenses(["notice"])
 cc_library(
     name = "system_rpc_server",
     srcs = ["system_rpc_server.cc"],
+    features = ["-conversion_warnings"],
     implementation_deps = ["//pw_assert:check"],
     deps = [
         "//pw_hdlc",
@@ -34,6 +36,15 @@ cc_library(
         "//pw_rpc/system_server:facade",
         "//pw_stream:socket_stream",
     ],
+)
+
+platform(
+    name = "host_googletest",
+    flags = flags_from_dict({
+        "//pw_unit_test:backend": "//pw_unit_test:googletest",
+        "//pw_unit_test:main": "@com_google_googletest//:gtest_main",
+    }),
+    parents = ["@bazel_tools//tools:host_platform"],
 )
 
 sphinx_docs_library(

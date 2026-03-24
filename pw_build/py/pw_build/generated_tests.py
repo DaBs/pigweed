@@ -1,4 +1,4 @@
-# Copyright 2020 The Pigweed Authors
+# Copyright 2025 The Pigweed Authors
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may not
 # use this file except in compliance with the License. You may obtain a copy of
@@ -11,7 +11,48 @@
 # WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
 # License for the specific language governing permissions and limitations under
 # the License.
-"""Tools for generating Pigweed tests that execute in C++ and Python."""
+"""Tools for generating Pigweed tests that execute in C++ and Python.
+
+This module provides a way to write data-driven tests that can be executed in
+multiple languages, ensuring that the implementations behave identically.
+
+The core of this module is the :py:class:`TestGenerator` class, which takes a
+sequence of test cases and generates tests for Python, C++, and TypeScript.
+
+The following example shows how to use ``generated_tests.py``:
+
+.. literalinclude:: py/generated_tests_example_test.py
+   :language: python
+   :start-at: import
+   :linenos:
+
+After the test generation code is written, add the Python tests to the build
+like a regular Python test:
+
+.. literalinclude:: py/BUILD.bazel
+   :language: bazel
+   :start-after: [pw_build-generated-test-example-py]
+   :end-before: [pw_build-generated-test-example-py]
+
+A little more work is required to generate tests for other languagues. Start by
+declaring the script as a ``pw_py_binary``.
+
+.. literalinclude:: py/BUILD.bazel
+   :language: bazel
+   :start-after: [pw_build-generated-test-example-py-binary]
+   :end-before: [pw_build-generated-test-example-py-binary]
+
+Then, for each language, declare a ``run_binary`` target to generate the test
+source and a test target to run it. For C++, this is done as follows:
+
+.. literalinclude:: py/BUILD.bazel
+   :language: bazel
+   :start-after: [pw_build-generated-test-example-cc]
+   :end-before: [pw_build-generated-test-example-cc]
+
+It is also possible to generate tests for other languages and check them in, but
+that is not recommended, since the tests may become outdated.
+"""
 
 import argparse
 from dataclasses import dataclass
@@ -51,23 +92,13 @@ _COPYRIGHT = f"""\
 // Generated at {datetime.now().isoformat()}
 """
 
-_HEADER_CPP = (
-    _COPYRIGHT
-    + """\
-// clang-format off
-"""
-)
+_HEADER_CPP = _COPYRIGHT + '// clang-format off\n'
 
-_HEADER_JS = (
-    _COPYRIGHT
-    + """\
-/* eslint-env browser, jasmine */
-"""
-)
+_HEADER_TS = _COPYRIGHT + '/* eslint-env browser, jasmine */\n'
 
 
 class Error(Exception):
-    """Something went wrong when generating tests."""
+    """Base class for exceptions raised by this module."""
 
 
 T = TypeVar('T')
@@ -75,7 +106,15 @@ T = TypeVar('T')
 
 @dataclass
 class Context(Generic[T]):
-    """Info passed into test generator functions for each test case."""
+    """Information about a particular test case passed to generator functions.
+
+    Attributes:
+        group: The name of the test group.
+        count: The 1-based index of this test case within the group.
+        total: The total number of test cases in the group.
+        test_case: The test case object from the list provided to the
+            :class:TestGenerator.
+    """
 
     group: str
     count: int
@@ -126,11 +165,68 @@ CcTestGenerator = Callable[[Context[T]], Iterable[str]]
 JsTestGenerator = Callable[[Context[T]], Iterable[str]]
 
 
-class TestGenerator(Generic[T]):
-    """Generates tests for multiple languages from a series of test cases."""
+@dataclass(frozen=True)
+class CcTest:
+    """Captures how to generate a C++ test.
 
-    def __init__(self, test_cases: Sequence[GroupOrTest[T]]):
+    Attributes:
+      generator: Function that takes a :class:`Context` and produces the C++
+          test.
+      header: Header that is output before the tests.
+      footer: Footer that is output after the tests.
+    """
+
+    generator: CcTestGenerator
+    header: str
+    footer: str
+
+
+@dataclass(frozen=True)
+class TsTest:
+    """Captures how to generate a TypeScript test.
+
+    Attributes:
+      generator: Function that takes a :class:`Context` and produces the
+          TypeScript test.
+      header: Header that is output before the tests.
+      footer: Footer that is output after the tests.
+    """
+
+    generator: JsTestGenerator
+    header: str
+    footer: str
+
+
+def _to_test(test_class: type[T], value: tuple | T | None) -> T | None:
+    if value is None:
+        return None
+
+    if isinstance(value, tuple):
+        return test_class(*value)
+
+    return value
+
+
+class TestGenerator(Generic[T]):
+    """Generates tests for multiple languages from a series of test cases.
+
+    This class orchestrates the generation of tests for Python, C++, and
+    TypeScript. It takes a sequence of test cases and uses generator functions
+    to produce the corresponding tests for each language.
+    """
+
+    def __init__(
+        self,
+        test_cases: Sequence[GroupOrTest[T]],
+        *,
+        cc_test: tuple[CcTestGenerator, str, str] | CcTest | None = None,
+        ts_test: tuple[JsTestGenerator, str, str] | TsTest | None = None,
+    ) -> None:
         self._cases: dict[str, list[T]] = defaultdict(list)
+
+        self._cc_test = _to_test(CcTest, cc_test)
+        self._ts_test = _to_test(TsTest, ts_test)
+
         message = ''
 
         if len(test_cases) < 2:
@@ -177,80 +273,131 @@ class TestGenerator(Generic[T]):
             self._generate_python_tests(define_py_test),
         )
 
-    def _generate_cc_tests(
-        self, define_cpp_test: CcTestGenerator, header: str, footer: str
-    ) -> Iterator[str]:
-        yield _HEADER_CPP
-        yield header
+    def _generate_cc_tests(self, test: CcTest) -> Iterator[str]:
+        yield test.header
 
         for ctx in self._test_contexts():
-            yield from define_cpp_test(ctx)
+            yield from test.generator(ctx)
             yield ''
 
-        yield footer
+        yield test.footer
 
-    def cc_tests(
-        self,
-        output: TextIO,
-        define_cpp_test: CcTestGenerator,
-        header: str,
-        footer: str,
-    ):
+    def cc_tests(self, output: TextIO) -> None:
         """Writes C++ unit tests for each test case to the given file."""
-        for line in self._generate_cc_tests(define_cpp_test, header, footer):
+        if self._cc_test is None:
+            raise NotImplementedError('cc_test was not set!')
+
+        for line in self._generate_cc_tests(self._cc_test):
             output.write(line)
             output.write('\n')
 
-    def _generate_ts_tests(
-        self, define_ts_test: JsTestGenerator, header: str, footer: str
-    ) -> Iterator[str]:
-        yield _HEADER_JS
-        yield header
+    def _generate_ts_tests(self, test: TsTest) -> Iterator[str]:
+        yield test.header
 
         for ctx in self._test_contexts():
-            yield from define_ts_test(ctx)
-        yield footer
+            yield from test.generator(ctx)
+        yield test.footer
 
-    def ts_tests(
-        self,
-        output: TextIO,
-        define_js_test: JsTestGenerator,
-        header: str,
-        footer: str,
-    ):
-        """Writes JS unit tests for each test case to the given file."""
-        for line in self._generate_ts_tests(define_js_test, header, footer):
+    def ts_tests(self, output: TextIO) -> None:
+        """Writes TypeScript unit tests for each test case to the given file."""
+        if self._ts_test is None:
+            raise NotImplementedError('ts_test was not set!')
+
+        for line in self._generate_ts_tests(self._ts_test):
             output.write(line)
             output.write('\n')
+
+
+_CPP_ESCAPES = {
+    ord(b'"'): r'\"',
+    ord(b'\\'): r'\\',
+    ord(b'\a'): r'\a',
+    ord(b'\b'): r'\b',
+    ord(b'\f'): r'\f',
+    ord(b'\n'): r'\n',
+    ord(b'\r'): r'\r',
+    ord(b'\t'): r'\t',
+    ord(b'\v'): r'\v',
+}
 
 
 def _to_chars(data: bytes) -> Iterator[str]:
+    """Convert bytes to a literal, using ASCII characters when possible."""
+    hex_byte = False
+    yield '"'
+
     for i, byte in enumerate(data):
+        if byte in _CPP_ESCAPES:
+            yield _CPP_ESCAPES[byte]
+            continue
         try:
-            char = data[i : i + 1].decode()
-            yield char if char.isprintable() else fr'\x{byte:02x}'
+            char = data[i : i + 1].decode('utf-8')
+            if char.isprintable():
+                if hex_byte and (char.isdigit() or 'a' <= char.lower() <= 'f'):
+                    yield '""'  # new literal so \x doesn't absorb this char
+                hex_byte = False
+                yield char
+                continue
         except UnicodeDecodeError:
-            yield fr'\x{byte:02x}'
+            pass
+
+        hex_byte = True
+        yield fr'\x{byte:02x}'
+
+    yield '"'
 
 
 def cc_string(data: str | bytes) -> str:
-    """Returns a C++ string literal version of a byte string or UTF-8 string."""
+    """Returns a C++ string literal version of bytes or a UTF-8 string.
+
+    Adds quotes and handles escaping. Minimizes the number of characters
+    required.
+    """
     if isinstance(data, str):
         data = data.encode()
 
-    return '"' + ''.join(_to_chars(data)) + '"'
+    return ''.join(_to_chars(data))
 
 
-def parse_test_generation_args() -> argparse.Namespace:
+def _parse_test_generation_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description='Generate unit test files')
-    parser.add_argument(
+    tests = parser.add_mutually_exclusive_group()
+    tests.add_argument(
         '--generate-cc-test',
         type=argparse.FileType('w'),
         help='Generate the C++ test file',
     )
-    parser.add_argument(
+    tests.add_argument(
         '--generate-ts-test',
         type=argparse.FileType('w'),
-        help='Generate the JS test file',
+        help='Generate the TypeScript test file',
     )
     return parser.parse_known_args()[0]
+
+
+def _cc_tests(tests: Iterable[TestGenerator], output: TextIO) -> None:
+    output.write(_HEADER_CPP)
+    for test in tests:
+        test.cc_tests(output)
+
+
+def _ts_tests(tests: Iterable[TestGenerator], output: TextIO) -> None:
+    output.write(_HEADER_TS)
+    for test in tests:
+        test.ts_tests(output)
+
+
+def main(*tests: TestGenerator) -> None:
+    """Runs the test generation or the Python tests.
+
+    If command line arguments for generating C++ or TypeScript tests are
+    provided, this function generates those tests. Otherwise, it runs the Python
+    unit tests.
+    """
+    args = _parse_test_generation_args()
+    if args.generate_cc_test:
+        _cc_tests(tests, args.generate_cc_test)
+    elif args.generate_ts_test:
+        _ts_tests(tests, args.generate_ts_test)
+    else:
+        unittest.main()

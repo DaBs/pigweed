@@ -34,7 +34,6 @@ pw_add_library(pw_bluetooth INTERFACE
     public/pw_bluetooth/gatt/error.h
     public/pw_bluetooth/gatt/server.h
     public/pw_bluetooth/gatt/types.h
-    public/pw_bluetooth/internal/hex.h
     public/pw_bluetooth/internal/raii_ptr.h
     public/pw_bluetooth/low_energy/advertising_data.h
     public/pw_bluetooth/low_energy/bond_data.h
@@ -58,8 +57,10 @@ pw_add_library(pw_bluetooth INTERFACE
     pw_function
     pw_multibuf
     pw_status
+    pw_string.hex
     pw_string.string
     pw_chrono.system_clock
+    pw_uuid
 )
 
 pw_add_library(pw_bluetooth.pw_bluetooth2 INTERFACE
@@ -74,7 +75,6 @@ pw_add_library(pw_bluetooth.pw_bluetooth2 INTERFACE
     public/pw_bluetooth/gatt/error.h
     public/pw_bluetooth/gatt/server2.h
     public/pw_bluetooth/gatt/types.h
-    public/pw_bluetooth/internal/hex.h
     public/pw_bluetooth/internal/raii_ptr.h
     public/pw_bluetooth/low_energy/advertising_data.h
     public/pw_bluetooth/low_energy/bond_data2.h
@@ -92,8 +92,8 @@ pw_add_library(pw_bluetooth.pw_bluetooth2 INTERFACE
     public
   PUBLIC_DEPS
     pw_bluetooth.config
-    pw_async2.dispatcher
-    pw_async2.once_sender
+    pw_async2
+    pw_async2.value_future
     pw_result.expected
     pw_channel
     pw_containers
@@ -102,6 +102,8 @@ pw_add_library(pw_bluetooth.pw_bluetooth2 INTERFACE
     pw_result
     pw_span
     pw_status
+    pw_string
+    pw_uuid
 )
 
 
@@ -273,14 +275,35 @@ pw_add_library(pw_bluetooth.snoop STATIC
   PUBLIC_DEPS
     pw_assert.check
     pw_bluetooth_proxy
+    pw_bluetooth.emboss_hci_group
     pw_bluetooth.emboss_snoop
     pw_chrono.system_clock
     pw_containers.inline_var_len_entry_queue
     pw_hex_dump
     pw_log
+    pw_stream
+    pw_string
     pw_sync.mutex
     pw_sync.virtual_basic_lockable
+    pw_trace
     pw_result
+)
+
+pw_add_library(pw_bluetooth.hci_util STATIC
+  HEADERS
+    public/pw_bluetooth/hci_util.h
+  PUBLIC_INCLUDES
+    public
+  SOURCES
+    hci_util.cc
+  PUBLIC_DEPS
+    pw_bluetooth.emboss_hci_h4
+    pw_result
+    pw_span
+  PRIVATE_DEPS
+    pw_bluetooth.emboss_hci_common
+    pw_bluetooth.emboss_hci_data
+    pw_status
 )
 
 pw_target_link_targets(pw_bluetooth
@@ -308,6 +331,7 @@ pw_add_test(pw_bluetooth.emboss_test
     pw_bluetooth.emboss_hci_test
     pw_bluetooth.emboss_l2cap_frames
     pw_bluetooth.emboss_rfcomm_frames
+    pw_bluetooth.emboss_util
     pw_third_party.fuchsia.stdcompat
   GROUPS
     modules
@@ -328,6 +352,15 @@ pw_add_test(pw_bluetooth.snoop_test
     snoop_test.cc
   PRIVATE_DEPS
     pw_bluetooth.snoop
+  GROUPS
+    modules
+)
+
+pw_add_test(pw_bluetooth.hci_util_test
+  SOURCES
+    hci_util_test.cc
+  PRIVATE_DEPS
+    pw_bluetooth.hci_util
   GROUPS
     modules
 )

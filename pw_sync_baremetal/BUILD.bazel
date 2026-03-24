@@ -36,7 +36,6 @@ cc_library(
     deps = [
         "//pw_assert:assert",
         "//pw_sync:interrupt_spin_lock.facade",
-        "//pw_sync:yield_core",
     ],
 )
 

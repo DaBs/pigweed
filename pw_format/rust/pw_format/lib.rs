@@ -70,18 +70,15 @@
 //! });
 //! ```
 #![deny(missing_docs)]
-#![cfg_attr(feature = "nightly_tait", feature(type_alias_impl_trait))]
 
 use std::collections::HashSet;
 
-use nom::{
-    branch::alt,
-    bytes::complete::tag,
-    character::complete::digit1,
-    combinator::{map, map_res},
-    IResult,
-};
-use quote::{quote, ToTokens};
+use nom::IResult;
+use nom::branch::alt;
+use nom::bytes::complete::tag;
+use nom::character::complete::digit1;
+use nom::combinator::{map, map_res};
+use quote::{ToTokens, quote};
 
 pub mod macros;
 
@@ -322,7 +319,7 @@ impl FormatFragment {
             return Some(fragment);
         };
 
-        let Self::Literal(ref mut literal_self) = self else {
+        let Self::Literal(literal_self) = self else {
             return Some(fragment);
         };
 

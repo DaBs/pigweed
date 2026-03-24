@@ -27,9 +27,6 @@ namespace pwemb = pw::bluetooth::emboss;
 // Android range -70 to +20, select the middle for now
 constexpr int8_t kTransmitPower = -25;
 
-// AndroidExtendedLowEnergyAdvertiser doesn't support extended advertising PDUs
-constexpr bool kUseExtendedPdu = false;
-
 namespace android_hci = hci_spec::vendor::android;
 namespace android_emb = pw::bluetooth::vendor::android_hci;
 
@@ -60,13 +57,15 @@ AndroidExtendedLowEnergyAdvertiser::~AndroidExtendedLowEnergyAdvertiser() {
   StopAdvertising();
 }
 
+void AndroidExtendedLowEnergyAdvertiser::AttachInspect(inspect::Node& parent) {
+  node_ = parent.CreateChild("low_energy_advertiser");
+  advertising_handle_map_.AttachInspect(node_);
+}
+
 CommandPacket AndroidExtendedLowEnergyAdvertiser::BuildEnablePacket(
-    const DeviceAddress& address,
-    pwemb::GenericEnableParam enable,
-    bool extended_pdu) {
-  std::optional<hci_spec::AdvertisingHandle> handle =
-      advertising_handle_map_.GetHandle(address, extended_pdu);
-  PW_CHECK(handle);
+    AdvertisementId advertisement_id, pwemb::GenericEnableParam enable) const {
+  hci_spec::AdvertisingHandle advertising_handle =
+      advertising_handle_map_.GetHandle(advertisement_id);
 
   auto packet =
       hci::CommandPacket::New<android_emb::LEMultiAdvtEnableCommandWriter>(
@@ -75,20 +74,19 @@ CommandPacket AndroidExtendedLowEnergyAdvertiser::BuildEnablePacket(
   packet_view.vendor_command().sub_opcode().Write(
       android_hci::kLEMultiAdvtEnableSubopcode);
   packet_view.enable().Write(enable);
-  packet_view.advertising_handle().Write(handle.value());
+  packet_view.advertising_handle().Write(advertising_handle);
   return packet;
 }
 
-std::optional<CommandPacket>
+std::optional<LowEnergyAdvertiser::SetAdvertisingParams>
 AndroidExtendedLowEnergyAdvertiser::BuildSetAdvertisingParams(
     const DeviceAddress& address,
     const AdvertisingEventProperties& properties,
     pwemb::LEOwnAddressType own_address_type,
-    const AdvertisingIntervalRange& interval,
-    bool extended_pdu) {
-  std::optional<hci_spec::AdvertisingHandle> handle =
-      advertising_handle_map_.MapHandle(address, extended_pdu);
-  if (!handle) {
+    const AdvertisingIntervalRange& interval) {
+  std::optional<AdvertisementId> advertisement_id =
+      advertising_handle_map_.Insert(address);
+  if (!advertisement_id) {
     bt_log(WARN,
            "hci-le",
            "could not allocate advertising handle for address: %s",
@@ -112,47 +110,57 @@ AndroidExtendedLowEnergyAdvertiser::BuildSetAdvertisingParams(
   view.adv_channel_map().channel_38().Write(true);
   view.adv_channel_map().channel_39().Write(true);
   view.adv_filter_policy().Write(pwemb::LEAdvertisingFilterPolicy::ALLOW_ALL);
-  view.adv_handle().Write(handle.value());
+  view.adv_handle().Write(
+      advertising_handle_map_.GetHandle(advertisement_id.value()));
   view.adv_tx_power().Write(hci_spec::kLEAdvertisingTxPowerMax);
 
   // We don't support directed advertising yet, so leave peer_address and
   // peer_address_type as 0x00
   // (|packet| parameters are initialized to zero above).
 
+  return SetAdvertisingParams{std::move(packet), advertisement_id.value()};
+}
+
+std::optional<CommandPacket>
+AndroidExtendedLowEnergyAdvertiser::BuildSetAdvertisingRandomAddr(
+    AdvertisementId advertisement_id) const {
+  hci_spec::AdvertisingHandle advertising_handle =
+      advertising_handle_map_.GetHandle(advertisement_id);
+  DeviceAddress address = advertising_handle_map_.GetAddress(advertisement_id);
+
+  auto packet =
+      CommandPacket::New<android_emb::LEMultiAdvtSetRandomAddrCommandWriter>(
+          android_hci::kLEMultiAdvt);
+  auto view = packet.view_t();
+
+  view.vendor_command().sub_opcode().Write(
+      android_hci::kLEMultiAdvtSetRandomAddrSubopcode);
+  view.adv_handle().Write(advertising_handle);
+  view.random_address().CopyFrom(address.value().view());
+
   return packet;
 }
 
 std::vector<CommandPacket>
 AndroidExtendedLowEnergyAdvertiser::BuildSetAdvertisingData(
-    const DeviceAddress& address,
+    AdvertisementId advertisement_id,
     const AdvertisingData& data,
-    AdvFlags flags,
-    bool extended_pdu) {
+    AdvFlags flags) const {
   if (data.CalculateBlockSize() == 0) {
     std::vector<CommandPacket> packets;
     return packets;
   }
 
-  std::optional<hci_spec::AdvertisingHandle> handle =
-      advertising_handle_map_.GetHandle(address, extended_pdu);
-  PW_CHECK(handle);
-
-  uint8_t adv_data_length =
-      static_cast<uint8_t>(data.CalculateBlockSize(/*include_flags=*/true));
-  size_t packet_size =
-      android_emb::LEMultiAdvtSetAdvtDataCommandWriter::MinSizeInBytes()
-          .Read() +
-      adv_data_length;
-
   auto packet =
       hci::CommandPacket::New<android_emb::LEMultiAdvtSetAdvtDataCommandWriter>(
-          android_hci::kLEMultiAdvt, packet_size);
+          android_hci::kLEMultiAdvt);
   auto view = packet.view_t();
 
+  uint8_t adv_data_length = data.CalculateBlockSize(/*include_flags=*/true);
   view.vendor_command().sub_opcode().Write(
       android_hci::kLEMultiAdvtSetAdvtDataSubopcode);
   view.adv_data_length().Write(adv_data_length);
-  view.adv_handle().Write(handle.value());
+  view.adv_handle().Write(advertising_handle_map_.GetHandle(advertisement_id));
 
   MutableBufferView data_view(view.adv_data().BackingStorage().data(),
                               adv_data_length);
@@ -165,54 +173,38 @@ AndroidExtendedLowEnergyAdvertiser::BuildSetAdvertisingData(
 }
 
 CommandPacket AndroidExtendedLowEnergyAdvertiser::BuildUnsetAdvertisingData(
-    const DeviceAddress& address, bool extended_pdu) {
-  std::optional<hci_spec::AdvertisingHandle> handle =
-      advertising_handle_map_.GetHandle(address, extended_pdu);
-  PW_CHECK(handle);
-
-  size_t packet_size =
-      android_emb::LEMultiAdvtSetAdvtDataCommandWriter::MinSizeInBytes().Read();
+    AdvertisementId advertisement_id) const {
   auto packet =
       hci::CommandPacket::New<android_emb::LEMultiAdvtSetAdvtDataCommandWriter>(
-          android_hci::kLEMultiAdvt, packet_size);
+          android_hci::kLEMultiAdvt);
   auto view = packet.view_t();
 
   view.vendor_command().sub_opcode().Write(
       android_hci::kLEMultiAdvtSetAdvtDataSubopcode);
   view.adv_data_length().Write(0);
-  view.adv_handle().Write(handle.value());
+  view.adv_handle().Write(advertising_handle_map_.GetHandle(advertisement_id));
 
   return packet;
 }
 
 std::vector<CommandPacket>
 AndroidExtendedLowEnergyAdvertiser::BuildSetScanResponse(
-    const DeviceAddress& address,
-    const AdvertisingData& data,
-    bool extended_pdu) {
+    AdvertisementId advertisement_id, const AdvertisingData& data) const {
   if (data.CalculateBlockSize() == 0) {
     std::vector<CommandPacket> packets;
     return packets;
   }
 
-  std::optional<hci_spec::AdvertisingHandle> handle =
-      advertising_handle_map_.GetHandle(address, extended_pdu);
-  PW_CHECK(handle);
-
-  uint8_t scan_rsp_length = static_cast<uint8_t>(data.CalculateBlockSize());
-  size_t packet_size =
-      android_emb::LEMultiAdvtSetScanRespDataCommandWriter::MinSizeInBytes()
-          .Read() +
-      scan_rsp_length;
   auto packet = hci::CommandPacket::New<
       android_emb::LEMultiAdvtSetScanRespDataCommandWriter>(
-      android_hci::kLEMultiAdvt, packet_size);
+      android_hci::kLEMultiAdvt);
   auto view = packet.view_t();
 
+  uint8_t scan_rsp_length = data.CalculateBlockSize();
   view.vendor_command().sub_opcode().Write(
       android_hci::kLEMultiAdvtSetScanRespSubopcode);
   view.scan_resp_length().Write(scan_rsp_length);
-  view.adv_handle().Write(handle.value());
+  view.adv_handle().Write(advertising_handle_map_.GetHandle(advertisement_id));
 
   MutableBufferView data_view(view.scan_resp_data().BackingStorage().data(),
                               scan_rsp_length);
@@ -225,33 +217,23 @@ AndroidExtendedLowEnergyAdvertiser::BuildSetScanResponse(
 }
 
 CommandPacket AndroidExtendedLowEnergyAdvertiser::BuildUnsetScanResponse(
-    const DeviceAddress& address, bool extended_pdu) {
-  std::optional<hci_spec::AdvertisingHandle> handle =
-      advertising_handle_map_.GetHandle(address, extended_pdu);
-  PW_CHECK(handle);
-
-  size_t packet_size =
-      android_emb::LEMultiAdvtSetScanRespDataCommandWriter::MinSizeInBytes()
-          .Read();
+    AdvertisementId advertisement_id) const {
   auto packet = hci::CommandPacket::New<
       android_emb::LEMultiAdvtSetScanRespDataCommandWriter>(
-      android_hci::kLEMultiAdvt, packet_size);
+      android_hci::kLEMultiAdvt);
   auto view = packet.view_t();
 
   view.vendor_command().sub_opcode().Write(
       android_hci::kLEMultiAdvtSetScanRespSubopcode);
   view.scan_resp_length().Write(0);
-  view.adv_handle().Write(handle.value());
+  view.adv_handle().Write(advertising_handle_map_.GetHandle(advertisement_id));
 
   return packet;
 }
 
-CommandPacket AndroidExtendedLowEnergyAdvertiser::BuildRemoveAdvertisingSet(
-    const DeviceAddress& address, bool extended_pdu) {
-  std::optional<hci_spec::AdvertisingHandle> handle =
-      advertising_handle_map_.GetHandle(address, extended_pdu);
-  PW_CHECK(handle);
-
+std::optional<CommandPacket>
+AndroidExtendedLowEnergyAdvertiser::BuildRemoveAdvertisingSet(
+    AdvertisementId advertisement_id) const {
   auto packet =
       hci::CommandPacket::New<android_emb::LEMultiAdvtEnableCommandWriter>(
           android_hci::kLEMultiAdvt);
@@ -259,7 +241,8 @@ CommandPacket AndroidExtendedLowEnergyAdvertiser::BuildRemoveAdvertisingSet(
   packet_view.vendor_command().sub_opcode().Write(
       android_hci::kLEMultiAdvtEnableSubopcode);
   packet_view.enable().Write(pwemb::GenericEnableParam::DISABLE);
-  packet_view.advertising_handle().Write(handle.value());
+  packet_view.advertising_handle().Write(
+      advertising_handle_map_.GetHandle(advertisement_id));
   return packet;
 }
 
@@ -269,19 +252,19 @@ void AndroidExtendedLowEnergyAdvertiser::StartAdvertising(
     const AdvertisingData& scan_rsp,
     const AdvertisingOptions& options,
     ConnectionCallback connect_callback,
-    ResultFunction<> result_callback) {
+    ResultFunction<AdvertisementId> result_callback) {
   if (options.extended_pdu) {
     bt_log(WARN,
            "hci-le",
            "android vendor extensions cannot use extended advertising PDUs");
-    result_callback(ToResult(HostError::kNotSupported));
+    result_callback(ToResult(HostError::kNotSupported).take_error());
     return;
   }
 
-  fit::result<HostError> result =
+  fit::result<HostError> can_start_result =
       CanStartAdvertising(address, data, scan_rsp, options, connect_callback);
-  if (result.is_error()) {
-    result_callback(ToResult(result.error_value()));
+  if (can_start_result.is_error()) {
+    result_callback(ToResult(can_start_result.error_value()).take_error());
     return;
   }
 
@@ -316,28 +299,35 @@ void AndroidExtendedLowEnergyAdvertiser::StartAdvertising(
     return;
   }
 
-  if (IsAdvertising(address, options.extended_pdu)) {
-    bt_log(DEBUG,
-           "hci-le",
-           "updating existing advertisement for %s",
-           bt_str(address));
-  }
-
   if (options.include_tx_power_level) {
     copied_data.SetTxPower(kTransmitPower);
     copied_scan_rsp.SetTxPower(kTransmitPower);
   }
+
+  auto result_cb_wrapper = [this, cb = std::move(result_callback)](
+                               StartAdvertisingInternalResult result) {
+    if (result.is_error()) {
+      auto [error, advertisement_id] = result.error_value();
+      if (advertisement_id.has_value()) {
+        advertising_handle_map_.Erase(advertisement_id.value());
+      }
+      cb(fit::error(error));
+      return;
+    }
+    cb(result.take_value());
+  };
 
   StartAdvertisingInternal(address,
                            copied_data,
                            copied_scan_rsp,
                            options,
                            std::move(connect_callback),
-                           std::move(result_callback));
+                           std::move(result_cb_wrapper));
 }
 
-void AndroidExtendedLowEnergyAdvertiser::StopAdvertising() {
-  LowEnergyAdvertiser::StopAdvertising();
+void AndroidExtendedLowEnergyAdvertiser::StopAdvertising(
+    fit::function<void(Result<>)> result_cb) {
+  StopAdvertisingInternal(std::move(result_cb));
   advertising_handle_map_.Clear();
 
   // std::queue doesn't have a clear method so we have to resort to this
@@ -347,7 +337,7 @@ void AndroidExtendedLowEnergyAdvertiser::StopAdvertising() {
 }
 
 void AndroidExtendedLowEnergyAdvertiser::StopAdvertising(
-    const DeviceAddress& address, bool extended_pdu) {
+    AdvertisementId advertisement_id, fit::function<void(Result<>)> result_cb) {
   // if there is an operation currently in progress, enqueue this operation and
   // we will get to it the next time we have a chance
   if (!hci_cmd_runner().IsReady()) {
@@ -355,14 +345,15 @@ void AndroidExtendedLowEnergyAdvertiser::StopAdvertising(
         INFO,
         "hci-le",
         "hci cmd runner not ready, queueing stop advertising command for now");
-    op_queue_.push([this, address, extended_pdu]() {
-      StopAdvertising(address, extended_pdu);
-    });
+    op_queue_.push(
+        [this, advertisement_id, cb = std::move(result_cb)]() mutable {
+          StopAdvertising(advertisement_id, std::move(cb));
+        });
     return;
   }
 
-  LowEnergyAdvertiser::StopAdvertisingInternal(address, kUseExtendedPdu);
-  advertising_handle_map_.RemoveAddress(address, kUseExtendedPdu);
+  StopAdvertisingInternal(advertisement_id, std::move(result_cb));
+  advertising_handle_map_.Erase(advertisement_id);
 }
 
 void AndroidExtendedLowEnergyAdvertiser::OnIncomingConnection(
@@ -395,8 +386,8 @@ AndroidExtendedLowEnergyAdvertiser::OnAdvertisingStateChangedSubevent(
 
   auto view = event.view<android_emb::LEMultiAdvtStateChangeSubeventView>();
   hci_spec::AdvertisingHandle adv_handle = view.advertising_handle().Read();
-  std::optional<DeviceAddress> opt_local_address =
-      advertising_handle_map_.GetAddress(adv_handle);
+  std::optional<AdvertisementId> advertisement_id =
+      advertising_handle_map_.GetId(adv_handle);
 
   // We use the identity address as the local address if we aren't advertising
   // or otherwise don't know about this advertising set. This is obviously
@@ -405,8 +396,9 @@ AndroidExtendedLowEnergyAdvertiser::OnAdvertisingStateChangedSubevent(
   static DeviceAddress identity_address =
       DeviceAddress(DeviceAddress::Type::kLEPublic, {0});
   DeviceAddress local_address = identity_address;
-  if (opt_local_address) {
-    local_address = opt_local_address.value();
+  if (advertisement_id.has_value()) {
+    local_address =
+        advertising_handle_map_.GetAddress(advertisement_id.value());
   }
 
   hci_spec::ConnectionHandle connection_handle =
@@ -427,7 +419,7 @@ AndroidExtendedLowEnergyAdvertiser::OnAdvertisingStateChangedSubevent(
                              local_address,
                              staged.peer_address,
                              staged.conn_params,
-                             kUseExtendedPdu);
+                             advertisement_id);
 
   return CommandChannel::EventCallbackResult::kContinue;
 }

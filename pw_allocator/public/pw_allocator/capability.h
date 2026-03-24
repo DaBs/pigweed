@@ -17,6 +17,8 @@
 
 namespace pw::allocator {
 
+/// @submodule{pw_allocator,impl}
+
 /// Hints about optional methods implemented or optional behaviors requested
 /// by an allocator of a derived type.
 ///
@@ -25,9 +27,10 @@ namespace pw::allocator {
 /// ``Capability``s using logical operations.
 enum Capability : uint32_t {
   // clang-format off
-  kImplementsGetRequestedLayout = 1 << 0,
-  kImplementsGetUsableLayout    = 1 << 1,
-  kImplementsGetAllocatedLayout = 1 << 2,
+  kCanAllocateArbitraryLayout   = 1 << 0,
+  kImplementsGetRequestedLayout = 1 << 1,
+  kImplementsGetUsableLayout    = 1 << 2,
+  kImplementsGetAllocatedLayout = 1 << 3,
   kImplementsGetCapacity        = 1 << 4,
   kImplementsRecognizes         = 1 << 5,
   kSkipsDestroy                 = 1 << 6,
@@ -98,5 +101,7 @@ inline constexpr Capabilities operator^(const Capabilities& lhs,
                                         const Capabilities& rhs) {
   return Capabilities(lhs.get() ^ rhs.get());
 }
+
+/// @}
 
 }  // namespace pw::allocator

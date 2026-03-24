@@ -11,7 +11,10 @@ pw_string
    - **Safe**: Never worry about buffer overruns or undefined behavior.
 
    *Pick three!* If you know how to use ``std::string``, just use
-   :cpp:type:`pw::InlineString` in the same way:
+   :cc:`pw::InlineString` in the same way:
+
+   .. Note for docs maintainers: the next code example could be built
+   .. but is difficult to test because it generates a runtime crash.
 
    .. code-block:: cpp
 
@@ -25,20 +28,19 @@ pw_string
       my_string.append('!', 8);
       // Foiled by a crash! No mysterious bugs or undefined behavior.
 
-   Need to build up a string? :cpp:type:`pw::StringBuilder` works like
+   Need to build up a string? :cc:`pw::StringBuilder` works like
    ``std::ostringstream``, but with most of the efficiency and memory benefits
-   of :cpp:type:`pw::InlineString`:
+   of :cc:`pw::InlineString`:
 
-   .. code-block:: cpp
+   .. DOCSTAG: [contributing-docs-examples]
 
-      // Create a pw::StringBuilder with a built-in buffer
-      pw::StringBuffer<32> my_string_builder = "Is it really this easy?";
+   .. literalinclude:: ./examples/build_string_in_buffer_test.cc
+      :language: cpp
+      :dedent:
+      :start-after: // DOCSTAG: [build-string-in-buffer]
+      :end-before: // DOCSTAG: [build-string-in-buffer]
 
-      // Add to it with idiomatic C++
-      my_string << " YES!";
-
-      // Use it like any other string
-      PW_LOG_DEBUG("%s", my_string_builder.c_str());
+   .. DOCSTAG: [contributing-docs-examples]
 
    Check out :ref:`module-pw_string-guide` for more code samples.
 
@@ -87,7 +89,6 @@ meets your needs.
    :maxdepth: 1
 
    guide
-   api
    design
    code_size
 
@@ -101,8 +102,8 @@ meets your needs.
       Integrate pw_string into your project and learn common use cases
 
    .. grid-item-card:: :octicon:`code-square` API Reference
-      :link: module-pw_string-api
-      :link-type: ref
+      :link: ../api/cc/group__pw__string.html
+      :link-type: url
       :class-item: sales-pitch-cta-secondary
 
       Detailed description of the pw_string's classes and methods

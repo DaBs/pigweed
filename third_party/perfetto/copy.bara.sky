@@ -21,7 +21,7 @@ core.workflow(
     name = "default",
     description = "Imports files from the perfetto repo",
     origin = git.origin(
-        url = "https://android.googlesource.com/platform/external/perfetto",
+        url = "https://github.com/google/perfetto",
         ref = "main",
     ),
     destination = git.gerrit_destination(

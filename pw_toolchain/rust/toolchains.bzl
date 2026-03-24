@@ -62,11 +62,38 @@ EXTRA_TARGETS = [
         "cpu": "armv8-m",
         "triple": "thumbv8m.main-none-eabihf",
     },
+    {
+        "build_std": True,
+        "cpu": "aarch64",
+        "triple": "aarch64-unknown-none",
+    },
+    {
+        "build_std": True,
+        "constraints": [
+            "@pigweed//pw_build/constraints/riscv/extensions:I",
+            "@pigweed//pw_build/constraints/riscv/extensions:M",
+            "@pigweed//pw_build/constraints/riscv/extensions:C",
+            "@pigweed//pw_build/constraints/riscv/extensions:A.not",
+        ],
+        "cpu": "riscv32",
+        "triple": "riscv32imc-unknown-none-elf",
+    },
+    {
+        "build_std": True,
+        "constraints": [
+            "@pigweed//pw_build/constraints/riscv/extensions:I",
+            "@pigweed//pw_build/constraints/riscv/extensions:M",
+            "@pigweed//pw_build/constraints/riscv/extensions:C",
+            "@pigweed//pw_build/constraints/riscv/extensions:A",
+        ],
+        "cpu": "riscv32",
+        "triple": "riscv32imac-unknown-none-elf",
+    },
 ]
 
 CHANNELS = [
     {
-        "extra_rustc_flags": ["-Dwarnings", "-Zmacro-backtrace"],
+        "extra_rustc_flags": ["-Dwarnings", "-Zemit-stack-sizes", "-Zmacro-backtrace"],
         "name": "nightly",
         "target_settings": ["@rules_rust//rust/toolchain/channel:nightly"],
     },
@@ -87,6 +114,8 @@ CHANNELS = [
         "extra_rustc_flags": [
             "-Dwarnings",
             "-Zallow-features=core_intrinsics,error_generic_member_access,proc_macro_span,rustc_attrs",
+            "-Zemit-stack-sizes",
+            "-Zmacro-backtrace",
         ],
         "name": "stable",
         "target_settings": ["@rules_rust//rust/toolchain/channel:stable"],

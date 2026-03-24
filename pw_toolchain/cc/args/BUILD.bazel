@@ -13,25 +13,50 @@
 # the License.
 
 load("@rules_cc//cc/toolchains:args.bzl", "cc_args")
+load("@rules_cc//cc/toolchains:args_list.bzl", "cc_args_list")
 load("@rules_cc//cc/toolchains:feature.bzl", "cc_feature")
+load("@rules_cc//cc/toolchains:feature_constraint.bzl", "cc_feature_constraint")
 
 package(default_visibility = ["//visibility:public"])
 
-# The common set of warnings for clang and arm_gcc.
 cc_args(
+    name = "empty_cc_args",
+    actions = [],
+)
+
+label_flag(
+    name = "extra_toolchain_args",
+    build_setting_default = ":empty_cc_args",
+    # This is an injection point used by Pigweed's toolchains.
+    # While anyone should be allowed to set this flag, only Pigweed's
+    # toolchains should be able to read it.
+    visibility = ["//pw_toolchain:__subpackages__"],
+)
+
+# The common set of warnings for clang and arm_gcc.
+cc_args_list(
     name = "common_warnings",
+    args = [
+        ":strict_warnings",
+        ":extra_strict_warnings",
+    ],
+)
+
+# LINT.IfChange(strict_warnings)
+cc_args(
+    name = "strict_warnings",
     actions = [
         "@rules_cc//cc/toolchains/actions:c_compile_actions",
         "@rules_cc//cc/toolchains/actions:cpp_compile_actions",
     ],
     args = [
+        # Arguments from strict_warnings in GN.
         "-Wall",
         "-Wextra",
         "-Wimplicit-fallthrough",
         "-Wcast-qual",
+        "-Wundef",
         "-Wpointer-arith",
-        "-Wshadow",
-        "-Wredundant-decls",
         # TODO: b/259746255 - Enable implicit conversion warnings once fixed.
         # "-Wconversion",
         # Make all warnings errors, except for the exemptions below.
@@ -40,32 +65,154 @@ cc_args(
         "-Wno-error=deprecated-declarations",  # [[deprecated]] attribute
     ],
 )
+# LINT.ThenChange(//pw_build/BUILD.gn:strict_warnings,//pw_build/CMakeLists.txt:strict_warnings)
 
-# This config contains warnings that are enabled for upstream Pigweed.
-# This config MUST NOT be used downstream to allow for warnings to be
-# added in the future without breaking downstream.
+# LINT.IfChange(clang_thread_safety_warnings)
 cc_args(
-    name = "internal_strict_warnings_flags",
+    name = "thread_safety_warnings",
     actions = [
         "@rules_cc//cc/toolchains/actions:c_compile_actions",
         "@rules_cc//cc/toolchains/actions:cpp_compile_actions",
     ],
     args = [
-        "-Wswitch-enum",
-        "-Wextra-semi",
-    ] + select({
-        "@platforms//os:windows": [],
-        # TODO: b/243069432 - Enable pedantic warnings on Windows once passing.
-        "//conditions:default": [":pedantic_warnings"],
-    }),
+        "-Wthread-safety",
+        "-Wthread-safety-beta",
+        "-D_LIBCPP_ENABLE_THREAD_SAFETY_ANNOTATIONS=1",
+    ],
+    requires_any_of = [
+        "//pw_toolchain/cc/capability:compiler_is_clang",
+    ],
+)
+# LINT.ThenChange(//pw_build/BUILD.gn:clang_thread_safety_warnings)
+
+# LINT.IfChange(extra_strict_warnings)
+cc_args_list(
+    name = "extra_strict_warnings",
+    args = [
+        ":extra_strict_c_only_warnings",
+        ":extra_strict_cc_warnings",
+    ],
+)
+
+cc_args(
+    name = "extra_strict_c_only_warnings",
+    actions = [
+        "@rules_cc//cc/toolchains/actions:c_compile_actions",
+    ],
+    args = [
+        "-Wstrict-prototypes",
+    ],
+    visibility = ["//visibility:private"],
+)
+
+cc_args(
+    name = "extra_strict_cc_warnings",
+    actions = [
+        "@rules_cc//cc/toolchains/actions:c_compile_actions",
+        "@rules_cc//cc/toolchains/actions:cpp_compile_actions",
+    ],
+    args = [
+        "-Wshadow",
+        "-Wredundant-decls",
+    ],
+    visibility = ["//visibility:private"],
+)
+# LINT.ThenChange(//pw_build/BUILD.gn:extra_strict_warnings,//pw_build/CMakeLists.txt:extra_strict_warnings)
+
+# LINT.IfChange(internal_strict_warnings)
+# This config contains warnings that are enabled for upstream Pigweed.
+# This config MUST NOT ever be exposed to downstream.
+cc_args_list(
+    name = "internal_strict_warnings",
+    args = [
+        ":pedantic_warnings",
+        ":extra_pigweed_warnings",
+        ":clang_only_extra_pigweed_warnings",
+    ],
     visibility = ["//:__subpackages__"],
 )
 
-# Add `--features=internal_strict_warnings` to your Bazel invocation to enable.
+cc_args(
+    name = "extra_pigweed_warnings",
+    actions = [
+        "@rules_cc//cc/toolchains/actions:compile_actions",
+    ],
+    args = [
+        "-Wswitch-enum",
+        "-Wextra-semi",
+    ],
+    visibility = ["//:__subpackages__"],
+)
+
+cc_args(
+    name = "pedantic_warnings",
+    actions = [
+        "@rules_cc//cc/toolchains/actions:compile_actions",
+    ],
+    args = [
+        # Enable -Wpedantic, but disable a few warnings.
+        "-Wpedantic",
+
+        # Allow designated initializers, which were added in C++20 but widely
+        # supported prior and permitted by the Google style guide.
+        "-Wno-c++20-designator",
+
+        # __COUNTER__ is a GCC extension until C++26. Using it results in
+        # -Wc2y-extensions warnings, which must be disabled.
+        "-Wno-c2y-extensions",
+
+        # Allow empty ... arguments in macros, which are permitted in C++20 but
+        # widely supported prior.
+        "-Wno-gnu-zero-variadic-macro-arguments",
+    ],
+)
+
+cc_args(
+    name = "clang_only_extra_pigweed_warnings",
+    actions = [
+        "@rules_cc//cc/toolchains/actions:compile_actions",
+    ],
+    args = [
+        "-Wshadow-all",
+    ],
+    requires_any_of = [
+        "//pw_toolchain/cc/capability:compiler_is_clang",
+    ],
+    visibility = ["//visibility:private"],
+)
+# LINT.ThenChange(//pw_build/BUILD.gn:internal_strict_warnings,//pw_build/CMakeLists.txt:internal_strict_warnings)
+
+# LINT.IfChange(conversion_warnings)
+cc_args(
+    name = "w_conversion",
+    actions = ["@rules_cc//cc/toolchains/actions:cpp_compile_actions"],
+    args = ["-Wconversion"],
+)
+
+# This is currently expressed as a feature so it can be selectively disabled
+# while fixes are rolled out.
 cc_feature(
-    name = "internal_strict_warnings",
-    args = [":internal_strict_warnings_flags"],
-    feature_name = "internal_strict_warnings",
+    name = "conversion_warnings_feature",
+    args = [":w_conversion"],
+    feature_name = "conversion_warnings",
+    visibility = ["//:__subpackages__"],
+)
+# LINT.ThenChange(//pw_build/BUILD.gn:conversion_warnings)
+
+cc_args(
+    name = "w_ctad_maybe_unsupported",
+    actions = ["@rules_cc//cc/toolchains/actions:cpp_compile_actions"],
+    args = ["-Wctad-maybe-unsupported"],
+)
+
+# This is currently expressed as a feature so it can be selectively disabled
+# while fixes are rolled out.
+# TODO: https://pwbug.dev/417734962 - Eventually this should be added to
+# internal_strict_warnings.
+cc_feature(
+    name = "ctad_warnings_feature",
+    args = [":w_ctad_maybe_unsupported"],
+    feature_name = "ctad_warnings",
     visibility = ["//:__subpackages__"],
 )
 
@@ -192,6 +339,22 @@ cc_args(
     args = ["-std=c++20"],
 )
 
+cc_feature(
+    name = "c++23_feature",
+    args = [":c++23"],
+    feature_name = "c++23",
+)
+
+# Compile for the C++23 standard.
+cc_args(
+    name = "c++23",
+    actions = [
+        "@rules_cc//cc/toolchains/actions:cpp_compile_actions",
+        "@rules_cc//cc/toolchains/actions:link_actions",
+    ],
+    args = ["-std=c++23"],
+)
+
 cc_args(
     name = "asan",
     actions = [
@@ -202,6 +365,21 @@ cc_args(
     args = [
         "-fsanitize=address",
         "-DADDRESS_SANITIZER",
+        "-fno-sanitize-recover=all",
+    ],
+)
+
+# TODO: https://pwbug.dev/346388161 - Push this to upstream rules_cc.
+cc_args(
+    name = "msan",
+    actions = [
+        "@rules_cc//cc/toolchains/actions:c_compile_actions",
+        "@rules_cc//cc/toolchains/actions:cpp_compile_actions",
+        "@rules_cc//cc/toolchains/actions:link_actions",
+    ],
+    args = [
+        "-fsanitize=memory",
+        "-DMEMORY_SANITIZER",
         "-fno-sanitize-recover=all",
     ],
 )
@@ -244,6 +422,7 @@ cc_args(
         "@rules_cc//cc/toolchains/actions:link_actions",
     ],
     args = [
+        "-fsanitize-coverage=inline-8bit-counters,trace-cmp,pc-table",
         "-DFUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION",
         "-UNDEBUG",
         "-D_LIBCPP_HARDENING_MODE=_LIBCPP_HARDENING_MODE_DEBUG",
@@ -325,4 +504,46 @@ cc_args(
         "dependent_module_map_files": "@rules_cc//cc/toolchains/variables:dependent_module_map_files",
     },
     iterate_over = "@rules_cc//cc/toolchains/variables:dependent_module_map_files",
+    requires_not_none = "@rules_cc//cc/toolchains/variables:dependent_module_map_files",
+)
+
+filegroup(
+    name = "warning_exceptions",
+    srcs = ["warning_exceptions.txt"],
+)
+
+cc_args(
+    name = "warning_suppression_allowlist",
+    actions = [
+        "@rules_cc//cc/toolchains/actions:c_compile_actions",
+        "@rules_cc//cc/toolchains/actions:cpp_compile_actions",
+    ],
+    args = [
+        "--warning-suppression-mappings={warning_exceptions}",
+    ],
+    data = [
+        ":warning_exceptions",
+    ],
+    format = {
+        "warning_exceptions": ":warning_exceptions",
+    },
+    requires_any_of = [
+        # GO: cgo compilation involves another layer of sandboxing,
+        #     this file is not found during cgo compilation. Once
+        #     `--warning-suppression-mappings` is listed in cgoAbsEnvFlags in
+        #     rules_go, this can be removed.
+        # Rust: Rust has a similar problem, but it is encountered in a
+        #     less-frequently traveled path in rules_rust.
+        ":not_rust_and_not_go",
+    ],
+)
+
+cc_feature_constraint(
+    name = "not_rust_and_not_go",
+    all_of = [
+        "//pw_toolchain/cc/feature:rules_go_unsupported_feature",
+        "//pw_toolchain/cc/feature:rules_rust_unsupported_feature",
+    ],
+    # Find a better home for this.
+    visibility = ["//visibility:private"],
 )

@@ -14,6 +14,9 @@ This sync backend implements the ``pw_sync`` facade. To enable, set
 the Kconfig menu.
 
 * ``pw_sync.mutex`` can be enabled via ``CONFIG_PIGWEED_SYNC_MUTEX``.
+* ``pw_sync.timed_mutex`` can be enabled via ``CONFIG_PIGWEED_SYNC_TIMED_MUTEX``.
 * ``pw_sync.binary_semaphore`` can be enabled via
   ``CONFIG_PIGWEED_SYNC_BINARY_SEMAPHORE``.
+* ``pw_sync.counting_semaphore`` can be enabled via
+  ``CONFIG_PIGWEED_SYNC_COUNTING_SEMAPHORE``.
 * ``pw_sync.interrupt_spin_lock`` can be enabled via ``CONFIG_PIGWEED_SYNC_INTERRUPT_SPIN_LOCK``.

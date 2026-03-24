@@ -1,3 +1,5 @@
+.. TODO: b/442244233 - Move API reference content to Doxygen comments
+
 .. _module-pw_rpc-cpp:
 
 =====================
@@ -23,9 +25,7 @@ packet buffer, which comprises the plurality of the example's RAM usage. This is
 not a suitable transport for an actual product; a real implementation would have
 additional overhead proportional to the complexity of the transport.
 
-.. TODO: b/388905812 - Re-enable the size report.
-.. .. include:: server_size
-.. include:: ../size_report_notice
+.. include:: server_size
 
 RPC server implementation
 =========================
@@ -123,9 +123,7 @@ client, the client's ``ProcessPacket`` function is called with the packet data.
    }  // namespace
 
    // Called when the transport layer receives an RPC packet.
-   void ProcessRpcPacket(ConstByteSpan packet) {
-     my_client.ProcessPacket(packet);
-   }
+   void ProcessRpcPacket(ConstByteSpan packet) { my_client.ProcessPacket(packet); }
 
 Note that client processing such as callbacks will be invoked within
 the body of ``ProcessPacket``.
@@ -174,13 +172,11 @@ Example
 
    // Callback invoked when a response is received. This is called synchronously
    // from Client::ProcessPacket.
-   void EchoResponse(const pw_rpc_EchoMessage& response,
-                     pw::Status status) {
+   void EchoResponse(const pw_rpc_EchoMessage& response, pw::Status status) {
      if (status.ok()) {
        PW_LOG_INFO("Received echo response: %s", response.msg);
      } else {
-       PW_LOG_ERROR("Echo failed with status %d",
-                    static_cast<int>(status.code()));
+       PW_LOG_ERROR("Echo failed with status %d", static_cast<int>(status.code()));
      }
    }
 
@@ -265,6 +261,25 @@ with the ``ABORTED`` status.
    // on_error callbacks with ABORTED status.
    client->CloseChannel(1);
 
+Default Channel Output
+============================
+Sometimes it may be necessary to register a ``ChannelOutput`` that handles all
+messages which do not match a specific channel, for example, if the server
+itself doesn't have direct access to the clients and it has to be routed through
+some middleware. For cases like this, a default channel output can be registered
+which processes all packets with unrecognized channel ids.
+
+.. code-block:: cpp
+
+   // Only registered channel has id of 1.
+   std::array<Channel, 1> channels = {Channel::Create<1>(/*...*/)};
+   // `MyDefaultChannelOutput` is a class that implements the
+   // `pw::rpc::ChannelOutput` interface. It will process all packets that don't
+   // have a packet id of 1.
+   MyDefaultChannelOutput default_channel_output;
+   Server server(channels);
+   PW_ASSERT_OK(server.SetDefaultChannelOutput(default_channel_output));
+
 .. _module-pw_rpc-remap:
 
 Remapping channels
@@ -274,15 +289,12 @@ This can remove the need for globally known channel IDs. Clients can use a
 generic channel ID. The server remaps the generic channel ID to an ID associated
 with the transport the client is using.
 
-.. cpp:namespace-push:: pw::rpc
-
-.. doxygengroup:: pw_rpc_channel_functions
-   :content-only:
-
-.. cpp:namespace-pop::
-
 A future revision of the pw_rpc protocol will remove the need for global channel
 IDs without requiring remapping.
+
+API reference
+-------------
+Moved: :cc:`Channel functions <pw_rpc_channel>`
 
 Example deployment
 ==================
@@ -336,7 +348,8 @@ message payload size.
 
    namespace pw::file {
 
-   class FileSystemService : public pw_rpc::raw::FileSystem::Service<FileSystemService> {
+   class FileSystemService
+       : public pw_rpc::raw::FileSystem::Service<FileSystemService> {
     public:
      void List(ConstByteSpan request, RawServerWriter& writer);
 
@@ -424,6 +437,11 @@ Client call objects provide a few common methods.
       The buffer provided to the callback is only valid for the duration of the
       callback. The callback should return an OK status with the size of the
       encoded payload on success, or an error status on failure.
+
+   .. cpp:function:: size_t MaxWriteSizeBytes() const
+
+      Returns the maximum encoded payload size for writes to this call or 0 if
+      the call is not active.
 
    .. cpp:function:: pw::Status RequestCompletion()
 
@@ -532,7 +550,7 @@ Destructors & moves wait for callbacks to complete
       call object, which is not permitted. Fix this condition or change the value of
       PW_RPC_CALLBACK_TIMEOUT_TICKS to avoid this crash.
 
-      See https://pigweed.dev/pw_rpc#destructors-moves-wait-for-callbacks-to-complete
+      See https://pigweed.dev/pw_rpc/cpp.html#destructors-moves-wait-for-callbacks-to-complete
       for details.
 
 Only one thread at a time may execute ``on_next``
@@ -577,7 +595,7 @@ We also have a templated Storage type alias:
 
    template <auto kMethod>
    using Storage =
-      std::pair<MethodRequestType<kMethod>, MethodResponseType<kMethod>>;
+       std::pair<MethodRequestType<kMethod>, MethodResponseType<kMethod>>;
 
 ``Storage<some::package::pw_rpc::pwpb::SpecialService::MyMethod>`` will
 instantiate as:
@@ -601,8 +619,105 @@ instantiate as:
 --------------------------------
 Client synchronous call wrappers
 --------------------------------
-.. doxygenfile:: pw_rpc/synchronous_call.h
-   :sections: detaileddescription
+``pw_rpc`` provides wrappers that convert the asynchronous client API to a
+synchronous API. The :cc:`SynchronousCall\<RpcMethod\>
+<pw::rpc::SynchronousCall>` functions wrap the asynchronous client RPC call
+with a timed thread notification and returns once a result is known or a
+timeout has occurred. Only unary methods are supported.
+
+The Nanopb and pwpb APIs return a :cc:`SynchronousCallResult\<Response\>
+<pw::rpc::SynchronousCallResult>` object, which can be queried to determine
+whether any error scenarios occurred and, if not, access the response. The raw
+API executes a function when the call completes or returns a :cc:`Status
+<pw::Status>` if it does not.
+
+``SynchronousCall<RpcMethod>`` blocks indefinitely, whereas
+:cc:`SynchronousCallFor\<RpcMethod\> <pw::rpc::SynchronousCallFor>` and
+:cc:`SynchronousCallUntil\<RpcMethod\> <pw::rpc::SynchronousCallUntil>`
+block for a given timeout or until a deadline, respectively. All wrappers work
+with either the standalone static RPC functions or the generated service client
+member methods.
+
+.. note::
+
+   Use of the ``SynchronousCall`` wrappers requires a
+   :cc:`TimedThreadNotification <pw::sync::TimedThreadNotification>`
+   backend.
+
+The following examples use the Nanopb API to make a call that blocks
+indefinitely. If you'd like to include a timeout for how long the call
+should block for, use the ``SynchronousCallFor()`` or ``SynchronousCallUntil()``
+variants.
+
+.. code-block:: cpp
+
+   pw_rpc_EchoMessage request{.msg = "hello"};
+   pw::rpc::SynchronousCallResult<pw_rpc_EchoMessage> result =
+       pw::rpc::SynchronousCall<EchoService::Echo>(
+           rpc_client, channel_id, request);
+   if (result.ok()) {
+     PW_LOG_INFO("%s", result.response().msg);
+   }
+
+Additionally, the use of a generated ``Client`` object is supported:
+
+.. code-block:: cpp
+
+   pw_rpc::nanopb::EchoService::Client client(rpc_client, channel_id);
+   pw_rpc_EchoMessage request{.msg = "hello"};
+   pw::rpc::SynchronousCallResult<pw_rpc_EchoMessage> result =
+       pw::rpc::SynchronousCall<EchoService::Echo>(client, request);
+
+   if (result.ok()) {
+     PW_LOG_INFO("%s", result.response().msg);
+   }
+
+``SynchronousCall<RpcMethod>`` also supports using an optional custom response
+message class, ``SynchronousCall<RpcMethod, Response>``. This enables the use
+of response messages with variable-length fields.
+
+.. code-block:: cpp
+
+   pw_rpc_MyMethodRequestMessage request{};
+   class CustomResponse : public pw_rpc_MyMethodResponseMessage {
+    public:
+     CustomResponse() {
+       repeated_field.SetDecoder([this](MyMethodResponse::StreamDecoder& decoder) {
+         return decoder.ReadRepeatedField(values);
+       });
+     }
+     pw::Vector<uint32_t, 4> values();
+   };
+   pw::rpc::SynchronousCallResult<CustomResponse> result =
+       pw::rpc::SynchronousCall<EchoService::Echo, CustomResponse>(
+           rpc_client, channel_id, request);
+   if (result.ok()) {
+     PW_LOG_INFO("%d", result.response().values[0]);
+   }
+
+The raw API works similarly to the Nanopb API, but takes a :cc:`Function
+<pw::Function>` and returns a :cc:`Status <pw::Status>`. If the RPC
+completes, the ``Function`` is called with the response and returned status,
+and the ``SynchronousCall()`` invocation returns :cc:`OkStatus()
+<pw::OkStatus>`. If the RPC fails, ``SynchronousCall()`` returns an error.
+
+.. code-block:: cpp
+
+   pw::Status rpc_status = pw::rpc::SynchronousCall<EchoService::Echo>(
+       rpc_client,
+       channel_id,
+       encoded_request,
+       [](pw::ConstByteSpan reply, pw::Status status) {
+         PW_LOG_INFO(
+             "Received %zu bytes with status %s", reply.size(), status.str());
+       });
+
+.. warning::
+
+   These wrappers should not be used from any context that cannot be
+   blocked! This method will block the calling thread until the RPC completes,
+   and translate the response into a ``SynchronousCallResult`` that
+   contains the error type and status or the proto response.
 
 Example
 =======
@@ -616,7 +731,7 @@ Example
 
      RoomInfoRequest request;
      SynchronousCallResult<RoomInfoResponse> result =
-       SynchronousCall<Chat::GetRoomInformation>(client, channel.id(), request);
+         SynchronousCall<Chat::GetRoomInformation>(client, channel.id(), request);
 
      if (result.is_rpc_error()) {
        ShutdownClient(client);
@@ -640,7 +755,7 @@ Example
      if (result.is_timeout()) {
        RetryRoomRequest();
      } else {
-     ...
+       // ...
      }
    }
 
@@ -671,8 +786,7 @@ an RPC client and server with the same set of channels.
 
 .. code-block:: cpp
 
-   pw::rpc::Channel channels[] = {
-       pw::rpc::Channel::Create<1>(&channel_output)};
+   pw::rpc::Channel channels[] = {pw::rpc::Channel::Create<1>(&channel_output)};
 
    // Creates both a client and a server.
    pw::rpc::ClientServer client_server(channels);
@@ -786,11 +900,10 @@ response is received. It verifies that expected data was both sent and received.
      Status BlockOnResponse(uint32_t value);
    };
 
-
    class TestService final : public MyService<TestService> {
     public:
      Status TheMethod(const pw_rpc_test_TheMethod& request,
-                         pw_rpc_test_TheMethod& response) {
+                      pw_rpc_test_TheMethod& response) {
        response.value = request.integer + 1;
        return pw::OkStatus();
      }
@@ -851,11 +964,10 @@ to with a test service implementation.
      Status SendRpcCall(uint32_t value);
    };
 
-
    class TestService final : public MyService<TestService> {
     public:
      Status TheMethod(const pw_rpc_test_TheMethod& request,
-                         pw_rpc_test_TheMethod& response) {
+                      pw_rpc_test_TheMethod& response) {
        response.value = request.integer + 1;
        return pw::OkStatus();
      }
@@ -934,8 +1046,8 @@ timeout for the waiting part (default timeout is 100ms).
    context.call({});
 
    PW_TEST_ASSERT_OK(pw::rpc::test::SendResponseIfCalled<
-             other::pw_rpc::pwpb::OtherService::GetPart>(
-       client_context, {.value = 42}));
+                     other::pw_rpc::pwpb::OtherService::GetPart>(client_context,
+                                                                 {.value = 42}));
 
    // At this point MyService::GetData handler received the GetPartResponse.
 
@@ -965,13 +1077,7 @@ defined in ``pw_rpc/integration_testing.h``:
 ---------------------
 Configuration options
 ---------------------
-The following configurations can be adjusted via compile-time configuration of
-this module, see the
-:ref:`module documentation <module-structure-compile-time-configuration>` for
-more details.
-
-.. doxygenfile:: pw_rpc/public/pw_rpc/internal/config.h
-   :sections: define
+See :cc:`Configuration <pw_rpc_config>`.
 
 ------------------------------
 Sharing server and client code

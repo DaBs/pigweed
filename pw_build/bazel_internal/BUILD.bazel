@@ -17,6 +17,11 @@ load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("//pw_build:binary_tools.bzl", "pw_elf_to_bin", "pw_elf_to_dump")
 load("//pw_build:pw_linker_script.bzl", "pw_linker_script")
 
+filegroup(
+    name = "empty_file_target",
+    srcs = ["empty_file"],
+)
+
 cc_library(
     name = "header_test",
     hdrs = ["header_test.h"],
@@ -47,7 +52,10 @@ pw_linker_script(
 cc_binary(
     name = "test_linker_script",
     srcs = ["test.cc"],
-    copts = ["-Wno-unused-variable"],
+    copts = [
+        "-Wno-unused-variable",
+        "-Wno-main",
+    ],
     # Only compatible with platforms that support linker scripts.
     # This test and its siblings will not link with asan:
     # ld.lld: error: section '.text' will not fit in region 'VECTOR_TABLE': overflowed by 319296 bytes
@@ -63,7 +71,10 @@ cc_binary(
         "@platforms//os:linux": [],
         "//conditions:default": ["@platforms//:incompatible"],
     }),
-    deps = [":linker_script_test"],
+    deps = [
+        ":linker_script_test",
+        "//pw_preprocessor",
+    ],
 )
 
 # Use cc_library to depend on the linker script, and then use cc_binary to build
@@ -76,7 +87,10 @@ cc_library(
 cc_binary(
     name = "test_transitive_linker_script",
     srcs = ["test.cc"],
-    copts = ["-Wno-unused-variable"],
+    copts = [
+        "-Wno-unused-variable",
+        "-Wno-main",
+    ],
     features = ["-pic"],
     # Only compatible with platforms that support linker scripts.
     target_compatible_with = select({
@@ -86,7 +100,10 @@ cc_binary(
         "@platforms//os:linux": [],
         "//conditions:default": ["@platforms//:incompatible"],
     }),
-    deps = [":lib_linker_script"],
+    deps = [
+        ":lib_linker_script",
+        "//pw_preprocessor",
+    ],
 )
 
 # Verify that the linker script can also be specified directly.
@@ -94,7 +111,10 @@ cc_binary(
     name = "test_direct_linker_script",
     srcs = ["test.cc"],
     additional_linker_inputs = [":linker_script_test"],
-    copts = ["-Wno-unused-variable"],
+    copts = [
+        "-Wno-unused-variable",
+        "-Wno-main",
+    ],
     features = ["-pic"],
     linkopts = ["-T $(execpath :linker_script_test)"],
     # Only compatible with platforms that support linker scripts.
@@ -105,6 +125,7 @@ cc_binary(
         "@platforms//os:linux": [],
         "//conditions:default": ["@platforms//:incompatible"],
     }),
+    deps = ["//pw_preprocessor"],
 )
 
 pw_elf_to_bin(

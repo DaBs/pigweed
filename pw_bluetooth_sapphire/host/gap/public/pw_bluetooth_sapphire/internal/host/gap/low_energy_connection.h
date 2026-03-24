@@ -21,6 +21,7 @@
 #include "pw_bluetooth_sapphire/internal/host/gap/generic_access_client.h"
 #include "pw_bluetooth_sapphire/internal/host/gap/low_energy_connection_handle.h"
 #include "pw_bluetooth_sapphire/internal/host/gap/low_energy_connection_request.h"
+#include "pw_bluetooth_sapphire/internal/host/gap/low_energy_state.h"
 #include "pw_bluetooth_sapphire/internal/host/gatt/gatt.h"
 #include "pw_bluetooth_sapphire/internal/host/hci-spec/protocol.h"
 #include "pw_bluetooth_sapphire/internal/host/hci/low_energy_connection.h"
@@ -76,7 +77,9 @@ class LowEnergyConnection final : public sm::Delegate {
       l2cap::ChannelManager* l2cap,
       gatt::GATT::WeakPtr gatt,
       hci::Transport::WeakPtr hci,
-      pw::async::Dispatcher& dispatcher);
+      pw::bluetooth_sapphire::LeaseProvider& wake_lease_provider,
+      pw::async::Dispatcher& dispatcher,
+      const LowEnergyState& low_energy_state);
 
   // Notifies request callbacks and connection refs of the disconnection.
   ~LowEnergyConnection() override;
@@ -153,6 +156,10 @@ class LowEnergyConnection final : public sm::Delegate {
   hci::LowEnergyConnection* link() const { return link_.get(); }
   sm::BondableMode bondable_mode() const;
 
+  pw::chrono::SystemClock::time_point create_time() const {
+    return create_time_;
+  }
+
   sm::SecurityProperties security() const;
 
   pw::bluetooth::emboss::ConnectionRole role() const { return link()->role(); }
@@ -161,17 +168,19 @@ class LowEnergyConnection final : public sm::Delegate {
   LowEnergyConnection::WeakPtr GetWeakPtr() { return weak_self_.GetWeakPtr(); }
 
  private:
-  LowEnergyConnection(Peer::WeakPtr peer,
-                      std::unique_ptr<hci::LowEnergyConnection> link,
-                      LowEnergyConnectionOptions connection_options,
-                      PeerDisconnectCallback peer_disconnect_cb,
-                      ErrorCallback error_cb,
-                      WeakSelf<LowEnergyConnectionManager>::WeakPtr conn_mgr,
-                      std::unique_ptr<iso::IsoStreamManager> iso_mgr,
-                      l2cap::ChannelManager* l2cap,
-                      gatt::GATT::WeakPtr gatt,
-                      hci::Transport::WeakPtr hci,
-                      pw::async::Dispatcher& dispatcher);
+  LowEnergyConnection(
+      Peer::WeakPtr peer,
+      std::unique_ptr<hci::LowEnergyConnection> link,
+      LowEnergyConnectionOptions connection_options,
+      PeerDisconnectCallback peer_disconnect_cb,
+      ErrorCallback error_cb,
+      WeakSelf<LowEnergyConnectionManager>::WeakPtr conn_mgr,
+      l2cap::ChannelManager* l2cap,
+      gatt::GATT::WeakPtr gatt,
+      hci::Transport::WeakPtr hci,
+      pw::async::Dispatcher& dispatcher,
+      const LowEnergyState& low_energy_state,
+      pw::bluetooth_sapphire::LeaseProvider& wake_lease_provider);
 
   // Registers this connection with L2CAP and initializes the fixed channel
   // protocols. Return true on success, false on failure.
@@ -330,11 +339,12 @@ class LowEnergyConnection final : public sm::Delegate {
   // operating as a Central, |iso_mgr_| is used to establish an outgoing
   // connection to a peer. When operating as a Peripheral, |iso_mgr_| is used to
   // allow incoming requests for specified CIG/CIS combinations.
-  std::unique_ptr<iso::IsoStreamManager> iso_mgr_;
+  std::optional<iso::IsoStreamManager> iso_mgr_;
 
   struct InspectProperties {
     inspect::StringProperty peer_id;
     inspect::StringProperty peer_address;
+    inspect::IntProperty connected_time;
   };
   InspectProperties inspect_properties_;
   inspect::Node inspect_node_;
@@ -398,6 +408,8 @@ class LowEnergyConnection final : public sm::Delegate {
 
   WeakSelf<LowEnergyConnection> weak_self_;
   WeakSelf<sm::Delegate> weak_delegate_;
+
+  pw::chrono::SystemClock::time_point create_time_;
 
   BT_DISALLOW_COPY_AND_ASSIGN_ALLOW_MOVE(LowEnergyConnection);
 };

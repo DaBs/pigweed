@@ -11,10 +11,9 @@
 // WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
 // License for the specific language governing permissions and limitations under
 // the License.
-#![cfg_attr(feature = "nightly", feature(type_alias_impl_trait))]
 
 #[allow(unused_imports)]
-use pw_format::{macros::FormatParams, Style};
+use pw_format::{Style, macros::FormatParams};
 
 // Used to record calls into the test generator from `generator_test_macro!`.
 #[derive(Debug, PartialEq)]
@@ -57,10 +56,9 @@ mod tests {
         string_sub_printf_format_printf_generator_test_macro,
     };
 
+    use super::*;
     // Create an alias to ourselves so that the proc macro can name our crate.
     use crate as pw_format_test_macros_test;
-
-    use super::*;
 
     #[test]
     fn generate_calls_generator_correctly() {

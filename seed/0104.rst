@@ -112,7 +112,6 @@ used as a pair.
 
    }  // namespace pw::display
 
-
 Framebuffer
 ===========
 A framebuffer is a small class that provides access to a pixel buffer. It
@@ -129,7 +128,7 @@ those values.
    };
 
    class Framebuffer {
-   public:
+    public:
      // Construct a default invalid framebuffer.
      Framebuffer();
 
@@ -166,7 +165,7 @@ The framebuffer does not own the underlying pixel buffer. In other words
 the deletion of a framebuffer will not free the underlying pixel data.
 
 Framebuffers do not have methods for reading or writing to the underlying pixel
-buffer. This is the responsibility of the the selected graphics library which
+buffer. This is the responsibility of the selected graphics library which
 can be given the pixel buffer pointer retrieved by calling ``data()``.
 
 .. code-block:: cpp
@@ -184,7 +183,8 @@ can be given the pixel buffer pointer retrieved by calling ``data()``.
      pixel_data[0] = 0xffff;
    }
 
-   Framebuffer fb(pixel_data, {kWidth, kHeight},
+   Framebuffer fb(pixel_data,
+                  {kWidth, kHeight},
                   PixelFormat::RGB565,
                   kWidth * sizeof(uint16_t));
    DrawScreen(&fb);
@@ -204,7 +204,7 @@ until it has been returned by calling ``ReleaseFramebuffer()``.
    namespace pw::display {
 
    class FramebufferPool {
-   public:
+    public:
      using BufferArray = std::array<void*, FRAMEBUFFER_COUNT>;
 
      // Constructor parameters.
@@ -274,7 +274,7 @@ Because of this approach the DisplayDriver is defined as an interface:
    namespace pw::display {
 
    class DisplayDriver {
-   public:
+    public:
      // Called on the completion of a write operation.
      using WriteCallback = Callback<void(framebuffer::Framebuffer, Status)>;
 
@@ -298,7 +298,7 @@ definition of the display driver for the ILI9341:
    namespace pw::display {
 
    class DisplayDriverILI9341 : public DisplayDriver {
-   public:
+    public:
      struct Config {
        // Device specific initialization parameters.
      };
@@ -314,7 +314,7 @@ definition of the display driver for the ILI9341:
                      uint16_t col_idx) override;
      pw::math::Size<uint16_t> size() const override;
 
-   private:
+    private:
      enum class Mode {
        kData,
        kCommand,
@@ -416,7 +416,7 @@ Each display has:
    namespace pw::display {
 
    class Display {
-   public:
+    public:
      // Called on the completion of an update.
      using WriteCallback = Callback<void(Status)>;
 
@@ -461,7 +461,7 @@ A simplified application rendering loop would resemble:
 
    // Return the framebuffer to the display which will be written to the display
    // controller by the display's display driver.
-   display.ReleaseFramebuffer(std::move(fb), [](Status){});
+   display.ReleaseFramebuffer(std::move(fb), [](Status) {});
 
 Drawing Library
 ===============

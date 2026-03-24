@@ -1047,6 +1047,43 @@ TEST_F(ReadTransfer, InitialPacketFails_OnCompletedCalledWithDataLoss) {
   EXPECT_EQ(transfer_status, Status::Internal());
 }
 
+TEST_F(ReadTransfer, HijackedStreamIsCancelled) {
+  stream::MemoryWriterBuffer<64> writer1;
+  Status transfer_status1 = Status::Unknown();
+
+  ASSERT_EQ(OkStatus(),
+            legacy_client_
+                .Read(3,
+                      writer1,
+                      [&transfer_status1](Status status) {
+                        transfer_status1 = status;
+                      })
+                .status());
+  transfer_thread_.WaitUntilEventIsProcessed();
+
+  EXPECT_TRUE(legacy_client_.has_read_stream());
+
+  // A new client (client_) attempts a read transfer using the same thread.
+  // This will steal the read stream from legacy_client_.
+  stream::MemoryWriterBuffer<64> writer2;
+  Status transfer_status2 = Status::Unknown();
+
+  Result<Client::Handle> handle =
+      client_.Read(4, writer2, [&transfer_status2](Status status) {
+        transfer_status2 = status;
+      });
+  ASSERT_EQ(OkStatus(), handle.status());
+  transfer_thread_.WaitUntilEventIsProcessed();
+
+  // legacy_client_ should have its read stream cancelled and marked false.
+  EXPECT_FALSE(legacy_client_.has_read_stream());
+  EXPECT_TRUE(client_.has_read_stream());
+  EXPECT_EQ(transfer_status1, Status::Aborted());
+
+  handle->Cancel();
+  transfer_thread_.WaitUntilEventIsProcessed();
+}
+
 class WriteTransfer : public ::testing::Test {
  protected:
   WriteTransfer()
@@ -2795,6 +2832,43 @@ TEST_F(WriteTransfer, Version2_RetryDuringHandshake) {
   EXPECT_EQ(transfer_status, OkStatus());
 }
 
+TEST_F(WriteTransfer, HijackedStreamIsCancelled) {
+  stream::MemoryReader reader1(kData32);
+  Status transfer_status1 = Status::Unknown();
+
+  ASSERT_EQ(OkStatus(),
+            legacy_client_
+                .Write(3,
+                       reader1,
+                       [&transfer_status1](Status status) {
+                         transfer_status1 = status;
+                       })
+                .status());
+  transfer_thread_.WaitUntilEventIsProcessed();
+
+  EXPECT_TRUE(legacy_client_.has_write_stream());
+
+  // A new client (client_) attempts a write transfer using the same thread.
+  // This will steal the write stream from legacy_client_.
+  stream::MemoryReader reader2(kData32);
+  Status transfer_status2 = Status::Unknown();
+
+  Result<Client::Handle> handle =
+      client_.Write(4, reader2, [&transfer_status2](Status status) {
+        transfer_status2 = status;
+      });
+  ASSERT_EQ(OkStatus(), handle.status());
+  transfer_thread_.WaitUntilEventIsProcessed();
+
+  // legacy_client_ should have its write stream cancelled and marked false.
+  EXPECT_FALSE(legacy_client_.has_write_stream());
+  EXPECT_TRUE(client_.has_write_stream());
+  EXPECT_EQ(transfer_status1, Status::Aborted());
+
+  handle->Cancel();
+  transfer_thread_.WaitUntilEventIsProcessed();
+}
+
 TEST_F(WriteTransfer, Version2_RetryAfterHandshake) {
   stream::MemoryReader reader(kData32);
   Status transfer_status = Status::Unknown();
@@ -3595,6 +3669,89 @@ TEST_F(ReadTransfer, Version2_CancelBeforeServerResponse) {
   EXPECT_EQ(chunk.type(), Chunk::Type::kCompletion);
   EXPECT_EQ(chunk.protocol_version(), ProtocolVersion::kVersionTwo);
   EXPECT_EQ(chunk.status(), Status::Cancelled());
+}
+
+TEST_F(WriteTransfer, Version2_WriteRpcError) {
+  FakeNonSeekableReader reader(kData32);
+  Status transfer_status = Status::Unknown();
+
+  Result<Client::Handle> result = client_.Write(
+      3,
+      reader,
+      [&transfer_status](Status status) { transfer_status = status; },
+      cfg::kDefaultClientTimeout,
+      cfg::kDefaultClientTimeout);
+  ASSERT_EQ(OkStatus(), result.status());
+  transfer_thread_.WaitUntilEventIsProcessed();
+
+  Client::Handle handle = *result;
+
+  // The client begins by sending the ID of the resource to transfer.
+  rpc::PayloadsView payloads =
+      context_.output().payloads<Transfer::Write>(context_.channel().id());
+  ASSERT_EQ(payloads.size(), 1u);
+  EXPECT_EQ(transfer_status, Status::Unknown());
+
+  Chunk chunk = DecodeChunk(payloads.back());
+  EXPECT_EQ(chunk.type(), Chunk::Type::kStart);
+  EXPECT_EQ(chunk.protocol_version(), ProtocolVersion::kVersionTwo);
+  EXPECT_EQ(chunk.desired_session_id(), 1u);
+  EXPECT_EQ(chunk.resource_id(), 3u);
+
+  // RPC server sends back an error.
+  context_.server().SendServerError<Transfer::Write>(Status::Internal());
+  transfer_thread_.WaitUntilEventIsProcessed();
+
+  EXPECT_EQ(client_.has_write_stream(), false);
+  EXPECT_EQ(transfer_status, Status::Aborted());
+
+  // Ensure we don't leave a dangling reference to transfer_status.
+  handle.Cancel();
+  transfer_thread_.WaitUntilEventIsProcessed();
+}
+
+TEST_F(ReadTransfer, Version2_ReadRpcError) {
+  stream::MemoryWriterBuffer<64> writer;
+  Status transfer_status = Status::Unknown();
+
+  Result<Client::Handle> result = client_.Read(
+      3,
+      writer,
+      [&transfer_status](Status status) { transfer_status = status; },
+      cfg::kDefaultClientTimeout,
+      cfg::kDefaultClientTimeout);
+  ASSERT_EQ(OkStatus(), result.status());
+  transfer_thread_.WaitUntilEventIsProcessed();
+
+  Client::Handle handle = *result;
+
+  // Initial chunk of the transfer is sent. This chunk should contain all the
+  // fields from both legacy and version 2 protocols for backwards
+  // compatibility.
+  rpc::PayloadsView payloads =
+      context_.output().payloads<Transfer::Read>(context_.channel().id());
+  ASSERT_EQ(payloads.size(), 1u);
+  EXPECT_EQ(transfer_status, Status::Unknown());
+
+  Chunk chunk = DecodeChunk(payloads[0]);
+  EXPECT_EQ(chunk.type(), Chunk::Type::kStart);
+  EXPECT_EQ(chunk.protocol_version(), ProtocolVersion::kVersionTwo);
+  EXPECT_EQ(chunk.desired_session_id(), 1u);
+  EXPECT_EQ(chunk.resource_id(), 3u);
+  EXPECT_EQ(chunk.offset(), 0u);
+  EXPECT_EQ(chunk.window_end_offset(), 37u);
+  EXPECT_EQ(chunk.max_chunk_size_bytes(), 37u);
+
+  // RPC server sends back an error.
+  context_.server().SendServerError<Transfer::Read>(Status::Internal());
+  transfer_thread_.WaitUntilEventIsProcessed();
+
+  EXPECT_EQ(client_.has_read_stream(), false);
+  EXPECT_EQ(transfer_status, Status::Aborted());
+
+  // Ensure we don't leave a dangling reference to transfer_status.
+  handle.Cancel();
+  transfer_thread_.WaitUntilEventIsProcessed();
 }
 
 }  // namespace

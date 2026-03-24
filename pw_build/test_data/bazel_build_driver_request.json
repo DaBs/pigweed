@@ -1,0 +1,40 @@
+{
+  "jobs": [
+    {
+      "build": {
+        "targets": [
+          "//..."
+        ],
+        "build_config": {
+          "args": []
+        }
+      }
+    },
+    {
+      "build": {
+        "targets": [
+          "//...",
+          "//pw_bloat:bloat_base",
+          "//pw_status:status_test"
+        ],
+        "build_config": {
+          "args": [
+            "--config=rp2040"
+          ],
+          "driver_options": {
+            "@type": "pw.build.proto.BazelDriverOptions",
+            "no_test": true
+          }
+        }
+      }
+    },
+    {
+      "tool": {
+        "target": "@pigweed//format",
+        "build_config": {
+          "args": []
+        }
+      }
+    }
+  ]
+}

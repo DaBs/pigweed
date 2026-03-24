@@ -19,7 +19,7 @@ Setup
 .. note::
 
    The instructions below show you how to try out Host Device Simulator within
-   an :ref:`upstream Pigweed environment <docs-get-started-upstream>`. To set
+   an :ref:`upstream Pigweed environment <docs-contributing>`. To set
    up a target *similar* to Host Device Simulator in your own project, see
    `Kudzu`_ or the `examples repo`_.
 
@@ -71,15 +71,15 @@ Setup
 Building and running the demo
 -----------------------------
 .. _examples repo device_sim.py: https://pigweed.googlesource.com/pigweed/examples/+/refs/heads/main/tools/sample_project_tools/device_sim.py
-.. _Pigweed upstream device_sim.py: https://cs.opensource.google/pigweed/pigweed/+/main:pw_system/py/pw_system/device_sim.py
 
 .. seealso::
 
    See the `examples repo device_sim.py`_ for a downstream project example of
-   launching a device simulator with project specific RPC protos. That script
-   uses `Pigweed upstream device_sim.py`_ which runs the simulated device as a
-   subprocess and then connects to it via the default socket so you just have to
-   pass the binary.
+   launching a device simulator with project-specific RPC protos. That script
+   uses upstream Pigweed's :cs:`device_sim.py
+   <main:pw_system/py/pw_system/device_sim.py>` which runs the simulated device
+   as a subprocess and then connects to it via the default socket so you just
+   have to pass the binary.
 
 .. tab-set::
 
@@ -125,17 +125,10 @@ To send an RPC message that will be echoed back:
    >>> device.rpcs.pw.rpc.EchoService.Echo(msg='Hello, world!')
    (Status.OK, pw.rpc.EchoMessage(msg='Hello, world!'))
 
-To run unit tests included on the simulated device:
-
-.. code-block:: pycon
-
-   >>> device.run_tests()
-   True
-
 You are now up and running!
 
 .. seealso::
 
    The :ref:`module-pw_console`
    :bdg-ref-primary-line:`module-pw_console-user_guide` for more info on using
-   the the pw_console UI.
+   the pw_console UI.

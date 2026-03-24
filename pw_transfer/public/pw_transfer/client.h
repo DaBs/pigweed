@@ -99,6 +99,11 @@ class Client {
                transfer_thread,
                transfer_thread.max_chunk_size()) {}
 
+  Client(const Client&) = delete;
+  Client(Client&&) = delete;
+  Client& operator=(const Client&) = delete;
+  Client& operator=(Client&&) = delete;
+
   // Begins a new read transfer for the given resource ID. The data read from
   // the server is written to the provided writer. Returns OK if the transfer is
   // successfully started. When the transfer finishes (successfully or not), the
@@ -190,7 +195,13 @@ class Client {
     default_protocol_version = new_version;
   }
 
+  bool has_read_stream() const { return has_read_stream_; }
+
+  bool has_write_stream() const { return has_write_stream_; }
+
  private:
+  friend class internal::TransferThread;
+
   // Terminates an ongoing transfer.
   void CancelTransfer(Handle handle) {
     if (!handle.is_unassigned()) {
@@ -209,6 +220,9 @@ class Client {
   using Transfer = pw_rpc::raw::Transfer;
 
   void OnRpcError(Status status, internal::TransferType type);
+
+  void OpenReadStream(internal::SetStreamBehavior behavior);
+  void OpenWriteStream(internal::SetStreamBehavior behavior);
 
   Handle AssignHandle();
 

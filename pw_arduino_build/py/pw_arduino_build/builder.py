@@ -71,7 +71,8 @@ class ArduinoBuilder:
     )  # second (final) token after .
 
     TOOL_NAME_REGEX = re.compile(
-        r"^tools\." r"(?P<tool_name>[^.]+)\."  # starts with "tools"
+        r"^tools\."
+        r"(?P<tool_name>[^.]+)\."  # starts with "tools"
     )  # first token after .
 
     INTERPOLATED_VARIABLE_REGEX = re.compile(r"{[^}]+}", re.MULTILINE)

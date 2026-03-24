@@ -12,40 +12,32 @@
 # License for the specific language governing permissions and limitations under
 # the License.
 """A CLI utility that checks and fixes formatting for source files."""
-
 import sys
 
 from pw_build.runfiles_manager import RunfilesManager
 from pw_presubmit.format.private.cli import FormattingSuite
-from pw_presubmit.format.python import BlackFormatter
-from pw_presubmit.format.cpp import ClangFormatFormatter
+from pw_presubmit.format.formatters import pigweed_formatters
+
+try:
+    # pylint: disable=unused-import
+    import python.runfiles  # type: ignore
+
+    # pylint: enable=unused-import
+
+    _FORMAT_FIX_COMMAND = 'bazel run @pigweed//pw_presubmit/py:format --'
+except ImportError:
+    _FORMAT_FIX_COMMAND = 'python -m pigweed_format'
 
 
 def _pigweed_formatting_suite() -> FormattingSuite:
     runfiles = RunfilesManager()
-    # GN
-    runfiles.add_bootstrapped_tool(
-        'clang-format', 'clang-format', from_shell_path=True
+
+    enabled_formatters = pigweed_formatters(runfiles)
+
+    return FormattingSuite(
+        enabled_formatters,
+        formatter_fix_command=_FORMAT_FIX_COMMAND,
     )
-    runfiles.add_bootstrapped_tool('black', 'black', from_shell_path=True)
-
-    # Bazel
-    runfiles.add_bazel_tool('clang-format', 'llvm_toolchain.clang_format')
-    runfiles.add_bazel_tool('black', 'pw_presubmit.py.black_runfiles')
-
-    # This list can be broken out and library-ified as the default set of
-    # formatters once config file loading is smarter (i.e. loads from the
-    # path of the file that is being formatted rather than as a runfile
-    # dependency).
-    pigweed_formatters = [
-        BlackFormatter(
-            tool_runner=runfiles,
-        ),
-        ClangFormatFormatter(
-            tool_runner=runfiles,
-        ),
-    ]
-    return FormattingSuite(pigweed_formatters)
 
 
 if __name__ == '__main__':

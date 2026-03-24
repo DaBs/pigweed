@@ -163,7 +163,7 @@ class YamlFileFormat(_StructuredFileFormat):
         # Don't infere with ordering
         kwargs['sort_keys'] = False
         # The yaml module doesn't understand OrderedDicts
-        data_to_dump = dict_swap_type(data, dict)
+        data_to_dump: dict[Any, Any] = dict_swap_type(data, dict)
         yaml.safe_dump(data_to_dump, *args, **kwargs)
 
 
@@ -565,9 +565,9 @@ class EditorSettingsManager(Generic[_SettingsTypeT]):
 
     # The settings directory can be defined as a static path, or as a lambda
     # that takes an instance of `PigweedIdeSettings` as an argument.
-    default_settings_dir: Path | Callable[
-        [PigweedIdeSettings], Path
-    ] = undefined_default_settings_dir
+    default_settings_dir: Path | Callable[[PigweedIdeSettings], Path] = (
+        undefined_default_settings_dir
+    )
 
     def __init__(
         self,
@@ -643,10 +643,10 @@ class EditorSettingsManager(Generic[_SettingsTypeT]):
         ) in (
             self._types_with_defaults
         ):  # pylint: disable=consider-using-dict-items
-            self._settings_definitions[SettingsLevel.DEFAULT][
-                settings_type
-            ] = EditorSettingsDefinition(
-                pw_ide_settings, self._types_with_defaults[settings_type]
+            self._settings_definitions[SettingsLevel.DEFAULT][settings_type] = (
+                EditorSettingsDefinition(
+                    pw_ide_settings, self._types_with_defaults[settings_type]
+                )
             )
 
         # Initialize the settings definitions for each settings type for each
@@ -655,11 +655,12 @@ class EditorSettingsManager(Generic[_SettingsTypeT]):
             self._settings_definitions[level] = {}
 
             for settings_type in self._types_with_defaults:
-                name = f'{self._prefixes[level]}{settings_type.value}'
-                self._settings_definitions[level][
-                    settings_type
-                ] = EditorSettingsFile(
-                    self._settings_dir, name, self._file_format
+                level_prefix = self._prefixes[level]
+                name = f'{level_prefix}{settings_type.value}'  # type: ignore
+                self._settings_definitions[level][settings_type] = (
+                    EditorSettingsFile(
+                        self._settings_dir, name, self._file_format
+                    )
                 )
 
     def default(self, settings_type: _SettingsTypeT):

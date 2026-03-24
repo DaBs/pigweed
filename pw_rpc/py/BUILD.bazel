@@ -12,10 +12,9 @@
 # License for the specific language governing permissions and limitations under
 # the License.
 
-load("@rules_python//python:defs.bzl", "py_library")
 load("@rules_python//sphinxdocs:sphinx_docs_library.bzl", "sphinx_docs_library")
 load("//pw_build:compatibility.bzl", "incompatible_with_mcu")
-load("//pw_build:python.bzl", "pw_py_binary", "pw_py_test")
+load("//pw_build:python.bzl", "pw_py_binary", "pw_py_library", "pw_py_test")
 
 package(default_visibility = ["//visibility:public"])
 
@@ -53,8 +52,10 @@ pw_py_binary(
     main = "pw_rpc/plugin_raw.py",
     python_version = "PY3",
     deps = [
+        ":pw_rpc",
         "//pw_protobuf/py:plugin_library",
         "//pw_protobuf_compiler/py:pw_protobuf_compiler",
+        "//pw_rpc:internal_packet_proto_pb2",
         "//pw_status/py:pw_status",
         "@com_google_protobuf//:protobuf_python",
     ],
@@ -67,8 +68,10 @@ pw_py_binary(
     main = "pw_rpc/plugin_nanopb.py",
     python_version = "PY3",
     deps = [
+        ":pw_rpc",
         "//pw_protobuf/py:plugin_library",
         "//pw_protobuf_compiler/py:pw_protobuf_compiler",
+        "//pw_rpc:internal_packet_proto_pb2",
         "//pw_status/py:pw_status",
         "@com_google_protobuf//:protobuf_python",
     ],
@@ -81,19 +84,23 @@ pw_py_binary(
     main = "pw_rpc/plugin_pwpb.py",
     python_version = "PY3",
     deps = [
+        ":pw_rpc",
         "//pw_protobuf/py:plugin_library",
         "//pw_protobuf_compiler/py:pw_protobuf_compiler",
+        "//pw_rpc:internal_packet_proto_pb2",
         "//pw_status/py:pw_status",
         "@com_google_protobuf//:protobuf_python",
     ],
 )
 
-py_library(
+pw_py_library(
     name = "pw_rpc",
     srcs = [
         "pw_rpc/__init__.py",
         "pw_rpc/client.py",
         "pw_rpc/client_utils.py",
+        "pw_rpc/lossy_channel.py",
+        "pw_rpc/testing.py",
         ":pw_rpc_common_sources",
     ],
     imports = ["."],
@@ -103,6 +110,40 @@ py_library(
         "//pw_rpc:internal_packet_proto_pb2",
         "//pw_status/py:pw_status",
         "//pw_stream/py:pw_stream",
+        "@com_google_protobuf//:protobuf_python",
+    ],
+)
+
+pw_py_library(
+    name = "pw_rpc_benchmark",
+    srcs = [
+        "pw_rpc/benchmark/__init__.py",
+        "pw_rpc/benchmark/benchmark.py",
+        "pw_rpc/benchmark/benchmark_results.py",
+    ],
+    imports = ["."],
+    deps = [
+        ":pw_rpc",
+        "//pw_rpc:benchmark_py_pb2",
+        "//pw_rpc:benchmark_raw_rpc",
+    ],
+)
+
+pw_py_test(
+    name = "benchmark_test",
+    size = "small",
+    srcs = [
+        "tests/benchmark/benchmark_test.py",
+    ],
+    deps = [
+        ":pw_rpc",
+        ":pw_rpc_benchmark",
+        "//pw_protobuf_compiler:pw_protobuf_compiler_protos_py_pb2",
+        "//pw_rpc:benchmark_py_pb2",
+        "//pw_rpc:echo_py_pb2",
+        "//pw_rpc:internal_packet_proto_pb2",
+        "//pw_status/py:pw_status",
+        "//pw_system/py:pw_system_lib",
     ],
 )
 
@@ -118,6 +159,9 @@ pw_py_test(
     env = {
         "PROTOC": "$(rootpath @com_google_protobuf//:protoc)",
     },
+    # TODO: https://pwbug.dev/390675910 - Restore after protobuf is updated
+    # and versions skews are unified.
+    tags = ["noubsan"],
     deps = [
         ":pw_rpc",
         "//pw_protobuf_compiler:pw_protobuf_compiler_protos_py_pb2",
@@ -138,6 +182,9 @@ pw_py_test(
     env = {
         "PROTOC": "$(rootpath @com_google_protobuf//:protoc)",
     },
+    # TODO: https://pwbug.dev/390675910 - Restore after protobuf is updated
+    # and versions skews are unified.
+    tags = ["noubsan"],
     deps = [
         ":pw_rpc",
         "//pw_rpc:internal_packet_proto_pb2",
@@ -157,6 +204,9 @@ pw_py_test(
     env = {
         "PROTOC": "$(rootpath @com_google_protobuf//:protoc)",
     },
+    # TODO: https://pwbug.dev/390675910 - Restore after protobuf is updated
+    # and versions skews are unified.
+    tags = ["noubsan"],
     deps = [
         ":pw_rpc",
         "//pw_protobuf_compiler:pw_protobuf_compiler_protos_py_pb2",
@@ -202,6 +252,9 @@ pw_py_test(
     env = {
         "PROTOC": "$(rootpath @com_google_protobuf//:protoc)",
     },
+    # TODO: https://pwbug.dev/390675910 - Restore after protobuf is updated
+    # and versions skews are unified.
+    tags = ["noubsan"],
     deps = [
         ":pw_rpc",
     ],
@@ -235,4 +288,21 @@ sphinx_docs_library(
         "docs.rst",
     ],
     target_compatible_with = incompatible_with_mcu(),
+)
+
+pw_py_test(
+    name = "python_client_cpp_server_test",
+    srcs = ["tests/python_client_cpp_server_test.py"],
+    args = [
+        "--port=3304",  # From pw_rpc/internal/integration_test_ports.gni
+        "--test-server-command",
+        "$(rootpath //pw_rpc:test_rpc_server)",
+    ],
+    data = ["//pw_rpc:test_rpc_server"],
+    tags = ["manual"],
+    deps = [
+        ":pw_rpc",
+        ":pw_rpc_benchmark",
+        "//pw_hdlc/py:pw_hdlc",
+    ],
 )

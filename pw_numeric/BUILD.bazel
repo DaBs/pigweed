@@ -15,7 +15,7 @@
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("@rules_python//sphinxdocs:sphinx_docs_library.bzl", "sphinx_docs_library")
 load("//pw_build:compatibility.bzl", "incompatible_with_mcu")
-load("//pw_build:pigweed.bzl", "pw_cc_test")
+load("//pw_unit_test:pw_cc_test.bzl", "pw_cc_test")
 
 package(default_visibility = ["//visibility:public"])
 
@@ -25,15 +25,15 @@ cc_library(
     name = "checked_arithmetic",
     hdrs = ["public/pw_numeric/checked_arithmetic.h"],
     strip_include_prefix = "public",
-    deps = [
-        "//pw_preprocessor",
-    ],
 )
 
 pw_cc_test(
     name = "checked_arithmetic_test",
     srcs = ["checked_arithmetic_test.cc"],
-    deps = [":checked_arithmetic"],
+    deps = [
+        ":checked_arithmetic",
+        "//pw_unit_test:constexpr",
+    ],
 )
 
 cc_library(
@@ -48,11 +48,28 @@ pw_cc_test(
     deps = [":integer_division"],
 )
 
+cc_library(
+    name = "saturating_arithmetic",
+    hdrs = ["public/pw_numeric/saturating_arithmetic.h"],
+    strip_include_prefix = "public",
+    deps = [":checked_arithmetic"],
+)
+
+pw_cc_test(
+    name = "saturating_arithmetic_test",
+    srcs = ["saturating_arithmetic_test.cc"],
+    deps = [
+        ":saturating_arithmetic",
+        "//pw_unit_test:constexpr",
+    ],
+)
+
 filegroup(
     name = "doxygen",
     srcs = [
         "public/pw_numeric/checked_arithmetic.h",
         "public/pw_numeric/integer_division.h",
+        "public/pw_numeric/saturating_arithmetic.h",
     ],
 )
 

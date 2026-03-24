@@ -421,5 +421,45 @@ TEST_F(CommandHandlerTest, RejectInvalidChannelId) {
       kDisconnectionRequest, discon_req, kLocalCId, kRemoteCId));
 }
 
+TEST_F(CommandHandlerTest, SendCredits) {
+  constexpr ChannelId kExpectedChannel = 0x1234;
+  constexpr uint16_t kExpectedCredits = 0x0142;
+  StaticByteBuffer expected_credit_payload(
+      // Channel ID
+      LowerBits(kExpectedChannel),
+      UpperBits(kExpectedChannel),
+
+      // Credits
+      LowerBits(kExpectedCredits),
+      UpperBits(kExpectedCredits));
+
+  EXPECT_OUTBOUND_REQ(
+      *fake_sig(), kLEFlowControlCredit, expected_credit_payload.view());
+  cmd_handler()->SendCredits(kExpectedChannel, kExpectedCredits);
+  RunUntilIdle();
+}
+
+TEST_F(CommandHandlerTest, ReceiveCredits) {
+  const uint16_t expected_credits = 5;
+  int cb_count = 0;
+  cmd_handler()->ServeFlowControlCreditInd(
+      [&cb_count, expected_credits](ChannelId remote_cid, uint16_t credits) {
+        cb_count++;
+        EXPECT_EQ(remote_cid, kRemoteCId);
+        EXPECT_EQ(credits, expected_credits);
+      });
+
+  StaticByteBuffer payload(
+      // Channel ID
+      LowerBits(kRemoteCId),
+      UpperBits(kRemoteCId),
+      // Credits
+      LowerBits(expected_credits),
+      UpperBits(expected_credits));
+  fake_sig()->Receive(kLEFlowControlCredit, payload);
+  RunUntilIdle();
+  EXPECT_EQ(cb_count, 1);
+}
+
 }  // namespace
 }  // namespace bt::l2cap::internal

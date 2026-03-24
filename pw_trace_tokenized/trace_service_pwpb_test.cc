@@ -99,13 +99,16 @@ TEST_F(TraceServiceTest, StopNoData) {
 
   std::array<std::byte, PW_TRACE_BUFFER_SIZE_BYTES> dest_buffer;
   stream::MemoryWriter writer(dest_buffer);
+  PW_PWPB_TEST_METHOD_CONTEXT(TraceService, Start)
+  context_start(tracer, writer);
   PW_PWPB_TEST_METHOD_CONTEXT(TraceService, Stop)
-  context(tracer, writer);
+  context_stop(tracer, writer);
 
-  tracer.Enable(true);
+  tracer.Enable(false);
+  ASSERT_EQ(context_start.call({}), OkStatus());
 
   // stopping with no trace data results in Unavailable
-  ASSERT_EQ(context.call({}), Status::Unavailable());
+  ASSERT_EQ(context_stop.call({}), Status::Unavailable());
 }
 
 TEST_F(TraceServiceTest, GetClockParameters) {
@@ -118,11 +121,10 @@ TEST_F(TraceServiceTest, GetClockParameters) {
   context(tracer, writer);
 
   ASSERT_EQ(context.call({}), OkStatus());
+  EXPECT_EQ(1,
+            context.response().clock_parameters.tick_period_seconds_numerator);
   EXPECT_EQ(
-      static_cast<int32_t>(PW_CHRONO_SYSTEM_CLOCK_PERIOD_SECONDS_NUMERATOR),
-      context.response().clock_parameters.tick_period_seconds_numerator);
-  EXPECT_EQ(
-      static_cast<int32_t>(PW_CHRONO_SYSTEM_CLOCK_PERIOD_SECONDS_DENOMINATOR),
+      static_cast<int32_t>(pw_trace_GetTraceTimeTicksPerSecond()),
       context.response().clock_parameters.tick_period_seconds_denominator);
   EXPECT_EQ(
       static_cast<int32_t>(chrono::SystemClock::epoch),

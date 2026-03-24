@@ -3,7 +3,7 @@
 ========
 FuzzTest
 ========
-The ``$dir_pw_third_party/fuzztest/`` module provides build files to allow
+The ``$pw_external_fuzztest/`` module provides build files to allow
 optionally including upstream FuzzTest.
 
 .. _module-pw_third_party_fuzztest-using_upstream:
@@ -38,9 +38,6 @@ Add FuzzTest to your workspace with the following command.
       * Set ``dir_pw_third_party_googletest`` to the location of the
         :ref:`module-pw_third_party_googletest` source.
 
-      * Set ``dir_pw_third_party_re2`` to the location of the
-        :ref:`module-pw_third_party_re2` source.
-
       This can be set in your ``args.gn`` or ``.gn`` file. For example:
 
       .. code-block::
@@ -49,7 +46,6 @@ Add FuzzTest to your workspace with the following command.
          dir_pw_third_party_abseil_cpp="//third_party/abseil-cpp"
          dir_pw_third_party_fuzztest="//third_party/fuzztest"
          dir_pw_third_party_googletest="//third_party/googletest"
-         dir_pw_third_party_re2="//third_party/re2"
 
    .. tab-item:: CMake
 
@@ -93,19 +89,4 @@ then run:
 
 .. code-block:: console
 
-   $ python pw_build/py/pw_build/bazel_to_gn.py fuzztest
-
-Additionally, the ``fuzztest.bazelrc`` file should regenerated. From this
-directory, run:
-
-.. code-block:: console
-
-   $ bazel run @com_google_fuzztest//bazel:setup_configs > fuzztest.bazelrc
-
-.. DO NOT EDIT BELOW THIS LINE. Generated section.
-
-Version
-=======
-The update script was last run for revision `b7257a64`_.
-
-.. _b7257a64: https://github.com/google/fuzztes/tree/b7257a64c701fc30265eb91179bf9310549bf440
+   $ bazelisk run //pw_build/py:bazel_to_gn fuzztest

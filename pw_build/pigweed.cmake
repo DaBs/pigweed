@@ -177,6 +177,9 @@ endfunction()
 
 # Runs any deferred library checks for pw_target_link_targets.
 #
+# Makes one exception for the zephyr_interface which is only brought in when
+# integrating with the Zephyr build system.
+#
 # Required Args:
 #
 #   <name> - The name of the library target to add the link dependencies to.
@@ -199,6 +202,36 @@ macro(_pw_add_library_multi_value_args variable)
                     PUBLIC_LINK_OPTIONS PRIVATE_LINK_OPTIONS "${ARGN}")
 endmacro()
 
+function(_pw_sandbox_paths sandbox_dir paths_var)
+  set(result "")
+  set(parent_dir "..")
+  foreach(path IN LISTS ${paths_var})
+    cmake_path(ABSOLUTE_PATH path NORMALIZE)
+    cmake_path(RELATIVE_PATH path OUTPUT_VARIABLE relative_file)
+
+    cmake_path(IS_PREFIX parent_dir "${relative_file}" in_parent_directory)
+    if(in_parent_directory)
+      message(FATAL_ERROR
+        "File paths must be nested under the current directory; "
+        "'${path}' is not nested under ${CMAKE_CURRENT_SOURCE_DIR}")
+    endif()
+
+    if(IS_DIRECTORY "${path}")
+      message(DEBUG "Sandboxing include '${path}' as '${sandbox_dir}/${relative_file}'")
+      list(APPEND result "${sandbox_dir}/${relative_file}")
+    else()
+      set(destination "${sandbox_dir}/${relative_file}")
+      message(DEBUG "Sandboxing '${path}' as '${destination}'")
+      cmake_path(GET destination PARENT_PATH directory)
+      file(MAKE_DIRECTORY "${directory}")
+      cmake_path(ABSOLUTE_PATH path OUTPUT_VARIABLE absolute)
+      file(CREATE_LINK "${absolute}" "${destination}" SYMBOLIC)
+      list(APPEND result "${destination}")
+    endif()
+  endforeach()
+  set("${paths_var}" ${result} PARENT_SCOPE)
+endfunction()
+
 # pw_add_library_generic: Creates a CMake library target.
 #
 # Required Args:
@@ -211,6 +244,7 @@ endmacro()
 #
 #   SOURCES - source files for this library
 #   HEADERS - header files for this library
+#   GENERATED_HEADERS - headers that will be generated when the target is built
 #   PUBLIC_DEPS - public pw_target_link_targets arguments
 #   PRIVATE_DEPS - private pw_target_link_targets arguments
 #   PUBLIC_INCLUDES - public target_include_directories argument
@@ -225,6 +259,8 @@ endmacro()
 #     exposed by the non-generic API.
 #   PUBLIC_LINK_OPTIONS - public target_link_options arguments
 #   PRIVATE_LINK_OPTIONS - private target_link_options arguments
+#   SANDBOX - whether to sandbox this library (ON/OFF); overrides
+#     pw_ENABLE_CC_SANDBOX
 function(pw_add_library_generic NAME TYPE)
   set(supported_library_types INTERFACE OBJECT STATIC SHARED)
   if(NOT "${TYPE}" IN_LIST supported_library_types)
@@ -236,8 +272,11 @@ function(pw_add_library_generic NAME TYPE)
   pw_parse_arguments(
     NUM_POSITIONAL_ARGS
       2
+    ONE_VALUE_ARGS
+      SANDBOX
     MULTI_VALUE_ARGS
       ${multi_value_args}
+      GENERATED_HEADERS
       PRIVATE_COMPILE_OPTIONS_DEPS_BEFORE
   )
 
@@ -266,10 +305,49 @@ function(pw_add_library_generic NAME TYPE)
     pw_target_link_targets(${NAME} ${TYPE} ${arg_${VISIBILITY}_DEPS})
   endmacro()
 
+  set(sandbox_dir "${CMAKE_BINARY_DIR}/PIGWEED_SANDBOX/${NAME}")
+
+  # Default sandboxing to the global pw_ENABLE_CC_SANDBOX option.
+  if("${arg_SANDBOX}" STREQUAL "")
+    set(sandbox_enabled "${pw_ENABLE_CC_SANDBOX}")
+  else()
+    set(sandbox_enabled "${arg_SANDBOX}")
+  endif()
+
+  if(sandbox_enabled)
+    foreach(path IN LISTS arg_GENERATED_HEADERS arg_HEADERS arg_SOURCES
+        arg_PUBLIC_INCLUDES arg_PRIVATE_INCLUDES)
+      # Don't sandbox files that don't exist yet or are generator expressions.
+      cmake_path(ABSOLUTE_PATH path OUTPUT_VARIABLE absolute)
+      if(NOT EXISTS "${absolute}" OR "${path}" MATCHES ".*\\$<.+>.*")
+        if(NOT "${arg_SANDBOX}" STREQUAL "" AND arg_SANDBOX)
+          message(FATAL_ERROR "Sandboxing is enabled for ${NAME}, but the path "
+            "'${path}' does not exist or is a generator expression. This is "
+            "not currently supported.")
+        endif()
+
+        message(DEBUG
+          "Skipping sandboxing ${NAME} due to generated file '${path}'")
+        set(sandbox_enabled OFF)
+        break()
+      endif()
+    endforeach()
+
+    if(sandbox_enabled)
+      file(REMOVE_RECURSE "${sandbox_dir}")
+      _pw_sandbox_paths("${sandbox_dir}" arg_HEADERS)
+      _pw_sandbox_paths("${sandbox_dir}" arg_SOURCES)
+      _pw_sandbox_paths("${sandbox_dir}" arg_PRIVATE_INCLUDES)
+      _pw_sandbox_paths("${sandbox_dir}" arg_PUBLIC_INCLUDES)
+    endif()
+  endif()
+  list(APPEND arg_HEADERS ${arg_GENERATED_HEADERS})
+
   if("${TYPE}" STREQUAL "INTERFACE")
     if(NOT "${arg_SOURCES}" STREQUAL "")
       message(
-        SEND_ERROR "${NAME} cannot have sources as it's an INTERFACE library")
+        SEND_ERROR "${NAME} cannot have sources as it's an INTERFACE library"
+        "(${arg_SOURCES})")
     endif(NOT "${arg_SOURCES}" STREQUAL "")
 
     add_library("${NAME}" INTERFACE EXCLUDE_FROM_ALL)

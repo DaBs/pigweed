@@ -17,19 +17,23 @@ menu "pw_thread"
 config PIGWEED_THREAD_SLEEP
     bool "Link and set pw_thread.sleep library backend"
     select PIGWEED_CHRONO_SYSTEM_CLOCK
-    select PIGWEED_ASSERT
     help
       See :ref:`module-pw_thread` for module details.
 
+config PIGWEED_THREAD_YIELD
+    bool "Link and set pw_thread.yield library backend"
+    help
+      See :ref:`module-pw_thread` for module details.
+
+
 config PIGWEED_THREAD
     bool "Link and set pw_thread.thread and pw_thread.id backends"
-    select PIGWEED_ASSERT
+    select PIGWEED_INTERRUPT_CONTEXT
     help
       See :ref:`module-pw_thread` for module details.
 
 config PIGWEED_THREAD_ITERATION
     bool "Link and set pw_thread.thread_iteration backend"
-    select PIGWEED_ASSERT
     select PIGWEED_THREAD
     help
       See :ref:`module-pw_thread` for module details.
@@ -49,6 +53,21 @@ config PIGWEED_THREAD_NUM_PREEMPT_PRIORITIES
   int "Number of preemptible thread priorities"
   default NUM_PREEMPT_PRIORITIES
   range 0 NUM_PREEMPT_PRIORITIES
+
+config PIGWEED_THREAD_MAX_THREAD_NAME_LEN
+  int "The maximum length of a Pigweed thread's name"
+  default 15
+  help
+    This name allows modifying the storage size of Pigweed created Zephyr
+    thread names. Set to 0 if you don't plan on naming your threads.
+
+config PIGWEED_THREAD_DEFAULT_STACK_SIZE
+  int "Size of a standard stack"
+  default 1024
+
+config PIGWEED_THREAD_MINIMUM_STACK_SIZE
+  int "Minimum stack size"
+  default 256
 
 endif # PIGWEED_THREAD
 

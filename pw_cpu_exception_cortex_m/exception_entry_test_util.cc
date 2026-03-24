@@ -16,6 +16,7 @@
 
 #include <cstring>
 
+#include "pw_containers/storage.h"
 #include "pw_cpu_exception_cortex_m_private/cortex_m_constants.h"
 
 namespace pw::cpu_exception::cortex_m {
@@ -24,7 +25,7 @@ volatile uint32_t& cortex_m_vtor =
     *reinterpret_cast<volatile uint32_t*>(0xE000ED08u);
 
 // In-memory interrupt service routine vector table.
-using InterruptVectorTable = std::aligned_storage_t<512, 512>;
+using InterruptVectorTable = pw::containers::Storage<512, 512>;
 InterruptVectorTable ram_vector_table;
 
 // Begin a critical section that must not be interrupted.
@@ -70,9 +71,9 @@ void InstallVectorTableEntries(uint32_t* exception_entry_addr) {
   }
   // Copy table to new location since it's not guaranteed that we can write to
   // the original one.
-  std::memcpy(&ram_vector_table,
+  std::memcpy(ram_vector_table.data(),
               reinterpret_cast<uint32_t*>(cortex_m_vtor),
-              sizeof(ram_vector_table));
+              ram_vector_table.size());
 
   // Override exception handling vector table entries.
   uint32_t** interrupts = reinterpret_cast<uint32_t**>(&ram_vector_table);

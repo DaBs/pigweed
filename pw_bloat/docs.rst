@@ -445,15 +445,11 @@ Resulting in this output:
 
 Simple bloat loop example
 =========================
-.. TODO: b/388905812 - Re-enable the size report.
-.. .. include:: examples/simple_bloat_loop
-.. include:: ../size_report_notice
+.. include:: examples/simple_bloat_loop
 
 Simple bloat function example
 =============================
-.. TODO: b/388905812 - Re-enable the size report.
-.. .. include:: examples/simple_bloat_function
-.. include:: ../size_report_notice
+.. include:: examples/simple_bloat_function
 
 .. _module-pw_bloat-sources:
 
@@ -716,5 +712,7 @@ macros that can conditionally execute statements depending on the value of a
 ``mask`` variable. Size report authors can use a ``volatile`` variable to ensure
 the compiler cannot assume which calls will or will not be executed,
 
-.. doxygendefine:: PW_BLOAT_COND
-.. doxygendefine:: PW_BLOAT_EXPR
+-------------
+API reference
+-------------
+Moved: :cc:`pw_bloat`

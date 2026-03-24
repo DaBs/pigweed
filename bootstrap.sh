@@ -14,8 +14,15 @@
 
 # This script must be tested on bash, zsh, and dash.
 
+# This must be POSIX compliant to maximize portability. i.e. do NOT use
+# `realpath` or `readlink`.
 _bootstrap_abspath () {
-  $(command -v python3 || command -v python) -c "import os.path; print(os.path.abspath('$@'))"
+  # Since this is sourced, use a subshell (...) to ensure the 'cd' command does
+  # not change the directory of the current shell context.
+  (
+    cd "$(dirname "$1")" 2>/dev/null || return 1
+    echo "$(pwd)/$(basename "$1")"
+  )
 }
 
 # Shell: bash.
@@ -121,4 +128,7 @@ fi
 
 pw_cleanup
 
-git -C "$PW_ROOT" config blame.ignoreRevsFile .git-blame-ignore-revs
+git -C "$PW_ROOT" rev-parse --is-inside-work-tree > /dev/null 2>&1
+if [ $? -eq 0 ]; then
+  git -C "$PW_ROOT" config blame.ignoreRevsFile .git-blame-ignore-revs
+fi

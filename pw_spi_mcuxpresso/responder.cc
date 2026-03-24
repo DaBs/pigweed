@@ -549,6 +549,15 @@ Status McuxpressoResponder::DoWriteReadAsync(ConstByteSpan tx_data,
     SPI_EnableSSInterrupt(base_);
   }
 
+  // Work around a bug in fsl_spi_dma v2.2.2 which doesn't set transferSize:
+  // https://github.com/nxp-mcuxpresso/mcuxsdk-core/issues/19
+  //
+  // This is required for SPI_MasterTransferGetCountDMA() and
+  // SPI_SlaveTransferGetCountDMA() to return the correct value.
+#if FSL_SPI_DMA_DRIVER_VERSION >= MAKE_VERSION(2, 2, 2)
+  handle_.transferSize = transfer.dataSize;
+#endif  // FSL_SPI_DMA_DRIVER_VERSION
+
   status_t sdk_status = SPI_SlaveTransferDMA(base_, &handle_, &transfer);
   if (sdk_status != kStatus_Success) {
     PW_LOG_ERROR("SPI_SlaveTransferDMA failed: %ld", sdk_status);

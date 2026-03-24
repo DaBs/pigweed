@@ -45,8 +45,10 @@ class FormattingSuite:
     def __init__(
         self,
         formatters: Collection[FileFormatter],
+        formatter_fix_command: str,
     ):
         self._formatters = formatters
+        self._formatter_fix_command = formatter_fix_command
 
     def main(self) -> int:
         """Entry point for the formatter CLI."""
@@ -55,8 +57,10 @@ class FormattingSuite:
 
         if 'BUILD_WORKING_DIRECTORY' in os.environ:
             os.chdir(os.environ['BUILD_WORKING_DIRECTORY'])
-        parser = argparse.ArgumentParser(description=__doc__)
-        cli_support.add_arguments(parser)
+        parser = argparse.ArgumentParser(
+            prog='./pw format', description=__doc__
+        )
+        cli_support.add_arguments(parser, default_to_fix=True)
         args = parser.parse_args()
         return 0 if self.format_files(**vars(args)) else 1
 
@@ -66,6 +70,8 @@ class FormattingSuite:
         base: str | None,
         exclude: Collection[Pattern] = tuple(),
         apply_fixes: bool = True,
+        jobs: int | None = None,
+        directory: Path | None = None,
     ) -> bool:
         """Formats files in a repository.
 
@@ -75,10 +81,12 @@ class FormattingSuite:
                 specified Git ref.
             exclude: Regex patterns to exclude from the set of collected files.
             apply_fixes: Whether or not to apply formatting fixes to files.
-
-        Returns:
-            True if operation was successful.
+            jobs: Number of parallel jobs to use.
+            directory: Change to this directory before doing anything.
         """
+        if directory:
+            os.chdir(directory)
+
         all_files = collect_files_in_current_repo(
             paths,
             _git_runner,
@@ -94,13 +102,13 @@ class FormattingSuite:
         ):
             print(line, file=sys.stderr)
 
-        # TODO: b/326309165 - Load formatter options, and exclusion paths.
+        all_files = tuple(cli_support.filter_exclusions(all_files))
 
         files_by_formatter = cli_support.map_files_to_formatters(
             all_files, self._formatters
         )
 
-        findings = cli_support.check(files_by_formatter)
+        findings = cli_support.check(files_by_formatter, jobs=jobs)
         findings_as_list = list(
             itertools.chain.from_iterable(findings.values())
         )
@@ -109,6 +117,7 @@ class FormattingSuite:
             findings_as_list,
             log_fix_command=(not apply_fixes),
             log_oneliner_summary=True,
+            formatter_fix_command=self._formatter_fix_command,
         )
 
         if not findings:

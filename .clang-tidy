@@ -15,12 +15,14 @@
 ---
 UseColor: true
 
+# DOCSTAG: [clang-tidy-checks]
 Checks: >
     bugprone-argument-comment,
     bugprone-assert-side-effect,
     bugprone-bool-pointer-implicit-conversion,
     bugprone-dangling-handle,
     bugprone-fold-init-type,
+    bugprone-forwarding-reference-overload,
     bugprone-forward-declaration-namespace,
     bugprone-inaccurate-erase,
     bugprone-macro-repeated-side-effects,
@@ -50,12 +52,14 @@ Checks: >
     modernize-deprecated-ios-base-aliases,
     modernize-make-shared,
     modernize-make-unique,
+    modernize-pass-by-value,
     modernize-replace-auto-ptr,
     modernize-replace-disallow-copy-and-assign-macro,
     modernize-replace-random-shuffle,
     modernize-shrink-to-fit,
     modernize-unary-static-assert,
     modernize-use-bool-literals,
+    modernize-use-emplace,
     modernize-use-equals-delete,
     modernize-use-noexcept,
     modernize-use-nullptr,
@@ -74,6 +78,7 @@ Checks: >
     readability-redundant-control-flow,
     readability-redundant-smartptr-get,
     readability-string-compare,
+# DOCSTAG: [clang-tidy-checks]
 WarningsAsErrors: >
     *,
     -clang-diagnostic-deprecated-declarations,
@@ -81,52 +86,3 @@ WarningsAsErrors: >
 HeaderFilterRegex: '.*'
 ExcludeHeaderFilterRegex: 'external/.*'
 ...
-
-# Disabled checks:
-#
-# clang-analyzer-*:
-#
-# performance-*
-# bugprone-*
-# cert-*
-# misc-*
-# readability-*
-#
-# Checks marked with @ should be reenabled first
-# (the effort is minimal).
-#
-# modernize-avoid-c-arrays:
-# @ modernize-concat-nested-namespaces:
-#   Note: added in c++17
-# modernize-deprecated-headers:
-#   Advises to use <cheader> instead of <header.h> for
-#   legacy headers
-# modernize-loop-convert:
-# @ modernize-pass-by-value:
-# @ modernize-raw-string-literal:
-#   Note: added in c++11
-# @ modernize-redundant-void-arg:
-# modernize-return-braced-init-list:
-# @ modernize-use-auto:
-#   Advises to use auto when initializing with a cast to
-#   avoid duplicating the type name
-# modernize-use-default-member-init:
-#   Note: added in c++11
-#   Advises to use a default initializer in
-#   member declarations
-# @ modernize-use-emplace:
-# @ modernize-use-equals-default:
-#   Note: added in c++11
-#   Advises to use '= default' for empty constructors or
-#   destructors '{}'
-# modernize-use-nodiscard:
-#   Note: added in c++17
-# @ modernize-use-override:
-# modernize-use-trailing-return-type:
-#   Note: added in c++11
-#   Used to delay the writing of the return type
-#   to after the function parameters; does not make
-#   sense to generalise its use.
-# modernize-use-using:
-#   Note: added in c++11
-#   Advises to use 'using' instead of 'typedef'

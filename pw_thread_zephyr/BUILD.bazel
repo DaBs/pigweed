@@ -26,3 +26,27 @@ sphinx_docs_library(
     prefix = "pw_thread_zephyr/",
     target_compatible_with = incompatible_with_mcu(),
 )
+
+# TODO: https://pwbug.dev/380001331 - Make this a zephyr_cc_library
+exports_files([
+    "id_public_overrides/pw_thread_backend/id_inline.h",
+    "id_public_overrides/pw_thread_backend/id_native.h",
+    "public/pw_thread_zephyr/context.h",
+    "public/pw_thread_zephyr/id_inline.h",
+    "public/pw_thread_zephyr/id_native.h",
+    "public/pw_thread_zephyr/options.h",
+    "public/pw_thread_zephyr/priority.h",
+    "public/pw_thread_zephyr/sleep_inline.h",
+    "public/pw_thread_zephyr/stack.h",
+    "public/pw_thread_zephyr/thread_inline.h",
+    "public/pw_thread_zephyr/thread_native.h",
+    "sleep_public_overrides/pw_thread_backend/sleep_inline.h",
+    "sleep.cc",
+    "thread_public_overrides/pw_thread_backend/context.h",
+    "thread_public_overrides/pw_thread_backend/options.h",
+    "thread_public_overrides/pw_thread_backend/priority.h",
+    "thread_public_overrides/pw_thread_backend/stack.h",
+    "thread_public_overrides/pw_thread_backend/thread_inline.h",
+    "thread_public_overrides/pw_thread_backend/thread_native.h",
+    "thread.cc",
+])

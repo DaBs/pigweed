@@ -427,7 +427,10 @@ class TransferIntegrationTest(unittest.TestCase):
         offsettable_resources=False,
     ) -> None:
         """Performs a single client-to-server write of the provided data."""
-        with tempfile.NamedTemporaryFile() as f_payload, tempfile.NamedTemporaryFile() as f_server_output:
+        with (
+            tempfile.NamedTemporaryFile() as f_payload,
+            tempfile.NamedTemporaryFile() as f_server_output,
+        ):
             if permanent_resource_id:
                 config.server.resources[
                     resource_id
@@ -436,9 +439,9 @@ class TransferIntegrationTest(unittest.TestCase):
                 config.server.resources[resource_id].destination_paths.append(
                     f_server_output.name
                 )
-            config.server.resources[
-                resource_id
-            ].offsettable = offsettable_resources
+            config.server.resources[resource_id].offsettable = (
+                offsettable_resources
+            )
             config.client.transfer_actions.append(
                 config_pb2.TransferAction(
                     resource_id=resource_id,
@@ -484,18 +487,21 @@ class TransferIntegrationTest(unittest.TestCase):
         offsettable_resources=False,
     ) -> None:
         """Performs a single server-to-client read of the provided data."""
-        with tempfile.NamedTemporaryFile() as f_payload, tempfile.NamedTemporaryFile() as f_client_output:
+        with (
+            tempfile.NamedTemporaryFile() as f_payload,
+            tempfile.NamedTemporaryFile() as f_client_output,
+        ):
             if permanent_resource_id:
-                config.server.resources[
-                    resource_id
-                ].default_source_path = f_payload.name
+                config.server.resources[resource_id].default_source_path = (
+                    f_payload.name
+                )
             else:
                 config.server.resources[resource_id].source_paths.append(
                     f_payload.name
                 )
-            config.server.resources[
-                resource_id
-            ].offsettable = offsettable_resources
+            config.server.resources[resource_id].offsettable = (
+                offsettable_resources
+            )
             config.client.transfer_actions.append(
                 config_pb2.TransferAction(
                     resource_id=resource_id,

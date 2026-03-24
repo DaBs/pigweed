@@ -32,6 +32,8 @@ struct AlignableBase {};
 
 }  // namespace internal
 
+/// @submodule{pw_allocator,block_mixins}
+
 /// Mix-in for blocks that can be split on alignment boundaries.
 ///
 /// Block mix-ins are stateless and trivially constructible. See `BasicBlock`
@@ -82,6 +84,8 @@ struct is_alignable : std::is_base_of<internal::AlignableBase, BlockType> {};
 /// Helper variable template for `is_alignable<BlockType>::value`.
 template <typename BlockType>
 constexpr bool is_alignable_v = is_alignable<BlockType>::value;
+
+/// @}
 
 // Template method implementations.
 
@@ -134,7 +138,7 @@ constexpr BlockResult<Derived> AlignableBlock<Derived>::DoAllocFirst(
   layout = Layout(size, layout.alignment());
   StatusWithSize can_alloc = block->DoCanAlloc(layout);
   if (!can_alloc.ok()) {
-    return BlockResult(block, can_alloc.status());
+    return BlockResult<Derived>(block, can_alloc.status());
   }
   size_t extra = can_alloc.size();
   size_t leading_outer_size = extra - AlignDown(extra, layout.alignment());
@@ -146,7 +150,7 @@ constexpr BlockResult<Derived> AlignableBlock<Derived>::DoAllocFirst(
                                   layout.alignment());
   }
   if (leading_outer_size > extra) {
-    return BlockResult(block, Status::ResourceExhausted());
+    return BlockResult<Derived>(block, Status::ResourceExhausted());
   }
 
   // Allocate the aligned block.
@@ -166,7 +170,7 @@ constexpr BlockResult<Derived> AlignableBlock<Derived>::DoAllocLast(
   layout = Layout(size, layout.alignment());
   StatusWithSize can_alloc = block->DoCanAlloc(layout);
   if (!can_alloc.ok()) {
-    return BlockResult(block, can_alloc.status());
+    return BlockResult<Derived>(block, can_alloc.status());
   }
   size_t leading_outer_size = can_alloc.size();
 
@@ -187,12 +191,13 @@ constexpr BlockResult<Derived> AlignableBlock<Derived>::DoAllocAligned(
   block = alloc_result.block();
 
   // Resize the allocation to the requested size.
-  auto resize_result = block->DoResize(new_inner_size);
+  auto resize_result =
+      block->AllocatableBlock<Derived>::DoResize(new_inner_size);
   if (!resize_result.ok()) {
     return resize_result;
   }
 
-  return BlockResult(
+  return BlockResult<Derived>(
       block, alloc_result.prev(), resize_result.next(), alloc_result.size());
 }
 

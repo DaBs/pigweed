@@ -23,6 +23,7 @@ pw_source_set("hci") {
   sources = [
     "acl_connection.cc",
     "advertising_handle_map.cc",
+    "advertising_packet_filter.cc",
     "android_extended_low_energy_advertiser.cc",
     "bredr_connection.cc",
     "bredr_connection_request.cc",
@@ -36,12 +37,14 @@ pw_source_set("hci") {
     "low_energy_connection.cc",
     "low_energy_connector.cc",
     "low_energy_scanner.cc",
+    "periodic_advertising_synchronizer.cc",
     "sco_connection.cc",
     "sequential_command_runner.cc",
   ]
   public = [
     "public/pw_bluetooth_sapphire/internal/host/hci/acl_connection.h",
     "public/pw_bluetooth_sapphire/internal/host/hci/advertising_handle_map.h",
+    "public/pw_bluetooth_sapphire/internal/host/hci/advertising_packet_filter.h",
     "public/pw_bluetooth_sapphire/internal/host/hci/advertising_report_parser.h",
     "public/pw_bluetooth_sapphire/internal/host/hci/android_extended_low_energy_advertiser.h",
     "public/pw_bluetooth_sapphire/internal/host/hci/bredr_connection.h",
@@ -57,6 +60,7 @@ pw_source_set("hci") {
     "public/pw_bluetooth_sapphire/internal/host/hci/low_energy_connection.h",
     "public/pw_bluetooth_sapphire/internal/host/hci/low_energy_connector.h",
     "public/pw_bluetooth_sapphire/internal/host/hci/low_energy_scanner.h",
+    "public/pw_bluetooth_sapphire/internal/host/hci/periodic_advertising_synchronizer.h",
     "public/pw_bluetooth_sapphire/internal/host/hci/sco_connection.h",
     "public/pw_bluetooth_sapphire/internal/host/hci/sequential_command_runner.h",
   ]
@@ -65,7 +69,7 @@ pw_source_set("hci") {
     "$dir_pw_bluetooth_sapphire/host/common",
     "$dir_pw_bluetooth_sapphire/host/hci-spec",
     "$dir_pw_bluetooth_sapphire/host/transport",
-    "$dir_pw_third_party/fuchsia:fit",
+    "$pw_external_fuchsia:fit",
   ]
   deps = [
     "$dir_pw_async:heap_dispatcher",
@@ -96,9 +100,9 @@ pw_source_set("testing") {
 }
 
 pw_test("hci_test") {
-  enable_if = pw_unit_test_BACKEND == "$dir_pw_unit_test:googletest"
   sources = [
     "advertising_handle_map_test.cc",
+    "advertising_packet_filter_test.cc",
     "connection_test.cc",
     "discovery_filter_test.cc",
     "extended_low_energy_advertiser_test.cc",
@@ -109,6 +113,7 @@ pw_test("hci_test") {
     "low_energy_connector_test.cc",
     "low_energy_multiple_advertising_test.cc",
     "low_energy_scanner_test.cc",
+    "periodic_advertising_synchronizer_test.cc",
     "sequential_command_runner_test.cc",
   ]
   test_main = "$dir_pw_bluetooth_sapphire/host/testing:gtest_main"

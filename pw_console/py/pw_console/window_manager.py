@@ -19,6 +19,7 @@ import functools
 from itertools import chain
 import logging
 import operator
+from enum import Enum
 from typing import Any, Iterable
 
 from prompt_toolkit.key_binding import KeyBindings
@@ -33,9 +34,10 @@ from prompt_toolkit.layout import (
 from prompt_toolkit.mouse_events import MouseEvent, MouseEventType, MouseButton
 from prompt_toolkit.widgets import MenuItem
 
-from pw_console.console_prefs import ConsolePrefs, error_unknown_window
+from pw_console.console_prefs import ConsolePrefs, warn_unknown_window
 from pw_console.log_pane import LogPane
 from pw_console.widgets import (
+    WindowPane,
     WindowPaneToolbar,
     to_checkbox_text,
 )
@@ -46,6 +48,13 @@ _LOG = logging.getLogger(__package__)
 
 # Amount for adjusting window dimensions when enlarging and shrinking.
 _WINDOW_SPLIT_ADJUST = 1
+
+
+class Direction(Enum):
+    UP = 1
+    DOWN = 2
+    LEFT = 3
+    RIGHT = 4
 
 
 class WindowListResizeHandle(FormattedTextControl):
@@ -193,6 +202,10 @@ class WindowManager:
         self.top_toolbars: list[WindowPaneToolbar] = []
         self.bottom_toolbars: list[WindowPaneToolbar] = []
 
+        self.vertical_splitting = bool(
+            self.application.prefs.window_column_split_method == 'vertical'
+        )
+
         self.resize_mode: bool = False
         self.resize_target_window_list_index: int | None = None
         self.resize_target_window_list: int | None = None
@@ -229,8 +242,14 @@ class WindowManager:
             window_list.width = Dimension(preferred=new_widths[0])
             new_widths = new_widths[1:]
 
-    def vertical_window_list_spliting(self) -> bool:
-        return self.application.prefs.window_column_split_method == 'vertical'
+    def toggle_vertical_window_list_splitting(self) -> None:
+        self.vertical_splitting = not self.vertical_splitting
+        # Reset sizes so interactive resizing will work.
+        self.reset_split_sizes()
+        self.update_root_container_body()
+
+    def vertical_window_list_splitting(self) -> bool:
+        return self.vertical_splitting
 
     def rebalance_window_list_sizes(self) -> None:
         """Adjust relative split sizes to fill available space."""
@@ -256,7 +275,7 @@ class WindowManager:
             for percentage in width_percentages
         ]
 
-        if self.vertical_window_list_spliting():
+        if self.vertical_window_list_splitting():
             new_heights = [
                 self.current_window_manager_height for h in new_heights
             ]
@@ -270,43 +289,43 @@ class WindowManager:
         register = self.application.prefs.register_keybinding
 
         @register('window-manager.move-pane-left', key_bindings)
-        def move_pane_left(_event):
-            """Move window pane left."""
-            self.move_pane_left()
+        def move_pane_to_prev_group(_event):
+            """Move window to prev group."""
+            self.move_pane_to_prev_group()
 
         @register('window-manager.move-pane-right', key_bindings)
-        def move_pane_right(_event):
-            """Move window pane right."""
-            self.move_pane_right()
+        def move_pane_to_next_group(_event):
+            """Move window to next group."""
+            self.move_pane_to_next_group()
 
         @register('window-manager.move-pane-down', key_bindings)
         def move_pane_down(_event):
-            """Move window pane down."""
+            """Move window down in group."""
             self.move_pane_down()
 
         @register('window-manager.move-pane-up', key_bindings)
         def move_pane_up(_event):
-            """Move window pane up."""
+            """Move window up in group."""
             self.move_pane_up()
 
         @register('window-manager.enlarge-pane', key_bindings)
         def enlarge_pane(_event):
-            """Enlarge the active window pane."""
+            """Grow window height."""
             self.enlarge_pane()
 
         @register('window-manager.shrink-pane', key_bindings)
         def shrink_pane(_event):
-            """Shrink the active window pane."""
+            """Shrink window height."""
             self.shrink_pane()
 
         @register('window-manager.shrink-split', key_bindings)
         def shrink_split(_event):
-            """Shrink the current window split."""
+            """Shrink window group height or width."""
             self.shrink_split()
 
         @register('window-manager.enlarge-split', key_bindings)
         def enlarge_split(_event):
-            """Enlarge the current window split."""
+            """Grow window group height or width."""
             self.enlarge_split()
 
         @register('window-manager.focus-prev-pane', key_bindings)
@@ -318,6 +337,26 @@ class WindowManager:
         def focus_next_pane(_event):
             """Switch focus to the next window pane or tab."""
             self.focus_next_pane()
+
+        @register('window-manager.focus-pane-up', key_bindings)
+        def focus_pane_up(_event):
+            """Move focus up."""
+            self.focus_pane_direction(Direction.UP)
+
+        @register('window-manager.focus-pane-down', key_bindings)
+        def focus_pane_down(_event):
+            """Move focus down."""
+            self.focus_pane_direction(Direction.DOWN)
+
+        @register('window-manager.focus-pane-left', key_bindings)
+        def focus_pane_left(_event):
+            """Move focus left."""
+            self.focus_pane_direction(Direction.LEFT)
+
+        @register('window-manager.focus-pane-right', key_bindings)
+        def focus_pane_right(_event):
+            """Move focus right."""
+            self.focus_pane_direction(Direction.RIGHT)
 
         @register('window-manager.balance-window-panes', key_bindings)
         def balance_window_panes(_event):
@@ -348,7 +387,7 @@ class WindowManager:
         for window_list in self.window_lists:
             window_list.update_container()
 
-        vertical_split = self.vertical_window_list_spliting()
+        vertical_split = self.vertical_window_list_splitting()
 
         window_containers = []
         for i, window_list in enumerate(self.window_lists):
@@ -402,9 +441,9 @@ class WindowManager:
 
     def update_root_container_body(self):
         # Replace the root MenuContainer body with the new split.
-        self.application.root_container.container.content.children[
-            1
-        ] = self.create_root_container()
+        self.application.root_container.container.content.children[1] = (
+            self.create_root_container()
+        )
 
     def _get_active_window_list_and_pane(self):
         active_pane = None
@@ -437,6 +476,223 @@ class WindowManager:
         method_to_call()
         return
 
+    def _focus_pane_up(
+        self, window_list: WindowList, active_pane: WindowPane
+    ) -> bool:
+        previous_visible_pane = window_list.get_previous_visible_pane(
+            active_pane
+        )
+
+        if previous_visible_pane:
+            self.application.application.layout.focus(previous_visible_pane)
+            return True
+        return False
+
+    def _focus_pane_down(
+        self, window_list: WindowList, active_pane: WindowPane
+    ) -> bool:
+        next_visible_pane = window_list.get_next_visible_pane(active_pane)
+
+        if next_visible_pane:
+            self.application.application.layout.focus(next_visible_pane)
+            return True
+
+        return False
+
+    def _focus_window_list(
+        self, window_list: WindowList, reverse: bool = False
+    ) -> None:
+        panes = (
+            reversed(window_list.active_panes)
+            if reverse
+            else window_list.active_panes
+        )
+        for pane in panes:
+            if pane.show_pane:
+                self.application.focus_on_container(pane)
+                return
+
+    def _focus_group_up(self, active_window_list: WindowList) -> None:
+        window_list_index = self.window_list_index(active_window_list)
+        if window_list_index is None:
+            return
+
+        previous_window_list_index = window_list_index - 1
+        if previous_window_list_index < 0:
+            return
+
+        previous_window_list = self.window_lists[previous_window_list_index]
+
+        # Move to the bottom pane if we're in stacked mode in a horizontal
+        # split.
+        reverse = (
+            previous_window_list.display_mode == DisplayMode.STACK
+            and not self.vertical_window_list_splitting()
+        )
+        self._focus_window_list(previous_window_list, reverse)
+
+    def _focus_group_down(self, active_window_list: WindowList) -> None:
+        window_list_index = self.window_list_index(active_window_list)
+        if window_list_index is None:
+            return
+
+        next_window_list_index = window_list_index + 1
+        if next_window_list_index >= len(self.window_lists):
+            return
+
+        next_window_list = self.window_lists[next_window_list_index]
+        self._focus_window_list(next_window_list)
+
+    def _focus_tab_right(  # pylint: disable=no-self-use
+        self, active_window_list: WindowList
+    ) -> bool:
+        _ = active_window_list.get_tab_mode_active_pane()
+        assert (
+            active_window_list.focused_pane_index is not None
+        ), 'focused_pane_index should not be None in tab mode'
+        next_pane_index = active_window_list.focused_pane_index + 1
+        if next_pane_index >= len(active_window_list.active_panes):
+            return False
+
+        active_window_list.switch_to_tab(next_pane_index)
+        return True
+
+    def _focus_tab_left(  # pylint: disable=no-self-use
+        self, active_window_list: WindowList
+    ) -> bool:
+        _ = active_window_list.get_tab_mode_active_pane()
+        assert (
+            active_window_list.focused_pane_index is not None
+        ), 'focused_pane_index should not be None in tab mode'
+        previous_pane_index = active_window_list.focused_pane_index - 1
+        if previous_pane_index < 0:
+            return False
+
+        active_window_list.switch_to_tab(previous_pane_index)
+        return True
+
+    def _focus_next_group(
+        self, active_window_list: WindowList, wrap: bool = True
+    ) -> None:
+        window_list_count = len(self.window_lists)
+        active_window_list_index = self.window_list_index(active_window_list)
+        assert active_window_list_index is not None
+        next_window_list_index = active_window_list_index + 1
+
+        if next_window_list_index >= window_list_count:
+            if not wrap:
+                return
+            next_window_list_index = next_window_list_index % window_list_count
+        next_window_list = self.window_lists[next_window_list_index]
+
+        if next_window_list.display_mode == DisplayMode.TABBED:
+            if wrap:
+                next_window_list.switch_to_tab(0)
+            else:
+                next_window_list.switch_to_tab(
+                    next_window_list.focused_pane_index
+                )
+        else:
+            pane_list = next_window_list.active_panes
+            for pane in pane_list:
+                if pane.show_pane:
+                    self.application.focus_on_container(pane)
+                    return
+
+    def _focus_prev_group(
+        self, active_window_list: WindowList, wrap: bool = True
+    ) -> None:
+        window_list_count = len(self.window_lists)
+        active_window_list_index = self.window_list_index(active_window_list)
+        assert active_window_list_index is not None
+        previous_window_list_index = active_window_list_index - 1
+
+        if previous_window_list_index < 0:
+            if not wrap:
+                return
+            previous_window_list_index = (
+                previous_window_list_index % window_list_count
+            )
+        previous_window_list = self.window_lists[previous_window_list_index]
+
+        if previous_window_list.display_mode == DisplayMode.TABBED:
+            if wrap:
+                previous_window_list.switch_to_tab(
+                    len(previous_window_list.active_panes) - 1
+                )
+            else:
+                previous_window_list.switch_to_tab(
+                    previous_window_list.focused_pane_index
+                )
+        else:
+            pane_list = previous_window_list.active_panes
+            if wrap:
+                pane_list = reversed(pane_list)
+            for pane in pane_list:
+                if pane.show_pane:
+                    self.application.focus_on_container(pane)
+                    return
+
+    def focus_pane_direction(self, direction: Direction) -> None:
+        """Change the focus to the pane in the specified direction.
+
+        The behavior depends on the current layout (vertical/horizontal splits)
+        and the display mode of the panes within the current group
+        (tabbed/stacked).
+        """
+        (
+            active_window_list,
+            active_pane,
+        ) = self._get_active_window_list_and_pane()
+        # Vertical group split
+        if self.vertical_window_list_splitting():
+            if active_window_list.display_mode == DisplayMode.TABBED:
+                match direction:
+                    case Direction.LEFT:
+                        if not self._focus_tab_left(active_window_list):
+                            self._focus_prev_group(active_window_list, False)
+                    case Direction.RIGHT:
+                        if not self._focus_tab_right(active_window_list):
+                            self._focus_next_group(active_window_list, False)
+                    case Direction.UP | Direction.DOWN:
+                        return
+            elif active_window_list.display_mode == DisplayMode.STACK:
+                match direction:
+                    case Direction.LEFT:
+                        self._focus_group_up(active_window_list)
+                    case Direction.RIGHT:
+                        self._focus_group_down(active_window_list)
+                    case Direction.UP:
+                        self._focus_pane_up(active_window_list, active_pane)
+                    case Direction.DOWN:
+                        self._focus_pane_down(active_window_list, active_pane)
+        # Horizontal group split
+        else:
+            if active_window_list.display_mode == DisplayMode.TABBED:
+                match direction:
+                    case Direction.LEFT:
+                        self._focus_tab_left(active_window_list)
+                    case Direction.RIGHT:
+                        self._focus_tab_right(active_window_list)
+                    case Direction.UP:
+                        self._focus_group_up(active_window_list)
+                    case Direction.DOWN:
+                        self._focus_group_down(active_window_list)
+            elif active_window_list.display_mode == DisplayMode.STACK:
+                match direction:
+                    case Direction.LEFT | Direction.RIGHT:
+                        return
+                    case Direction.UP:
+                        if not self._focus_pane_up(
+                            active_window_list, active_pane
+                        ):
+                            self._focus_group_up(active_window_list)
+                    case Direction.DOWN:
+                        if not self._focus_pane_down(
+                            active_window_list, active_pane
+                        ):
+                            self._focus_group_down(active_window_list)
+
     def focus_previous_pane(self) -> None:
         """Focus on the previous visible window pane or tab."""
         self.focus_next_pane(reverse_order=True)
@@ -450,8 +706,7 @@ class WindowManager:
         if active_window_list is None:
             return
 
-        # Total count of window lists and panes
-        window_list_count = len(self.window_lists)
+        # Total count of panes
         pane_count = len(active_window_list.active_panes)
 
         # Get currently focused indices
@@ -466,31 +721,12 @@ class WindowManager:
 
         # Case 1: next_pane_index does not exist in this window list.
         # Action: Switch to the first pane of the next window list.
-        if next_pane_index >= pane_count or next_pane_index < 0:
-            # Get the next window_list
-            next_window_list_index = (
-                active_window_list_index + increment
-            ) % window_list_count
-            next_window_list = self.window_lists[next_window_list_index]
-
-            # If tabbed window mode is enabled, switch to the first tab.
-            if next_window_list.display_mode == DisplayMode.TABBED:
-                if reverse_order:
-                    next_window_list.switch_to_tab(
-                        len(next_window_list.active_panes) - 1
-                    )
-                else:
-                    next_window_list.switch_to_tab(0)
-                return
-
-            # Otherwise switch to the first visible window pane.
-            pane_list = next_window_list.active_panes
-            if reverse_order:
-                pane_list = reversed(pane_list)
-            for pane in pane_list:
-                if pane.show_pane:
-                    self.application.focus_on_container(pane)
-                    return
+        if next_pane_index >= pane_count:
+            self._focus_next_group(active_window_list)
+            return
+        if next_pane_index < 0:
+            self._focus_prev_group(active_window_list)
+            return
 
         # Case 2: next_pane_index does exist and display mode is tabs.
         # Action: Switch to the next tab of the current window list.
@@ -511,7 +747,8 @@ class WindowManager:
                 return
         return
 
-    def move_pane_left(self):
+    def move_pane_to_prev_group(self):
+        """Move a pane to the previous window group."""
         (
             active_window_list,
             active_pane,
@@ -540,8 +777,11 @@ class WindowManager:
         target_window_list.add_pane(active_pane, add_at_beginning=True)
         target_window_list.reset_pane_sizes()
         self.delete_empty_window_lists()
+        self.focus_on_pane(target_window_list, active_pane)
+        self.reset_tab_focus()
 
-    def move_pane_right(self):
+    def move_pane_to_next_group(self):
+        """Move a pane to the next window group."""
         (
             active_window_list,
             active_pane,
@@ -568,6 +808,20 @@ class WindowManager:
         target_window_list.add_pane(active_pane, add_at_beginning=True)
         target_window_list.reset_pane_sizes()
         self.delete_empty_window_lists()
+        self.focus_on_pane(target_window_list, active_pane)
+        self.reset_tab_focus()
+
+    def __repr__(self) -> str:
+        window_list_repr = []
+        for i, wl in enumerate(self.window_lists):
+            window_list_repr.append(
+                f'WindowList {i}: '
+                f'mode:{wl.display_mode} '
+                f'focused_pane_index:{wl.focused_pane_index})'
+            )
+            for p in wl.active_panes:
+                window_list_repr.append(f'  {p}')
+        return '\n'.join(window_list_repr)
 
     def move_pane_up(self):
         (
@@ -590,6 +844,7 @@ class WindowManager:
         active_window_list.move_pane_down()
 
     def shrink_pane(self):
+        """Grow the window pane height or group split size."""
         (
             active_window_list,
             _active_pane,
@@ -597,9 +852,15 @@ class WindowManager:
         if not active_window_list:
             return
 
-        active_window_list.shrink_pane()
+        # If windows are in stacked mode change window pane height.
+        if active_window_list.display_mode == DisplayMode.STACK:
+            active_window_list.shrink_pane()
+        # If in tabbed mode shrink the group height.
+        else:
+            self.shrink_split()
 
     def enlarge_pane(self):
+        """Grow the window pane height or group split size."""
         (
             active_window_list,
             _active_pane,
@@ -607,7 +868,12 @@ class WindowManager:
         if not active_window_list:
             return
 
-        active_window_list.enlarge_pane()
+        # If windows are in stacked mode change window pane height.
+        if active_window_list.display_mode == DisplayMode.STACK:
+            active_window_list.enlarge_pane()
+        # If in tabbed mode increase the group height.
+        else:
+            self.enlarge_split()
 
     def shrink_split(self):
         if len(self.window_lists) < 2:
@@ -681,7 +947,7 @@ class WindowManager:
         if not next_window_list:
             return
 
-        if self.vertical_window_list_spliting():
+        if self.vertical_window_list_splitting():
             # Get current width
             old_value = window_list.width.preferred
             next_old_value = next_window_list.width.preferred  # type: ignore
@@ -704,7 +970,7 @@ class WindowManager:
         if new_value < 3 or next_new_value < 3 or old_value == new_value:
             return
 
-        if self.vertical_window_list_spliting():
+        if self.vertical_window_list_splitting():
             # Set new width
             window_list.width.preferred = new_value
             next_window_list.width.preferred = next_new_value  # type: ignore
@@ -715,7 +981,7 @@ class WindowManager:
             window_list.rebalance_window_heights()
             next_window_list.rebalance_window_heights()
 
-    def toggle_pane(self, pane):
+    def toggle_pane(self, pane) -> None:
         """Toggle a pane on or off."""
         window_list, _pane_index = self.find_window_list_and_pane_index(pane)
 
@@ -737,6 +1003,27 @@ class WindowManager:
             if pane.show_pane:
                 self.application.application.layout.focus(pane)
                 break
+
+    def focus_on_pane(
+        self, window_list: WindowList, pane_to_focus: WindowPane
+    ) -> None:
+        """Focus on the a given window_list and pane."""
+        if window_list.display_mode == DisplayMode.TABBED:
+            # Switch to the correct tab index.
+            for index, pane in enumerate(window_list.active_panes):
+                if pane == pane_to_focus:
+                    window_list.switch_to_tab(index)
+                    break
+            return
+
+        # Otherwise just focus on the pane directly.
+        self.application.focus_on_container(pane_to_focus)
+
+    def reset_tab_focus(self) -> None:
+        """Check for tabbed windows and unhide only the focused tab."""
+        for window_list in self.window_lists:
+            if window_list.display_mode == DisplayMode.TABBED:
+                window_list.reset_tabbed_window_visibility()
 
     def check_for_all_hidden_panes_and_unhide(self) -> None:
         """Scan for window_lists containing only hidden panes."""
@@ -775,7 +1062,7 @@ class WindowManager:
         ]
 
         diff = ypos - self.resize_current_row
-        if self.vertical_window_list_spliting():
+        if self.vertical_window_list_splitting():
             diff = xpos - self.resize_current_column
         if diff == 0:
             return
@@ -915,9 +1202,9 @@ class WindowManager:
             # iterating.
             for pane in copy.copy(window_list.active_panes):
                 if pane.pane_title() in pane_titles:
-                    collected_panes[
-                        pane.pane_title()
-                    ] = window_list.remove_pane_no_checks(pane)
+                    collected_panes[pane.pane_title()] = (
+                        window_list.remove_pane_no_checks(pane)
+                    )
         return collected_panes
 
     def _set_pane_options(  # pylint: disable=no-self-use
@@ -933,28 +1220,47 @@ class WindowManager:
             pane.height.preferred = new_height
 
     def _set_window_list_display_modes(self, prefs: ConsolePrefs) -> None:
-        # Set column display modes
-        for column_index, column_type in enumerate(prefs.window_column_modes):
-            mode = DisplayMode.STACK
-            if 'tabbed' in column_type:
-                mode = DisplayMode.TABBED
-            self.window_lists[column_index].set_display_mode(mode)
+        # Get display modes from the config.
+        modes = [
+            DisplayMode.TABBED if 'tabbed' in column_type else DisplayMode.STACK
+            for column_type in prefs.window_column_modes
+        ]
 
-    def _create_new_log_pane_with_loggers(
+        # Apply modes to the current window lists starting from the beginning.
+        for mode, window_list in zip(modes, self.window_lists):
+            window_list.set_display_mode(mode)
+
+    def _create_new_log_pane_with_options(
         self, window_title, window_options, existing_pane_titles
-    ) -> LogPane:
-        if 'loggers' not in window_options:
-            error_unknown_window(window_title, existing_pane_titles)
+    ) -> LogPane | None:
+        if 'loggers' not in window_options and 'command' not in window_options:
+            warn_unknown_window(window_title, existing_pane_titles)
+            return None
+
+        if 'command' in window_options:
+            process_log_name = None
+            if 'command_log_parser' in window_options:
+                process_log_name = window_options['command_log_parser']
+            new_pane = (
+                self.application.background_command_runner.execute_new_command(
+                    command=window_options['command'],
+                    process_log_name=process_log_name,
+                    log_pane_title=window_title,
+                )
+            )
+            return new_pane
 
         new_pane = LogPane(
             application=self.application, pane_title=window_title
         )
+
         # Add logger handlers
         for logger_name, logger_options in window_options.get(
             'loggers', {}
         ).items():
             log_level_name = logger_options.get('level', None)
             new_pane.add_log_handler(logger_name, level_name=log_level_name)
+
         return new_pane
 
     # TODO(tonymd): Split this large function up.
@@ -962,6 +1268,11 @@ class WindowManager:
         """Apply window configuration from loaded ConsolePrefs."""
         if not prefs.windows:
             return
+
+        # Update split method
+        self.vertical_splitting = bool(
+            prefs.window_column_split_method == 'vertical'
+        )
 
         unique_titles = prefs.unique_window_titles
         collected_panes = self._remove_panes_from_layout(unique_titles)
@@ -972,7 +1283,7 @@ class WindowManager:
         ]
 
         # Keep track of original non-duplicated pane titles
-        already_added_panes = []
+        newly_added_panes: list[str] = []
 
         for column_index, column in enumerate(
             prefs.windows.items()
@@ -985,6 +1296,10 @@ class WindowManager:
             # Set column display mode to stacked by default.
             self.window_lists[column_index].display_mode = DisplayMode.STACK
 
+            if not windows:
+                # Empty window list, ignore.
+                continue
+
             # Add windows to the this column (window_list)
             for window_title, window_dict in windows.items():
                 window_options = window_dict if window_dict else {}
@@ -996,17 +1311,24 @@ class WindowManager:
                 # Check if this pane is brand new, ready to be added, or should
                 # be duplicated.
                 if (
-                    window_title not in already_added_panes
+                    window_title not in newly_added_panes
                     and window_title not in collected_panes
                 ):
                     # New pane entirely
-                    new_pane = self._create_new_log_pane_with_loggers(
-                        window_title, window_options, existing_pane_titles
+                    new_pane = self._create_new_log_pane_with_options(
+                        window_title,
+                        window_options,
+                        (existing_pane_titles + newly_added_panes),
                     )
+                    if not new_pane:
+                        continue
+                    newly_added_panes.append(window_title)
+                    # Add the new pane to the list of what can be duplicated.
+                    collected_panes[window_title] = new_pane
 
-                elif window_title not in already_added_panes:
+                elif window_title not in newly_added_panes:
                     # First time adding this pane
-                    already_added_panes.append(window_title)
+                    newly_added_panes.append(window_title)
                     new_pane = collected_panes[window_title]
 
                 elif window_title in collected_panes:
@@ -1028,6 +1350,9 @@ class WindowManager:
                         if window_options.get('view_in_web', False):
                             new_pane.toggle_websocket_server()
 
+        # Remove any empty window lists from the config.
+        self.delete_empty_window_lists()
+
         # Update column display modes.
         self._set_window_list_display_modes(prefs)
         # Check for columns where all panes are hidden and unhide at least one.
@@ -1047,7 +1372,7 @@ class WindowManager:
             menu_items = []
             menu_items.append(
                 MenuItem(
-                    'Column {index} View Modes'.format(
+                    'Group {index} View Mode'.format(
                         index=window_list_index + 1
                     ),
                     children=[
@@ -1067,21 +1392,39 @@ class WindowManager:
                     ],
                 )
             )
-            menu_items.extend(
-                MenuItem(
-                    '{index}: {title}'.format(
-                        index=pane_index + 1,
-                        title=pane.menu_title(),
-                    ),
-                    children=[
+
+            for pane_index, pane in enumerate(window_list.active_panes):
+                window_list_menu_items: list[MenuItem] = []
+                # If tabbed mode or if the pane is visible, show focus window.
+                if (
+                    window_list.display_mode == DisplayMode.TABBED
+                    or pane.show_pane
+                ):
+                    window_list_menu_items.append(
+                        MenuItem(
+                            'Focus Window',
+                            handler=functools.partial(
+                                self.focus_on_pane,
+                                window_list,
+                                pane,
+                            ),
+                        )
+                    )
+
+                # Allow hide/unhide in stacked mode.
+                if window_list.display_mode == DisplayMode.STACK:
+                    window_list_menu_items.append(
                         MenuItem(
                             '{check} Show/Hide Window'.format(
                                 check=to_checkbox_text(pane.show_pane, end='')
                             ),
                             handler=functools.partial(self.toggle_pane, pane),
-                        ),
-                    ]
-                    + [
+                        )
+                    )
+
+                # Add the rest of the pane defined menu options.
+                window_list_menu_items.extend(
+                    [
                         MenuItem(
                             text,
                             handler=functools.partial(
@@ -1089,10 +1432,20 @@ class WindowManager:
                             ),
                         )
                         for text, handler in pane.get_window_menu_options()
-                    ],
+                    ]
                 )
-                for pane_index, pane in enumerate(window_list.active_panes)
-            )
+
+                # Add the toplevel pane submenu.
+                menu_items.append(
+                    MenuItem(
+                        '{index}: {title}'.format(
+                            index=pane_index + 1,
+                            title=pane.menu_title(),
+                        ),
+                        children=window_list_menu_items,
+                    )
+                )
+
             if window_list_index + 1 < len(self.window_lists):
                 menu_items.append(MenuItem('-'))
             root_menu_items.extend(menu_items)

@@ -14,7 +14,7 @@
 """Adapters and helpers for Bazel runfiles handling."""
 
 from dataclasses import dataclass
-from pathlib import Path
+from typing import Optional
 
 
 @dataclass
@@ -25,8 +25,8 @@ class PythonRunfilesLabelAdapter:
     use this as the generated type for pw_py_importable_runfile libraries.
     """
 
-    runfiles_path: Path
-    source_repo: str
+    runfiles_path: str
+    source_repo: Optional[str]
 
     def __iter__(self):
         """Custom iterator to support passing an adapter to Rlocation()."""

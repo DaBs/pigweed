@@ -16,7 +16,7 @@
 #include <mutex>
 
 #include "pw_bytes/span.h"
-#include "pw_containers/intrusive_list.h"
+#include "pw_containers/intrusive_queue.h"
 #include "pw_result/result.h"
 #include "pw_span/span.h"
 #include "pw_status/status.h"
@@ -30,7 +30,7 @@ namespace pw::rpc::internal {
 template <size_t kMaxPacketSize>
 class PacketBufferQueue {
  public:
-  class PacketBuffer : public IntrusiveList<PacketBuffer>::Item {
+  class PacketBuffer : public IntrusiveQueue<PacketBuffer>::Item {
    public:
     Status CopyPacket(ConstByteSpan packet) {
       if (packet.size() > buffer_.size()) {
@@ -61,6 +61,8 @@ class PacketBufferQueue {
     }
   }
 
+  ~PacketBufferQueue() { packet_list_.clear(); }
+
   // Push a packet to the end of the queue.
   void Push(PacketBuffer& packet) {
     const LockGuard guard(lock_);
@@ -86,7 +88,7 @@ class PacketBufferQueue {
  private:
   using LockGuard = ::std::lock_guard<sync::Mutex>;
   sync::Mutex lock_;
-  IntrusiveList<PacketBuffer> packet_list_ PW_GUARDED_BY(lock_);
+  IntrusiveQueue<PacketBuffer> packet_list_ PW_GUARDED_BY(lock_);
 };
 
 }  // namespace pw::rpc::internal

@@ -35,15 +35,16 @@ Example API usage:
 
    Status ListenForButtonPress(DigitalInterrupt& button) {
      PW_TRY(button.SetInterruptHandler(Trigger::kActivatingEdge,
-       [](State sampled_state) {
-         // Handle the button press.
-         // NOTE: this may run in an interrupt context!
-       }));
+                                       [](State sampled_state) {
+                                         // Handle the button press.
+                                         // NOTE: this may run in an interrupt
+                                         // context!
+                                       }));
      return button.EnableInterruptHandler();
    }
 
 -------------------------
-pw::digital_io Interfaces
+pw::digital_io interfaces
 -------------------------
 There are 3 basic capabilities of a Digital IO line:
 
@@ -82,16 +83,16 @@ The following table summarizes the interfaces and their required functionality:
      - Interrupts Required
    * - Input/Output Not Required
      -
-     - :cpp:class:`DigitalInterrupt`
+     - :cc:`DigitalInterrupt <pw::digital_io::DigitalInterrupt>`
    * - Input Required
-     - :cpp:class:`DigitalIn`
-     - :cpp:class:`DigitalInInterrupt`
+     - :cc:`DigitalIn <pw::digital_io::DigitalIn>`
+     - :cc:`DigitalInInterrupt <pw::digital_io::DigitalInterrupt>`
    * - Output Required
-     - :cpp:class:`DigitalOut`
-     - :cpp:class:`DigitalOutInterrupt`
+     - :cc:`DigitalOut <pw::digital_io::DigitalOut>`
+     - :cc:`DigitalOutInterrupt <pw::digital_io::DigitalOutInterrupt>`
    * - Input/Output Required
-     - :cpp:class:`DigitalInOut`
-     - :cpp:class:`DigitalInOutInterrupt`
+     - :cc:`DigitalInOut <pw::digital_io::DigitalInOut>`
+     - :cc:`DigitalInOutInterrupt <pw::digital_io::DigitalInOutInterrupt>`
 
 Synchronization requirements
 ============================
@@ -103,7 +104,7 @@ Synchronization requirements
   interrupt context.
 
 ------------
-Design Notes
+Design notes
 ------------
 The interfaces are intended to support many but not all use cases, and they do
 not cover every possible type of functionality supported by the hardware. There
@@ -192,7 +193,7 @@ trigger.
 The handler is passed the latest known sampled state of the line. Otherwise
 handlers running in an interrupt context cannot query the state of the line.
 
-Class Hierarchy
+Class hierarchy
 ===============
 ``pw_digital_io`` contains a 2-level hierarchy of classes.
 
@@ -229,11 +230,13 @@ example:
 
 .. code-block:: cpp
 
-   DigitalInInterrupt& in_interrupt_line;
-   DigitalIn& in_line = in_interrupt_line;
+   void ExampleAssignments() {
+     DigitalInInterrupt & in_interrupt_line;
+     DigitalIn& in_line = in_interrupt_line;
 
-   DigitalInInterrupt* in_interrupt_line_ptr;
-   DigitalIn* in_line_ptr = &in_interrupt_line_ptr->as<DigitalIn>();
+     DigitalInInterrupt* in_interrupt_line_ptr;
+     DigitalIn* in_line_ptr = &in_interrupt_line_ptr->as<DigitalIn>();
+   }
 
 Asynchronous APIs
 =================
@@ -245,8 +248,8 @@ undesirable for GPIO extenders controlled through I2C or another shared bus.
 The API may be extended in the future to add asynchronous capabilities, or a
 separate asynchronous API may be created.
 
-Backend Implemention Notes
-==========================
+Backend implementation notes
+============================
 * Derived classes explicitly list the non-virtual methods as public or private
   depending on the supported set of functionality. For example, ``DigitalIn``
   declare ``GetState`` public and ``SetState`` private.
@@ -285,8 +288,8 @@ and output.
 .. code-block:: cpp
 
    std::array<std::reference_wrapper<DigitalIoOptional>> lines = {
-     ...DigitalIn(),
-     ...DigitalOut(),
+       FooDigitalIn(),
+       FooDigitalOut(),
    };
    DigitalIoService service(lines);
    rpc_server.RegisterService(service);
@@ -305,16 +308,7 @@ might do that using a Pigweed console device object.
 -------------
 API reference
 -------------
-.. note::
-   This API reference is incomplete.
-
-.. doxygenclass:: pw::digital_io::DigitalIoOptional
-   :members:
-   :private-members:
-
-.. doxygenclass:: pw::digital_io::DigitalInOutMock
-   :members:
-   :private-members:
+Moved: :cc:`pw_digital_io`
 
 ------------
 Dependencies

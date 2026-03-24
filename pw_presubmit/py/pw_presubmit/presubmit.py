@@ -76,7 +76,6 @@ from pw_cli.file_filter import FileFilter, exclude_paths
 from pw_package import package_manager
 from pw_presubmit import git_repo, tools
 from pw_presubmit.presubmit_context import (
-    FormatContext,
     FormatOptions,
     LuciContext,
     PRESUBMIT_CONTEXT,
@@ -394,9 +393,9 @@ class Presubmit:
     def apply_filters(self, program: Sequence[Callable]) -> list[FilteredCheck]:
         """Returns list of FilteredCheck for checks that should run."""
         checks = [c if isinstance(c, Check) else Check(c) for c in program]
-        filter_to_checks: dict[
-            FileFilter, list[Check]
-        ] = collections.defaultdict(list)
+        filter_to_checks: dict[FileFilter, list[Check]] = (
+            collections.defaultdict(list)
+        )
 
         for chk in checks:
             filter_to_checks[chk.filter].append(chk)
@@ -837,7 +836,7 @@ class Check:
             self.doc = doc
 
         if not self.name:
-            raise ValueError('no name for step')
+            raise ValueError(f'no name for step: {check}')
 
         self._substeps_raw: Iterable[SubStep]
         if isinstance(check, collections.abc.Iterator):
@@ -906,13 +905,7 @@ class Check:
         Returns a new check.
         """
         clone = copy.copy(self)
-        if clone.filter:
-            clone.filter.exclude = clone.filter.exclude + file_filter.exclude
-            clone.filter.endswith = clone.filter.endswith + file_filter.endswith
-            clone.filter.name = file_filter.name or clone.filter.name
-            clone.filter.suffix = clone.filter.suffix + file_filter.suffix
-        else:
-            clone.filter = file_filter
+        clone.filter = self.filter.concat(file_filter)
         return clone
 
     def run(
@@ -1073,7 +1066,7 @@ def filter_paths(
             endswith=_make_str_tuple(endswith), exclude=exclude
         )
 
-    def filter_paths_for_function(function: Callable):
+    def filter_paths_for_function(function: Callable) -> Check:
         return Check(function, real_file_filter, always_run=always_run)
 
     return filter_paths_for_function
@@ -1100,7 +1093,6 @@ def call(
     tee = kwargs.pop('tee', None)
     propagate_sigterm = kwargs.pop('propagate_sigterm', False)
 
-    env = pw_cli.env.pigweed_environment()
     kwargs.setdefault('stdout', subprocess.PIPE)
     kwargs.setdefault('stderr', subprocess.STDOUT)
 
@@ -1118,7 +1110,7 @@ def call(
 
         previous_signal_handler = signal.signal(signal.SIGTERM, signal_handler)
 
-    if env.PW_PRESUBMIT_DISABLE_SUBPROCESS_CAPTURE:
+    if pw_cli.env.pigweed_environment().PW_PRESUBMIT_DISABLE_SUBPROCESS_CAPTURE:
         while True:
             line = process.stdout.readline().decode(errors='backslashreplace')
             if not line:
@@ -1152,7 +1144,7 @@ def call(
 
 
 def install_package(
-    ctx: FormatContext | PresubmitContext,
+    ctx: PresubmitContext,
     name: str,
     force: bool = False,
 ) -> None:

@@ -183,7 +183,6 @@ class EnvSetup:
         cipd_only,
         trust_cipd_hash,
         additional_cipd_file,
-        disable_rosetta,
     ):
         self._env = environment.Environment()
         self._project_root = project_root
@@ -202,7 +201,6 @@ class EnvSetup:
         self._cipd_only = cipd_only
         self._trust_cipd_hash = trust_cipd_hash
         self._additional_cipd_file = additional_cipd_file
-        self._disable_rosetta = disable_rosetta
 
         if os.path.isfile(shell_file):
             os.unlink(shell_file)
@@ -305,18 +303,13 @@ class EnvSetup:
                 )
             )
 
-        rosetta = config.pop('rosetta', 'allow')
-        if rosetta not in ('never', 'allow', 'force'):
-            raise ValueError(rosetta)
-        self._rosetta = rosetta in ('allow', 'force')
-        if self._disable_rosetta:
-            self._rosetta = False
-        self._env.set('_PW_ROSETTA', str(int(self._rosetta)))
-
         if 'json_file' in config:
             self._json_file = config.pop('json_file')
 
-        self._gni_file = config.pop('gni_file', None)
+        self._gni_file = config.pop(
+            'gni_file',
+            os.path.join('build_overrides', 'pigweed_environment.gni'),
+        )
 
         self._optional_submodules.extend(
             _assert_sequence(config.pop('optional_submodules', ()))
@@ -398,6 +391,10 @@ class EnvSetup:
             'pip_install_require_hashes', False
         )
 
+        # Grab the extra environment variables, we'll add them to _env later
+        # so they're at the end.
+        self._extra_env_vars = virtualenv.pop('extra_vars', {})
+
         if virtualenv:
             raise ConfigFileError(
                 'unrecognized option in {}: "virtualenv.{}"'.format(
@@ -478,15 +475,28 @@ class EnvSetup:
         if self._cipd_only:
             return
 
-        gni_file = os.path.join(
-            self._project_root, 'build_overrides', 'pigweed_environment.gni'
+        generated_gni_file = os.path.join(
+            self._install_dir, 'build_overrides', 'pigweed_environment.gni'
         )
-        if self._gni_file:
-            gni_file = os.path.join(self._project_root, self._gni_file)
+        os.makedirs(os.path.dirname(generated_gni_file), exist_ok=True)
+        with open(generated_gni_file, 'w') as outs:
+            self._env.gni(outs, self._project_root, generated_gni_file)
+        shutil.copy(generated_gni_file, os.path.join(self._install_dir, 'logs'))
 
-        with open(gni_file, 'w') as outs:
-            self._env.gni(outs, self._project_root, gni_file)
-        shutil.copy(gni_file, os.path.join(self._install_dir, 'logs'))
+        # The location of the project's gni file
+        project_gni_file = os.path.join(self._project_root, self._gni_file)
+
+        # The pigweed gni file sole responsibility is to import the generated
+        # gni file.
+        pigweed_gni_file = os.path.join(
+            self._pw_root, 'build_overrides', 'pigweed_environment.gni'
+        )
+
+        # Copy the pigweed gni to the project's location
+        try:
+            shutil.copyfile(pigweed_gni_file, project_gni_file)
+        except shutil.SameFileError:
+            pass
 
     def _log(self, *args, **kwargs):
         # Not using logging module because it's awkward to flush a log handler.
@@ -602,6 +612,12 @@ Then use `set +x` to go back to normal.
         if 'GITHUB_ACTIONS' in os.environ:
             self._env.github(self._install_dir)
 
+        # Finally, add the extra environment variables. This is done last to
+        # make sure that references to other environment variables are resolved
+        # first.
+        for var_name, var_value in self._extra_env_vars.items():
+            self._env.set(var_name, var_value)
+
         self._log('')
         self._env.echo('')
 
@@ -667,11 +683,7 @@ Then use `set +x` to go back to normal.
 
         else:
             try:
-                cipd_client = cipd_wrapper.init(
-                    install_dir,
-                    silent=True,
-                    rosetta=self._rosetta,
-                )
+                cipd_client = cipd_wrapper.init(install_dir, silent=True)
             except cipd_wrapper.UnsupportedPlatform as exc:
                 return result_func(('    {!r}'.format(exc),))(
                     _Result.Status.SKIPPED,
@@ -692,7 +704,6 @@ Then use `set +x` to go back to normal.
             package_files=package_files,
             cache_dir=self._cipd_cache_dir,
             env_vars=self._env,
-            rosetta=self._rosetta,
             spin=spin,
             trust_hash=self._trust_cipd_hash,
         ):
@@ -966,15 +977,6 @@ def parse(argv=None):
         help='Skip checking for submodule presence.',
         dest='check_submodules',
         action='store_false',
-    )
-
-    parser.add_argument(
-        '--disable-rosetta',
-        help=(
-            "Disable Rosetta on ARM Macs, regardless of what's in "
-            'pigweed.json.'
-        ),
-        action='store_true',
     )
 
     args = parser.parse_args(argv)

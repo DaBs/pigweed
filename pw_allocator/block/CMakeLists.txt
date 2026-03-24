@@ -146,6 +146,48 @@ pw_add_library(pw_allocator.block.detailed_block INTERFACE
     pw_status
 )
 
+pw_add_library(pw_allocator.block.small_block_base INTERFACE
+  HEADERS
+    public/pw_allocator/block/small_block_base.h
+  PUBLIC_INCLUDES
+    public
+  PUBLIC_DEPS
+    pw_allocator.block.allocatable
+    pw_allocator.block.basic
+    pw_allocator.block.contiguous
+    pw_allocator.block.iterable
+    pw_allocator.bucket.fast_sorted
+    pw_bytes
+)
+
+pw_add_library(pw_allocator.block.small_block INTERFACE
+  HEADERS
+    public/pw_allocator/block/small_block.h
+  PUBLIC_INCLUDES
+    public
+  PUBLIC_DEPS
+    pw_allocator.block.small_block_base
+)
+
+pw_add_library(pw_allocator.block.small_alignable_block INTERFACE
+  HEADERS
+    public/pw_allocator/block/small_alignable_block.h
+  PUBLIC_INCLUDES
+    public
+  PUBLIC_DEPS
+    pw_allocator.block.alignable
+    pw_allocator.block.small_block_base
+)
+
+pw_add_library(pw_allocator.block.tiny_block INTERFACE
+  HEADERS
+    public/pw_allocator/block/tiny_block.h
+  PUBLIC_INCLUDES
+    public
+  PUBLIC_DEPS
+    pw_allocator.block.small_block_base
+)
+
 # Testing
 
 pw_add_library(pw_allocator.block.testing INTERFACE
@@ -190,3 +232,38 @@ pw_add_test(pw_allocator.block.detailed_block_test
     modules
     pw_allocator
 )
+
+
+pw_add_test(pw_allocator.block.small_block_test
+  SOURCES
+    small_block_test.cc
+  PRIVATE_DEPS
+    pw_allocator.block.small_block
+    pw_allocator.block.testing
+  GROUPS
+    modules
+    pw_allocator
+)
+
+pw_add_test(pw_allocator.block.small_alignable_block_test
+  SOURCES
+    small_alignable_block_test.cc
+  PRIVATE_DEPS
+    pw_allocator.block.small_alignable_block
+    pw_allocator.block.testing
+  GROUPS
+    modules
+    pw_allocator
+)
+
+pw_add_test(pw_allocator.block.tiny_block_test
+  SOURCES
+    tiny_block_test.cc
+  PRIVATE_DEPS
+    pw_allocator.block.testing
+    pw_allocator.block.tiny_block
+  GROUPS
+    modules
+    pw_allocator
+)
+

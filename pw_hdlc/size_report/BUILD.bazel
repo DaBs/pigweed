@@ -12,7 +12,7 @@
 # License for the specific language governing permissions and limitations under
 # the License.
 
-load("//pw_build:pw_cc_binary.bzl", "pw_cc_binary")
+load("//pw_bloat:pw_cc_size_binary.bzl", "pw_cc_size_binary")
 
 package(
     default_visibility = ["//visibility:public"],
@@ -32,20 +32,22 @@ deps = [
     "//pw_stream",
 ]
 
-pw_cc_binary(
+pw_cc_size_binary(
     name = "base",
     srcs = ["hdlc_size_report.cc"],
+    features = ["-conversion_warnings"],
     deps = deps,
 )
 
-pw_cc_binary(
+pw_cc_size_binary(
     name = "base_crc",
     srcs = ["hdlc_size_report.cc"],
     copts = ["-DENABLE_CRC=1"],
+    features = ["-conversion_warnings"],
     deps = deps,
 )
 
-pw_cc_binary(
+pw_cc_size_binary(
     name = "full",
     srcs = ["hdlc_size_report.cc"],
     copts = [
@@ -53,15 +55,17 @@ pw_cc_binary(
         "-DENABLE_DECODE=1",
         "-DENABLE_CRC",
     ],
+    features = ["-conversion_warnings"],
     deps = deps,
 )
 
-pw_cc_binary(
+pw_cc_size_binary(
     name = "full_crc",
     srcs = ["hdlc_size_report.cc"],
     copts = [
         "-DENABLE_ENCODE=1",
         "-DENABLE_DECODE=1",
     ],
+    features = ["-conversion_warnings"],
     deps = deps,
 )

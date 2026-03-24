@@ -28,7 +28,7 @@ TEST(TokenizedTrace, Simple) {
   PW_TRACE_INSTANT("Test");
 
   // Check results
-  pw::ring_buffer::PrefixedEntryRingBuffer* buf = pw::trace::GetBuffer();
+  pw::trace::TraceBuffer* buf = pw::trace::GetBuffer();
 
   EXPECT_EQ(buf->EntryCount(), 1u);
   const size_t expected_min_bytes_used =
@@ -49,7 +49,7 @@ TEST(TokenizedTrace, TraceId) {
   PW_TRACE_INSTANT("Test", "group", trace_id);
 
   // Check results
-  pw::ring_buffer::PrefixedEntryRingBuffer* buf = pw::trace::GetBuffer();
+  pw::trace::TraceBuffer* buf = pw::trace::GetBuffer();
 
   EXPECT_EQ(buf->EntryCount(), 1u);
   const size_t expected_min_bytes_used = 1 /*varint size */ + 4 /*token*/ +
@@ -71,7 +71,7 @@ TEST(TokenizedTrace, Data) {
   PW_TRACE_INSTANT_DATA("Test", "test_data", data, sizeof(data));
 
   // Check results
-  pw::ring_buffer::PrefixedEntryRingBuffer* buf = pw::trace::GetBuffer();
+  pw::trace::TraceBuffer* buf = pw::trace::GetBuffer();
 
   EXPECT_EQ(buf->EntryCount(), 1u);
   const size_t expected_min_bytes_used =
@@ -98,7 +98,7 @@ TEST(TokenizedTrace, Data) {
 TEST(TokenizedTrace, Clear) {
   PW_TRACE_SET_ENABLED(true);
   pw::trace::ClearBuffer();
-  pw::ring_buffer::PrefixedEntryRingBuffer* buf = pw::trace::GetBuffer();
+  pw::trace::TraceBuffer* buf = pw::trace::GetBuffer();
 
   PW_TRACE_INSTANT("Test");
   EXPECT_EQ(buf->EntryCount(), 1u);
@@ -109,7 +109,7 @@ TEST(TokenizedTrace, Clear) {
 TEST(TokenizedTrace, Overflow) {
   PW_TRACE_SET_ENABLED(true);
   pw::trace::ClearBuffer();
-  pw::ring_buffer::PrefixedEntryRingBuffer* buf = pw::trace::GetBuffer();
+  pw::trace::TraceBuffer* buf = pw::trace::GetBuffer();
 
   // Add samples until entry count stops increasing.
   uint32_t last_entry_count = 0;
@@ -140,7 +140,7 @@ TEST(TokenizedTrace, Overflow) {
 TEST(TokenizedTrace, BlockTooLarge) {
   PW_TRACE_SET_ENABLED(true);
   pw::trace::ClearBuffer();
-  pw::ring_buffer::PrefixedEntryRingBuffer* buf = pw::trace::GetBuffer();
+  pw::trace::TraceBuffer* buf = pw::trace::GetBuffer();
   uint8_t data[PW_TRACE_BUFFER_MAX_BLOCK_SIZE_BYTES];
   PW_TRACE_INSTANT_DATA("Test", "data", data, sizeof(data));
   EXPECT_EQ(buf->EntryCount(), 0u);

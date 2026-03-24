@@ -27,6 +27,7 @@ namespace {
 
 // Test fixtures.
 
+using ::pw::allocator::Fragmentation;
 using ::pw::allocator::Layout;
 using ::pw::allocator::TrackingAllocator;
 using TestMetrics = ::pw::allocator::internal::AllMetrics;
@@ -57,7 +58,6 @@ class TrackingAllocatorTest : public ::testing::Test {
 
   void TearDown() override {
     pw::allocator::test::FreeAll<BlockType>(allocator_->blocks());
-    allocator_->Reset();
   }
 
   pw::allocator::WithBuffer<AllocatorType, kCapacity, BlockType::kAlignment>
@@ -72,14 +72,14 @@ struct ExpectedValues {
 
 #undef INCLUDE_EXPECTED_METRIC
 
-  void AddRequestedBytes(uint32_t requested_bytes_) {
-    requested_bytes += requested_bytes_;
+  void AddRequestedBytes(size_t requested_bytes_) {
+    requested_bytes += static_cast<uint32_t>(requested_bytes_);
     peak_requested_bytes = std::max(requested_bytes, peak_requested_bytes);
     cumulative_requested_bytes += requested_bytes_;
   }
 
-  void AddAllocatedBytes(uint32_t allocated_bytes_) {
-    allocated_bytes += allocated_bytes_;
+  void AddAllocatedBytes(size_t allocated_bytes_) {
+    allocated_bytes += static_cast<uint32_t>(allocated_bytes_);
     peak_allocated_bytes = std::max(allocated_bytes, peak_allocated_bytes);
     cumulative_allocated_bytes += allocated_bytes_;
   }
@@ -117,11 +117,14 @@ TEST_F(TrackingAllocatorTest, AddTrackingAllocatorAsChild) {
   constexpr static pw::metric::Token kChildToken = 2U;
   TrackingAllocator<::pw::allocator::NoMetrics> child(
       kChildToken, tracker_, pw::allocator::kAddTrackingAllocatorAsChild);
-  pw::IntrusiveList<pw::metric::Group>& children =
-      tracker_.metric_group().children();
+  auto& children = tracker_.metric_group().children();
   ASSERT_FALSE(children.empty());
   EXPECT_EQ(children.size(), 1U);
-  EXPECT_EQ(&(children.front()), &(child.metric_group()));
+  int count = 0;
+  children.ForEach([&](const auto& group) {
+    EXPECT_EQ(&group, &child.metric_group());
+    count += 1;
+  });
 }
 
 TEST_F(TrackingAllocatorTest, AllocateDeallocate) {
@@ -445,6 +448,127 @@ TEST_F(TrackingAllocatorTest, CorrectlyAccountsForShiftedBytes) {
   expected.allocated_bytes -= ptr2_allocated;
   expected.num_deallocations += 1;
   EXPECT_METRICS_EQ(expected, metrics);
+}
+
+// A test allocator that does not provide layout information for its
+// allocations.
+//
+// This class is used to verify that `TrackingAllocator` can still provide
+// useful metrics even when the underlying allocator does not have
+// the `kImplementsGetAllocatedLayout` capability.
+template <size_t kCapacity>
+class AllocatorForTestWithoutInfo
+    : public pw::allocator::test::AllocatorForTest<kCapacity> {
+ public:
+  using Base = pw::allocator::test::AllocatorForTest<kCapacity>;
+  using BlockType = typename Base::BlockType;
+
+ private:
+  pw::Result<Layout> DoGetInfo(pw::Deallocator::InfoType,
+                               const void*) const final {
+    return pw::Status::Unimplemented();
+  }
+
+  void* DoReallocate(void* ptr, Layout new_layout) override {
+    return Base::GetTracker().Reallocate(ptr, new_layout);
+  }
+
+  bool DoResize(void*, size_t) override { return false; }
+};
+
+TEST(TrackingAllocator, ReallocateWithoutLayoutInfo) {
+  constexpr size_t kCapacity = 256;
+  using AllocatorType = AllocatorForTestWithoutInfo<kCapacity>;
+
+  AllocatorType allocator;
+
+  const TestMetrics& metrics = allocator.metrics();
+  ExpectedValues expected;
+
+  // Perform an initial allocation.
+  constexpr Layout layout1 = Layout::Of<uintptr_t[2]>();
+  void* ptr1 = allocator.Allocate(layout1);
+  ASSERT_NE(ptr1, nullptr);
+
+  auto* block1 = AllocatorType::BlockType::FromUsableSpace(ptr1);
+  size_t ptr1_allocated = block1->OuterSize();
+
+  expected.AddRequestedBytes(layout1.size());
+  expected.AddAllocatedBytes(ptr1_allocated);
+  expected.num_allocations += 1;
+  EXPECT_METRICS_EQ(expected, metrics);
+
+  // Allocate another block to block resizing and force a move during
+  // reallocation.
+  constexpr Layout layout_block = Layout::Of<uintptr_t>();
+  void* ptr_block = allocator.Allocate(layout_block);
+  ASSERT_NE(ptr_block, nullptr);
+  auto* block_ptr_block = AllocatorType::BlockType::FromUsableSpace(ptr_block);
+  size_t ptr_block_allocated = block_ptr_block->OuterSize();
+
+  expected.AddRequestedBytes(layout_block.size());
+  expected.AddAllocatedBytes(ptr_block_allocated);
+  expected.num_allocations += 1;
+  EXPECT_METRICS_EQ(expected, metrics);
+
+  // Reallocate the first block. Since it's blocked by the second allocation,
+  // it must be moved.
+  constexpr Layout layout2 = Layout::Of<uintptr_t[4]>();
+  void* ptr2 = allocator.Reallocate(ptr1, layout2);
+  ASSERT_NE(ptr2, nullptr);
+  EXPECT_NE(ptr2, ptr1);  // Should have moved
+
+  auto* block2 = AllocatorType::BlockType::FromUsableSpace(ptr2);
+  ASSERT_NE(block2, nullptr);
+  size_t ptr_block_allocated2 = block2->OuterSize();
+
+  // The metrics should reflect the move: new bytes allocated, old bytes
+  // deallocated.
+  expected.AddRequestedBytes(layout2.size() - layout1.size());
+  expected.AddAllocatedBytes(ptr_block_allocated2);
+  expected.allocated_bytes -= ptr1_allocated;
+
+  expected.num_reallocations += 1;
+  EXPECT_METRICS_EQ(expected, metrics);
+
+  allocator.Deallocate(ptr_block);
+  allocator.Deallocate(ptr2);
+}
+
+TEST_F(TrackingAllocatorTest, MeasureFragmentation) {
+  std::optional<Fragmentation> fragmentation1 =
+      allocator_->MeasureFragmentation();
+  ASSERT_TRUE(fragmentation1.has_value());
+  EXPECT_GT(fragmentation1->sum, 0U);
+
+  // Allocate some memory.
+  constexpr Layout layout = Layout::Of<uintptr_t[2]>();
+  void* ptr1 = tracker_.Allocate(layout);
+  void* ptr2 = tracker_.Allocate(layout);
+  void* ptr3 = tracker_.Allocate(layout);
+  ASSERT_NE(ptr1, nullptr);
+  ASSERT_NE(ptr2, nullptr);
+  ASSERT_NE(ptr3, nullptr);
+
+  // Measure fragmentation with several allocated blocks.
+  std::optional<Fragmentation> fragmentation2 =
+      allocator_->MeasureFragmentation();
+  ASSERT_TRUE(fragmentation2.has_value());
+  EXPECT_LT(fragmentation2->sum, fragmentation1->sum);
+
+  // Deallocate the middle one to create a fragment.
+  tracker_.Deallocate(ptr2);
+
+  std::optional<Fragmentation> fragmentation3 =
+      allocator_->MeasureFragmentation();
+  ASSERT_TRUE(fragmentation3.has_value());
+
+  // Fragmentation should have changed (more free bytes).
+  EXPECT_GT(fragmentation3->sum, fragmentation2->sum);
+  EXPECT_LT(fragmentation3->sum, fragmentation1->sum);
+
+  tracker_.Deallocate(ptr1);
+  tracker_.Deallocate(ptr3);
 }
 
 }  // namespace

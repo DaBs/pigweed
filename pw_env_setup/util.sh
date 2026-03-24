@@ -237,6 +237,32 @@ deactivate() {
   unset PW_BRANDING_BANNER_COLOR
 }
 
+_pw_get_meta() {
+  curl -s "http://metadata.google.internal/computeMetadata/v1/$1" \
+    -H "Metadata-Flavor: Google"
+}
+
+pw_google_checks() {
+  # Checks common Google-specific issues.
+  if [ which glinux-fixme &> /dev/null ]; then
+    return
+  fi
+
+  LI=0
+  if _pw_get_meta "project/project-id" | grep -q "cloudtop-prod-"; then
+    if ! _pw_get_meta "instance/tags" | grep -q "allow-internet-exception"; then
+      LI=1
+    fi
+  fi
+
+  if [[ ${LI} -eq 1 ]] ; then
+    pw_error "Warning: Running on glinux machine without Internet access"
+    pw_error_info "  The current machine ($(hostname)) has limited access to"
+    pw_error_info "  the Internet. Some parts of bootstrap will likely fail."
+    pw_error_info "  See http://go/lri for more."
+  fi
+}
+
 # The next three functions use the following variables.
 # * PW_BANNER_FUNC: function to print banner
 # * PW_BOOTSTRAP_PYTHON: specific Python interpreter to use for bootstrap
@@ -250,20 +276,29 @@ deactivate() {
 pw_bootstrap() {
   _pw_hello "  BOOTSTRAP! Bootstrap may take a few minutes; please be patient.\n"
 
-  local _pw_alias_check=0
-  alias python > /dev/null 2> /dev/null || _pw_alias_check=$?
-  if [ "$_pw_alias_check" -eq 0 ]; then
-    pw_error "Error: 'python' is an alias"
-    pw_error_info "The shell has a 'python' alias set. This causes many obscure"
-    pw_error_info "Python-related issues both in and out of Pigweed. Please"
-    pw_error_info "remove the Python alias from your shell init file or at"
-    pw_error_info "least run the following command before bootstrapping"
-    pw_error_info "Pigweed."
-    pw_error_info
-    pw_error_info "  unalias python"
-    pw_error_info
-    return
-  fi
+  for cmd in python python3; do
+    # If an alias exists, `alias foo` will have an exit code of 0.
+    local _pw_alias_check=0
+    # Use a logical or operator here because in the good case alias will
+    # return a nonzero exit code, and we don't want that to cause the
+    # script to exit.
+    alias $cmd > /dev/null 2> /dev/null || _pw_alias_check=$?
+    if [ "$_pw_alias_check" -eq 0 ]; then
+      pw_error "Error: '$cmd' is an alias"
+      pw_error_info "The shell has a '$cmd' alias set. This causes many obscure"
+      pw_error_info "Python-related issues both in and out of Pigweed. Please"
+      pw_error_info "remove the Python alias from your shell init file or at"
+      pw_error_info "least run the following command before bootstrapping"
+      pw_error_info "Pigweed."
+      pw_error_info
+      pw_error_info "  unalias $cmd"
+      pw_error_info
+      _PW_ENV_SETUP_STATUS="1"
+      return
+    fi
+  done
+
+  pw_google_checks
 
   # Allow forcing a specific version of Python for testing pursposes.
   if [ -n "$PW_BOOTSTRAP_PYTHON" ]; then
@@ -277,6 +312,7 @@ pw_bootstrap() {
     pw_error_info "  Pigweed's bootstrap process requires a local system"
     pw_error_info "  Python. Please install Python on your system, add it to "
     pw_error_info "  your PATH and re-try running bootstrap."
+    _PW_ENV_SETUP_STATUS="1"
     return
   fi
 
@@ -286,6 +322,7 @@ pw_bootstrap() {
     pw_error_info "  The system Python is not Python 3. Please install Python 3"
     pw_error_info "  and rerun bootstrap. Note that you may need to open a new"
     pw_error_info "  terminal to see the newly installed Python."
+    _PW_ENV_SETUP_STATUS="1"
     return
   fi
 
@@ -409,4 +446,5 @@ pw_cleanup() {
   unset -f _pw_hello
   unset -f pw_error
   unset -f pw_error_info
+  unset -f _pw_get_meta
 }

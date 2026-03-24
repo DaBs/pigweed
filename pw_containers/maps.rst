@@ -14,7 +14,7 @@ find, and remove key-value pairs in logarithmic time.
 -----------------------
 pw::containers::FlatMap
 -----------------------
-``FlatMap`` provides a simple, fixed-size associative array with ``O(log n)``
+:cc:`FlatMap` provides a simple, fixed-size associative array with ``O(log n)``
 lookup by key.
 
 ``pw::containers::FlatMap`` contains the same methods and features for looking
@@ -44,9 +44,12 @@ examples defines a ``FlatMap`` with two items.
 ----------------
 pw::IntrusiveMap
 ----------------
-``pw::IntrusiveMap`` provides an embedded-friendly, tree-based, intrusive
+:cc:`pw::IntrusiveMap` provides an embedded-friendly, tree-based, intrusive
 map implementation. The intrusive aspect of the map is very similar to that of
 :ref:`module-pw_containers-intrusive_list`.
+
+This class is similar to ``std::map<K, V>``. Items to be added must derive from
+``pw::IntrusiveMap<K, V>::Item`` or an equivalent type.
 
 See also :ref:`module-pw_containers-multiple_containers`.
 
@@ -61,21 +64,16 @@ Example
 If you need to add this item to containers of more than one type, see
 :ref:`module-pw_containers-multiple_containers`,
 
-API reference
-=============
-This class is similar to ``std::map<K, V>``. Items to be added must derive from
-``pw::IntrusiveMap<K, V>::Item`` or an equivalent type.
-
-.. doxygenclass:: pw::IntrusiveMap
-   :members:
-
 ---------------------
 pw::IntrusiveMultiMap
 ---------------------
-``pw::IntrusiveMultiMap`` provides an embedded-friendly, tree-based, intrusive
+:cc:`pw::IntrusiveMultiMap` provides an embedded-friendly, tree-based, intrusive
 multimap implementation. This is very similar to
 :ref:`module-pw_containers-intrusive_map`, except that the tree may contain
 multiple items with equivalent keys.
+
+This class is similar to ``std::multimap<K, V>``. Items to be added must derive
+from ``pw::IntrusiveMultiMap<K, V>::Item`` or an equivalent type.
 
 See also :ref:`module-pw_containers-multiple_containers`.
 
@@ -88,17 +86,72 @@ Example
    :end-before: [pw_containers-intrusive_multimap]
 
 If you need to add this item to containers of more than one type, see
-:ref:`module-pw_containers-multiple_containers`,
+:ref:`module-pw_containers-multiple_containers`.
 
+------------------
+pw::DynamicHashMap
+------------------
+:cc:`pw::DynamicHashMap` is an unordered associative container, similar to
+``std::unordered_map``, but optimized for memory-constrained environments.
+
+Key features of :cc:`pw::DynamicHashMap`:
+
+* **Allocator-driven**: Uses a :cc:`pw::Allocator` for all memory operations.
+* **Hybrid Storage**:
+    * **Nodes**: Stored in a dense ``pw::DynamicPtrVector`` to enable efficient,
+      linear iteration.
+    * **Buckets**: Stored in a ``pw::DynamicDeque`` for ``O(1)`` average lookup.
+* **Fallible API**: Adds ``try_*`` versions of operations (e.g., ``try_insert``,
+  ``try_emplace``, ``try_rehash``) that return ``std::nullopt`` or ``false`` on
+  allocation failure instead of crashing.
+* **Unstable Iteration**: Uses "swap-and-pop" erasure for efficiency.
+  Erasing an element moves the last element of the map into the erased
+  position, changing the iteration order.
+* **Flexible Load Factor**: Supports a load factor up to 500%. While 75% is
+  standard for speed, higher limits allow shrinking the bucket array's
+  footprint when RAM is more scarce than CPU cycles.
+
+Example
+=======
+.. literalinclude:: examples/dynamic_hash_map.cc
+   :language: cpp
+   :linenos:
+   :start-after: [pw_containers-dynamic_hash_map]
+   :end-before: [pw_containers-dynamic_hash_map]
+
+.. _module-pw_containers-dynamic_map:
+
+----------------
+pw::DynamicMap
+----------------
+:cc:`pw::DynamicMap` provides an embedded-friendly, tree-based, dynamic map
+implementation. It uses a :cc:`pw::Allocator` for all memory operations.
+
+This class is similar to ``std::map<K, V>``.
+
+Key features of :cc:`pw::DynamicMap`:
+
+*  Uses a :cc:`pw::Allocator` for memory operations for each node.
+*  Provides a ``std::map``-like API, but adds ``try_*`` versions of
+   operations that return ``std::nullopt`` on allocation failure.
+   (e.g., :cc:`insert` vs :cc:`try_insert`, :cc:`emplace` vs :cc:`try_emplace`).
+*  Never allocates in the constructor. ``constexpr`` constructible.
+*  Leverages :cc:`pw::IntrusiveMap` internally.
+
+Example
+=======
+.. literalinclude:: examples/dynamic_map.cc
+   :language: cpp
+   :linenos:
+   :start-after: [pw_containers-dynamic_map]
+   :end-before: [pw_containers-dynamic_map]
+
+-------------
 API reference
-=============
-This class is similar to ``std::multimap<K, V>``. Items to be added must derive
-from ``pw::IntrusiveMultiMap<K, V>::Item`` or an equivalent type.
+-------------
+Moved: :cc:`pw_containers_maps`
 
-.. doxygenclass:: pw::IntrusiveMultiMap
-   :members:
-
-
+------------
 Size reports
 ------------
 The tables below illustrate the following scenarios:
@@ -140,6 +193,4 @@ The tables below illustrate the following scenarios:
   and an ``IntrusiveMultiMap`` of the same type. These types reuse code, so the
   combined sum is less than the sum of its parts.
 
-.. TODO: b/388905812 - Re-enable the size report.
-.. .. include:: maps_size_report
-.. include:: ../size_report_notice
+.. include:: maps_size_report

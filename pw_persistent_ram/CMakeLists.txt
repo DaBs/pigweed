@@ -45,6 +45,7 @@ pw_add_test(pw_persistent_ram.persistent_test
   SOURCES
     persistent_test.cc
   PRIVATE_DEPS
+    pw_containers.storage
     pw_persistent_ram
     pw_random
   GROUPS

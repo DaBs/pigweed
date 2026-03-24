@@ -17,15 +17,18 @@
 #include <optional>
 
 #include "pw_async2/dispatcher.h"
+#include "pw_async2/epoll_dispatcher.h"
 #include "pw_async2/poll.h"
 #include "pw_channel/channel.h"
 #include "pw_multibuf/allocator.h"
-#include "pw_multibuf/allocator_async.h"
 #include "pw_multibuf/multibuf.h"
+#include "pw_multibuf/v1/allocator_async.h"
 
 namespace pw::channel {
 
-/// @defgroup pw_channel_epoll
+/// @module{pw_channel}
+
+/// @defgroup pw_channel_epoll epoll
 /// @{
 
 /// Channel implementation which writes to and reads from a file descriptor,
@@ -40,7 +43,7 @@ namespace pw::channel {
 class EpollChannel : public Implement<ByteReaderWriter> {
  public:
   EpollChannel(int channel_fd,
-               async2::Dispatcher& dispatcher,
+               async2::EpollDispatcher& dispatcher,
                multibuf::MultiBufAllocator& allocator)
       : channel_fd_(channel_fd),
         ready_to_write_(false),
@@ -63,12 +66,12 @@ class EpollChannel : public Implement<ByteReaderWriter> {
 
   void Register();
 
-  async2::Poll<Result<multibuf::MultiBuf>> DoPendRead(
+  async2::PollResult<multibuf::MultiBuf> DoPendRead(
       async2::Context& cx) override;
 
   async2::Poll<Status> DoPendReadyToWrite(async2::Context& cx) final;
 
-  async2::Poll<std::optional<multibuf::MultiBuf>> DoPendAllocateWriteBuffer(
+  async2::PollOptional<multibuf::MultiBuf> DoPendAllocateWriteBuffer(
       async2::Context& cx, size_t min_bytes) final {
     write_alloc_future_.SetDesiredSize(min_bytes);
     return write_alloc_future_.Pend(cx);
@@ -95,8 +98,8 @@ class EpollChannel : public Implement<ByteReaderWriter> {
   int channel_fd_;
   bool ready_to_write_;
 
-  async2::Dispatcher* dispatcher_;
-  multibuf::MultiBufAllocationFuture write_alloc_future_;
+  async2::EpollDispatcher* dispatcher_;
+  multibuf::v1::MultiBufAllocationFuture write_alloc_future_;
   async2::Waker waker_;
 };
 

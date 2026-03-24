@@ -67,11 +67,11 @@ How pw_channel addresses write-side backpressure
 When writing into a ``Channel`` instance, the ``Channel`` may provide
 backpressure in several locations:
 
-- :cpp:func:`PendReadyToWrite <pw::channel::AnyChannel::PendReadyToWrite>` --
+- :cc:`PendReadyToWrite <pw::channel::AnyChannel::PendReadyToWrite>` --
   Before writing to a channel, users must check that it is ready to receive
   writes. If the channel is not ready, the channel will wake up the async task
   when it becomes ready to accept outbound data.
-- :cpp:func:`GetWriteAllocator <pw::channel::AnyChannel::GetWriteAllocator>` --
+- ``GetWriteAllocator`` --
   Once the channel becomes ready to receive writes, the writer must ensure that
   there is space in an outgoing write buffer for the message they wish to send.
   If there is not yet enough space, the channel will wake up the async task
@@ -83,8 +83,9 @@ data into the outgoing buffer and send it into the channel.
 How pw_channel addresses read-side backpressure
 -----------------------------------------------
 When reading from a ``Channel`` instance, the consumer of the ``Channel`` data
-exerts backpressure by *not* invoking :cpp:func:`PendRead <pw::channel::AnyChannel::PendRead>`.
-The buffers returned by ``PendRead`` are allocated by the ``Channel`` itself.
+exerts backpressure by *not* invoking :cc:`PendRead
+<pw::channel::AnyChannel::PendRead>`. The buffers returned by ``PendRead`` are
+allocated by the ``Channel`` itself.
 
 Zero-copy
 =========
@@ -115,12 +116,12 @@ of the incoming data.
 This process requires both runtime overhead due to copying and memory overhead
 due to the need for multiple buffers to hold every message.
 
-``Channel`` avoids this problem by using
-:cpp:class:`MultiBuf <pw::multibuf::MultiBuf>`. The lower layers of the stack
-are responsible for allocating peripheral-compatible buffers that are then
-passed up the stack for the application code to read from or write into.
-``MultiBuf`` allows for fragementation, coalescing, insertion of headers,
-footers etc. without the need for a copy.
+``Channel`` avoids this problem by using :cc:`MultiBuf
+<pw::multibuf::v1::MultiBuf>`. The lower layers of the stack are responsible for
+allocating peripheral-compatible buffers that are then passed up the stack for
+the application code to read from or write into. ``MultiBuf`` allows for
+fragementation, coalescing, insertion of headers, footers etc. without the need
+for a copy.
 
 Composable
 ==========
@@ -161,9 +162,10 @@ read. If a zero-length byte read occurs, it is ignored.
 
 To facilitate simple code reuse, datagram-oriented channels may used as
 byte-oriented channels when appropriate. Calling
-:cpp:func:`Channel::IgnoreDatagramBoundaries` on a datagram channel returns a
-byte channel reference to it. The byte view of the channel is simply the
-concatenation of the contents of the datagrams.
+:cc:`IgnoreDatagramBoundaries
+<pw::channel::Channel::IgnoreDatagramBoundaries>` on
+a datagram channel returns a byte channel reference to it. The byte view of the
+channel is simply the concatenation of the contents of the datagrams.
 
 This is only valid if, for the datagram channel:
 
@@ -172,3 +174,92 @@ This is only valid if, for the datagram channel:
   meaningless for byte channels,
 - short or zero-length writes through the byte API will not result in
   unacceptable overhead.
+
+.. _module-pw_channel-design-hourglass_inheritance_pattern:
+
+-----------------------------
+Hourglass inheritance pattern
+-----------------------------
+:cc:`pw::channel::Channel` uses an uncommon, hourglass-like inheritance
+pattern. This pattern offers the advantages of multiple inheritance without the
+downsides (overhead, potential for the diamond problem).
+
+Empty base classes define the public interface with strongly typed capability
+guarantees. A shared core class privately inherits from all of the empty bases.
+This core class is virtual and stores common state variables. A series of
+implementation classes inherit from the core class. These correspond with the
+empty bases at the top of the hierarchy, expressing their capabilities in the
+type system once again.
+
+This pattern is hourglass-like because the hierarchy starts with several types
+at the top, narrows to a single type in the middle, then expands out to the
+implementation classes at the bottom.
+
+Advantages of this pattern:
+
+- Express capabilities in the type system, with support for optional
+  capabilities.
+- No multiple virtual inheritance. All supported functionality is in a single
+  vtable.
+- Trivial and safe conversions between related types. Any type can be used
+  through a reference to a compatible type without indirection or memory
+  aliasing.
+
+The drawback of this pattern is implementation complexity. While the core
+implementation is complicated, the resulting classes are straightforward to use
+or extend.
+
+.. mermaid::
+
+   classDiagram
+       class TypeA {
+           +CommonFunctions()
+           +FunctionForA()
+       }
+
+       class TypeB {
+           +CommonFunctions()
+           +FunctionForB()
+       }
+
+       class TypeAB {
+           +CommonFunctions()
+           +FunctionForA()
+           +FunctionForB()
+       }
+
+       class Core {
+           -common_state
+           -capabilities
+           +CommonFunctions()
+           +MaybeFunctionForA()
+           +MaybeFunctionForB()
+
+           virtual -DoFunctionForA()
+           virtual -DoFunctionForB()
+       }
+
+       class ImplementTypeA {
+           +CommonFunctions()
+           +FunctionForA()
+       }
+
+       class ImplementTypeB {
+           +CommonFunctions()
+           +FunctionForB()
+       }
+
+       class ImplementTypeAB {
+           +CommonFunctions()
+           +FunctionForA()
+           +FunctionForB()
+       }
+
+       TypeA <|-- Core
+       TypeB <|-- Core
+       TypeAB <|-- Core
+
+
+       Core <|-- ImplementTypeA
+       Core <|-- ImplementTypeB
+       Core <|-- ImplementTypeAB

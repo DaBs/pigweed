@@ -14,60 +14,139 @@
 #pragma once
 
 #include "pw_assert/assert.h"
-#include "pw_thread/thread.h"
-#include "pw_thread_zephyr/config.h"
+#include "pw_thread/attrs.h"
+#include "pw_thread/options.h"
 #include "pw_thread_zephyr/context.h"
+#include "pw_thread_zephyr/priority.h"
 
 namespace pw::thread::zephyr {
 
 class Context;
 
-// pw::thread::Options for Zephyr RTOS.
-//
-// Example usage:
-//
-//   pw::Thread example_thread(
-//     pw::thread::zephyr::Options(static_example_thread_context)
-//         .set_priority(kFooPriority),
-//     example_thread_function, example_arg);
-//
-// TODO(aeremin): Add support for time slice configuration
-//     (k_thread_time_slice_set when CONFIG_TIMESLICE_PER_THREAD=y).
-// TODO(aeremin): Add support for thread name
-//     (k_thread_name_set when CONFIG_THREAD_MONITOR is enabled).
+/// pw::thread::Options for Zephyr RTOS.
+///
+/// Example usage:
+///
+///   pw::thread::backend::NativeContextWithStack<kStackSize>
+///       static_example_thread_context;
+///
+///   pw::Thread example_thread(
+///     pw::thread::zephyr::Options(static_example_thread_context)
+///         .set_priority(kFooPriority)
+///         .set_name("example_thread")
+///         .set_stack(static_example_thread_context.stack()),
+///     example_thread_function, example_arg);
+///
+/// TODO(aeremin): Add support for time slice configuration
+///     (k_thread_time_slice_set when CONFIG_TIMESLICE_PER_THREAD=y).
 class Options : public thread::Options {
  public:
-  constexpr Options(StaticContext& context) : context_(&context) {}
+  constexpr Options(Context& context) : context_(&context) {}
   constexpr Options(const Options&) = default;
   constexpr Options(Options&&) = default;
 
-  // Sets the priority for the Zephyr RTOS thread.
-  // Lower priority values have a higher scheduling priority.
+  /// Sets the priority for the Zephyr RTOS thread.
+  ///
+  /// Lower priority values have a higher scheduling priority.
+  ///
+  /// @arg priority The desired thread priority
+  /// @return Reference to this object
   constexpr Options& set_priority(int priority) {
-    PW_DASSERT(priority <= config::kLowestSchedulerPriority);
-    PW_DASSERT(priority >= config::kHighestSchedulerPriority);
+    PW_DASSERT(priority <= kLowestPriority);
+    PW_DASSERT(priority >= kHighestPriority);
     priority_ = priority;
     return *this;
   }
 
-  // Sets the Zephyr RTOS native options
-  // (https://docs.zephyrproject.org/latest/kernel/services/threads/index.html#thread-options)
+  /// Sets the name for the Thread.
+  ///
+  /// This value will be deep copied into the context and may be truncated based
+  /// on PW_THREAD_ZEPHYR_CONFIG_MAX_THREAD_NAME_LEN. This may be set natively
+  /// in the zephyr thread if CONFIG_THREAD_NAME is set, where it may
+  /// again be truncated based on the value of CONFIG_THREAD_MAX_NAME_LEN.
+  ///
+  /// @arg name The name of the thread (null terminated)
+  /// @return Reference to this object
+  constexpr Options& set_name(const char* name) {
+    name_ = name;
+    return *this;
+  }
+
+  /// Sets the Zephyr RTOS native options
+  ///
+  /// (https://docs.zephyrproject.org/latest/kernel/services/threads/index.html#thread-options)
+  ///
+  /// @arg native_options Native option flags
+  /// @return Reference to this object
   constexpr Options& set_native_options(uint32_t native_options) {
     native_options_ = native_options;
     return *this;
   }
 
- private:
-  friend Thread;
-  friend Context;
+  /// Sets the stack to use for the thread
+  ///
+  /// @arg stack The stack span to use
+  /// @return Reference to this object
+  constexpr Options& set_stack(span<z_thread_stack_element> stack) {
+    stack_ = stack;
+    return *this;
+  }
 
+  /// @return The current name of the thread
+  const char* name() const { return name_; }
+
+  /// @return The priority of the thread
   int priority() const { return priority_; }
-  uint32_t native_options() const { return native_options_; }
-  StaticContext* static_context() const { return context_; }
 
-  int priority_ = config::kDefaultPriority;
+  /// @return The native options of the thread
+  uint32_t native_options() const { return native_options_; }
+
+  /// @return The stack span to be used by the thread
+  span<z_thread_stack_element> stack() const { return stack_; }
+
+  /// Use the current configuration to create a thread.
+  ///
+  /// This function can only be called once
+  ///
+  /// @arg thread_fn The entry point to the thread
+  /// @return Pointer to the internal context
+  Context* CreateThread(Function<void()>&& thread_fn);
+
+ private:
+  // Note that the default name may end up truncated due to
+  // PW_THREAD_ZEPHYR_CONFIG_MAX_THREAD_NAME_LEN.
+  static constexpr char kDefaultName[] = "pw::Thread";
+
+  int priority_ = kDefaultPriority;
   uint32_t native_options_ = 0;
-  StaticContext* context_ = nullptr;
+  Context* context_ = nullptr;
+  const char* name_ = kDefaultName;
+  span<z_thread_stack_element> stack_ = span<z_thread_stack_element>();
 };
+
+/// Convert a context and attributes to Options
+///
+/// Note that if both the context and attributes provide a stack, the
+/// attributes' stack will be used.
+///
+/// @arg context The context on which the thread will be created
+/// @arg attributes The desired attributes of the thread
+/// @return Options representing the desired thread
+constexpr Options GetOptions(Context& context, const ThreadAttrs& attributes) {
+  Options options =
+      Options(context).set_priority(attributes.priority().native());
+
+  if (attributes.has_external_stack()) {
+    options.set_stack(span(attributes.native_stack_pointer(),
+                           attributes.native_stack_size()));
+  } else {
+    options.set_stack(context.stack());
+  }
+
+  if (attributes.name()[0] != '\0') {
+    options.set_name(attributes.name());
+  }
+  return options;
+}
 
 }  // namespace pw::thread::zephyr

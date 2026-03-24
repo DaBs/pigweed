@@ -53,6 +53,28 @@ Using the detokenizing tools with the database, the logs can be decoded:
    encoded. For projects that wish to interleave tokenized with plain text,
    using Base64 is a worthwhile tradeoff.
 
+.. _module-pw_tokenizer-base64-decoding:
+
+---------------------
+Nested detokenization
+---------------------
+The Python, C++, TypeScript, and Java detokenization tools support detokenizing
+:ref:`nested messages <module-pw_tokenizer-nested-arguments>`.
+
+.. tip::
+   The detokenization tools support recursive detokenization for Base64, base
+   10, or base 16 messages. Tokenized strings found in detokenized text are
+   detokenized recursively, so nested messages can be passed as arguments.
+
+   For example, the tokenized string for "Wow!" is ``$RhYjmQ==``. This could be
+   passed as an argument to the printf-style string ``Nested message: %s``,
+   which encodes to ``$pEVTYQkkUmhZam1RPT0=``. The detokenizer would decode the
+   message as follows:
+
+   ::
+
+     "$pEVTYQkkUmhZam1RPT0=" → "Nested message: $RhYjmQ==" → "Nested message: Wow!"
+
 ------------------------
 Detokenization in Python
 ------------------------
@@ -82,33 +104,8 @@ Base64, or plaintext UTF-8, use
 determine the correct method to detokenize and always provide a printable
 string.
 
-.. _module-pw_tokenizer-base64-decoding:
-
-Decoding Base64
-===============
-The Python ``Detokenizer`` class supports decoding and detokenizing prefixed
-Base64 messages with ``detokenize_base64`` and related methods.
-
-.. tip::
-   The Python detokenization tools support recursive detokenization for prefixed
-   Base64 text. Tokenized strings found in detokenized text are detokenized, so
-   prefixed Base64 messages can be passed as ``%s`` arguments.
-
-   For example, the tokenized string for "Wow!" is ``$RhYjmQ==``. This could be
-   passed as an argument to the printf-style string ``Nested message: %s``, which
-   encodes to ``$pEVTYQkkUmhZam1RPT0=``. The detokenizer would decode the message
-   as follows:
-
-   ::
-
-     "$pEVTYQkkUmhZam1RPT0=" → "Nested message: $RhYjmQ==" → "Nested message: Wow!"
-
-Base64 decoding is supported in C++ or C with the
-``pw::tokenizer::PrefixedBase64Decode`` or ``pw_tokenizer_PrefixedBase64Decode``
-functions.
-
 Investigating undecoded Base64 messages
----------------------------------------
+=======================================
 Tokenized messages cannot be decoded if the token is not recognized. The Python
 package includes the ``parse_message`` tool, which parses tokenized Base64
 messages without looking up the token in a database. This tool attempts to guess
@@ -124,7 +121,7 @@ The tool is executed by passing Base64 tokenized messages, with or without the
 see full usage information.
 
 Example
-^^^^^^^
+-------
 .. code-block::
 
    $ python -m pw_tokenizer.parse_message '$329JMwA=' koSl524TRkFJTEVEX1BSRUNPTkRJVElPTgJPSw== --specs %s %d
@@ -253,13 +250,16 @@ interpreted as plain text.
 Detokenization in C++
 ---------------------
 The C++ detokenization libraries can be used in C++ or any language that can
-call into C++ with a C-linkage wrapper, such as Java or Rust. A reference
-Java Native Interface (JNI) implementation is provided.
+call into C++ with a C-linkage wrapper, such as Java or Rust. A reference Java
+Native Interface (JNI) implementation is provided.
 
-The C++ detokenization library uses binary-format token databases (created with
-``database.py create --type binary``). Read a binary format database from a
-file or include it in the source code. Pass the database array to
-``TokenDatabase::Create``, and construct a detokenizer.
+The C++ detokenization library uses a CSV, binary-format (created with
+``database.py create --type binary``), or ELF section format token database.
+
+Binary database
+===============
+Read the database from a file or include it in the source code. Pass the
+database array to ``TokenDatabase::Create``, and construct a detokenizer.
 
 .. code-block:: cpp
 
@@ -277,7 +277,7 @@ this check can be done at compile time.
 .. code-block:: cpp
 
    // This line fails to compile with a static_assert if the database is invalid.
-   constexpr TokenDatabase kDefaultDatabase =  TokenDatabase::Create<kData>();
+   constexpr TokenDatabase kDefaultDatabase = TokenDatabase::Create<kData>();
 
    Detokenizer OpenDatabase(std::string_view path) {
      std::vector<uint8_t> data = ReadWholeFile(path);
@@ -292,6 +292,30 @@ this check can be done at compile time.
      }
      return Detokenizer(kDefaultDatabase);
    }
+
+Detokenization from CSV
+=======================
+Create a detokenizer from CSV token database text using
+:cc:`pw::tokenizer::Detokenizer::FromCsv`.
+
+Detokenization from an ELF file
+===============================
+Utilize an ELF file (with the appropriate ``.pw_tokenizer.entries`` section
+included) as a token database using
+:cc:`pw::tokenizer::Detokenizer::FromElfFile`.
+
+Detokenization from this program
+================================
+An ELF executable program can use itself as a token database, for detokenizing
+its own tokens. This is primarily intended for testing.
+
+* Link with ``add_detokenize_from_this_program_sections.ld``.
+
+  * For Bazel builds this is handled automatically.
+  * For GN builds use the
+    ``"$dir_pw_tokenizer:detokenize_from_this_program_linker_script"`` config.
+
+* Use :cc:`pw::tokenizer::GetDetokenizerFromThisProgram`.
 
 ----------------------------
 Detokenization in TypeScript
@@ -494,8 +518,8 @@ This implementation supports:
 
      - If the precision is specified as ``0``, it is interpreted to mean ``1``.
 
-     - ``e`` formatting is used if the the exponent would be less than ``-4`` or
-       is greater than or equal to the precision.
+     - ``e`` formatting is used if the exponent would be less than ``-4`` or is
+       greater than or equal to the precision.
 
      - Trailing zeros are removed unless the ``#`` flag is set.
 
@@ -511,8 +535,8 @@ This implementation supports:
 
      - If the precision is specified as ``0``, it is interpreted to mean ``1``.
 
-     - ``E`` formatting is used if the the exponent would be less than ``-4`` or
-       is greater than or equal to the precision.
+     - ``E`` formatting is used if the exponent would be less than ``-4`` or is
+       greater than or equal to the precision.
 
      - Trailing zeros are removed unless the ``#`` flag is set.
 

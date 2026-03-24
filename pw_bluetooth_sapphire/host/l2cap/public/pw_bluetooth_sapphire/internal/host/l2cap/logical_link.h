@@ -25,6 +25,7 @@
 #include "pw_bluetooth_sapphire/internal/host/common/macros.h"
 #include "pw_bluetooth_sapphire/internal/host/hci-spec/protocol.h"
 #include "pw_bluetooth_sapphire/internal/host/l2cap/a2dp_offload_manager.h"
+#include "pw_bluetooth_sapphire/internal/host/l2cap/autosniff.h"
 #include "pw_bluetooth_sapphire/internal/host/l2cap/bredr_command_handler.h"
 #include "pw_bluetooth_sapphire/internal/host/l2cap/channel.h"
 #include "pw_bluetooth_sapphire/internal/host/l2cap/channel_manager.h"
@@ -34,6 +35,7 @@
 #include "pw_bluetooth_sapphire/internal/host/l2cap/low_energy_command_handler.h"
 #include "pw_bluetooth_sapphire/internal/host/l2cap/recombiner.h"
 #include "pw_bluetooth_sapphire/internal/host/transport/acl_data_packet.h"
+#include "pw_bluetooth_sapphire/internal/host/transport/command_channel.h"
 #include "pw_bluetooth_sapphire/internal/host/transport/link_type.h"
 
 namespace bt::l2cap::internal {
@@ -76,7 +78,8 @@ class LogicalLink : public hci::AclDataChannel::ConnectionInterface {
               hci::CommandChannel* cmd_channel,
               bool random_channel_ids,
               A2dpOffloadManager& a2dp_offload_manager,
-              pw::async::Dispatcher& dispatcher);
+              pw::async::Dispatcher& dispatcher,
+              pw::bluetooth_sapphire::LeaseProvider& wake_lease_provider);
 
   // When a logical link is destroyed it notifies all of its channels to close
   // themselves. Data packets will no longer be routed to the associated
@@ -185,6 +188,27 @@ class LogicalLink : public hci::AclDataChannel::ConnectionInterface {
   std::unique_ptr<hci::ACLDataPacket> GetNextOutboundPacket() override;
   bool HasAvailablePacket() const override;
 
+  // Called by ChannelImpl::OnRxPacket() to return credits after the associated
+  // packet has been handled.
+  void SignalCreditsAvailable(ChannelId channel, uint16_t credits);
+
+  // Returns true if autosniff is enabled
+  bool AutosniffEnabled() const;
+
+  // Returns true if autosniff is disabled or suppressed.
+  bool AutosniffIsSuppressed() const;
+
+  // Returns the current connection mode as per autosniff. This will always
+  // return ACTIVE if autosniff is not enabled.
+  pw::bluetooth::emboss::AclConnectionMode AutosniffMode() const;
+
+  std::unique_ptr<AutosniffSuppressInterest> SuppressAutosniff(
+      const char* reason);
+
+  // Duration to wait without events before switching into sniff mode.
+  static constexpr pw::chrono::SystemClock::duration kAutosniffTimeout =
+      std::chrono::seconds(1);
+
  private:
   friend class ChannelImpl;
 
@@ -249,6 +273,9 @@ class LogicalLink : public hci::AclDataChannel::ConnectionInterface {
       uint16_t timeout_multiplier,
       LowEnergyCommandHandler::ConnectionParameterUpdateResponder* responder);
 
+  void ServeFlowControlCreditInd();
+  void OnRxFlowControlCreditInd(ChannelId remote_cid, uint16_t credits);
+
   // Processes the next ACL priority request in the  |pending_acl_requests_|
   // queue. In order to optimize radio performance, ACL priority is downgraded
   // whenever possible (i.e. when no more channels are requesting high
@@ -262,6 +289,8 @@ class LogicalLink : public hci::AclDataChannel::ConnectionInterface {
   // Round robins through channels in logical link to get next packet to send
   // Returns nullptr if there are no connections with pending packets
   void RoundRobinChannels();
+
+  pw::bluetooth_sapphire::LeaseProvider& wake_lease_provider_;
 
   pw::async::Dispatcher& pw_dispatcher_;
 
@@ -341,9 +370,13 @@ class LogicalLink : public hci::AclDataChannel::ConnectionInterface {
   // opened channels.
   QueryServiceCallback query_service_cb_;
 
+  // Automatically toggles the connection between sniff mode and active.
+  std::optional<Autosniff> autosniff_;
+
   struct InspectProperties {
     inspect::Node node;
     inspect::Node channels_node;
+    inspect::Node sniff_node;
     inspect::StringProperty handle;
     inspect::StringProperty link_type;
   };

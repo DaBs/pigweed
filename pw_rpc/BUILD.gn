@@ -21,12 +21,11 @@ import("$dir_pw_build/python_action_test.gni")
 import("$dir_pw_build/target_types.gni")
 import("$dir_pw_chrono/backend.gni")
 import("$dir_pw_compilation_testing/negative_compilation_test.gni")
-import("$dir_pw_docgen/docs.gni")
 import("$dir_pw_protobuf_compiler/proto.gni")
 import("$dir_pw_sync/backend.gni")
-import("$dir_pw_third_party/nanopb/nanopb.gni")
 import("$dir_pw_thread/backend.gni")
 import("$dir_pw_unit_test/test.gni")
+import("$pw_external_nanopb/nanopb.gni")
 import("config.gni")
 import("internal/integration_test_ports.gni")
 
@@ -78,6 +77,14 @@ pw_source_set("config") {
   friend = [ "./*" ]
 }
 
+pw_source_set("call_allocator") {
+  sources = [ "public/pw_rpc/internal/call_allocator.h" ]
+  public_configs = [ ":public_include_path" ]
+  public_deps = [ ":config" ]
+  visibility = [ "./*" ]
+  friend = [ "./*" ]
+}
+
 pw_source_set("log_config") {
   sources = [ "public/pw_rpc/internal/log_config.h" ]
   public_configs = [ ":public_include_path" ]
@@ -88,7 +95,10 @@ pw_source_set("log_config") {
 
 pw_source_set("server") {
   public_configs = [ ":public_include_path" ]
-  public_deps = [ ":common" ]
+  public_deps = [
+    ":call_allocator",
+    ":common",
+  ]
   deps = [
     ":log_config",
     dir_pw_log,
@@ -168,6 +178,7 @@ pw_source_set("common") {
     ":protos.pwpb",
     "$dir_pw_containers:intrusive_list",
     "$dir_pw_sync:lock_annotations",
+    "$dir_pw_sync:no_lock",
     "$dir_pw_toolchain:no_destructor",
     dir_pw_assert,
     dir_pw_bytes,
@@ -229,6 +240,17 @@ pw_source_set("benchmark") {
   public_deps = [ ":protos.raw_rpc" ]
   public = [ "public/pw_rpc/benchmark.h" ]
   sources = [ "benchmark.cc" ]
+}
+
+pw_test("benchmark_service_test") {
+  deps = [
+    ":benchmark",
+    ":test_protos.raw_rpc",
+    ":test_utils",
+    "raw:client_testing",
+    "raw:test_method_context",
+  ]
+  sources = [ "benchmark_service_test.cc" ]
 }
 
 pw_source_set("fake_channel_output") {
@@ -406,56 +428,12 @@ pw_proto_library("protos") {
   prefix = "pw_rpc"
 }
 
-pw_doc_group("docs") {
-  sources = [
-    "cpp.rst",
-    "design.rst",
-    "docs.rst",
-    "guides.rst",
-    "libraries.rst",
-    "protocol.rst",
-  ]
-  inputs = [
-    "Kconfig",
-    "benchmark.proto",
-    "echo.proto",
-    "internal/packet.proto",
-  ]
-  group_deps = [
-    "nanopb:docs",
-    "pwpb:docs",
-    "py:docs",
-    "ts:docs",
-  ]
-  report_deps = [ ":server_size" ]
-}
-
-pw_size_diff("server_size") {
-  title = "Pigweed RPC server size report"
-
-  binaries = [
-    {
-      target = "size_report:server_only"
-      base = "size_report:base"
-      label = "Server by itself"
-    },
-  ]
-
-  if (dir_pw_third_party_nanopb != "") {
-    binaries += [
-      {
-        target = "size_report:server_with_echo_service"
-        base = "size_report:base_with_nanopb"
-        label = "Server with a registered nanopb EchoService"
-      },
-    ]
-  }
-}
-
 pw_test_group("tests") {
   tests = [
+    ":benchmark_service_test",
     ":call_test",
     ":callback_test",
+    ":channel_list_test",
     ":channel_test",
     ":client_server_test",
     ":test_helpers_test",
@@ -512,6 +490,14 @@ pw_test("callback_test") {
 
   # TODO: b/259746255 - Remove this when everything compiles with -Wconversion.
   configs = [ "$dir_pw_build:conversion_warnings" ]
+}
+
+pw_test("channel_list_test") {
+  deps = [
+    ":server",
+    ":test_utils",
+  ]
+  sources = [ "channel_list_test.cc" ]
 }
 
 pw_test("channel_test") {

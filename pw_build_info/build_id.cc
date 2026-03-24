@@ -20,8 +20,6 @@
 #include "pw_preprocessor/compiler.h"
 #include "pw_span/span.h"
 
-extern "C" const uint8_t gnu_build_id_begin;
-
 namespace pw::build_info {
 namespace {
 
@@ -31,29 +29,27 @@ PW_PACKED(struct) ElfNoteInfo {
   uint32_t type;
 };
 
-}  // namespace
+// Symbol that points to the start of the .note.gnu.build-id ELF note section.
+// The section layout is:
+//   - ElfNoteInfo header
+//   - 'name' field (name_size bytes from header)
+//   - 'descriptor' field (descriptor_size bytes, the actual build identifier)
+// This symbol only references the header.
+extern "C" const ElfNoteInfo gnu_build_id_begin;
 
-// Reading more than a uint8_t from gnu_build_id_begin triggers compiler
-// warnings that must be silenced.
-PW_MODIFY_DIAGNOSTICS_PUSH();
-PW_MODIFY_DIAGNOSTIC(ignored, "-Warray-bounds");
-PW_MODIFY_DIAGNOSTIC_GCC(ignored, "-Wstringop-overflow");
-#if __GNUC__ >= 11
-PW_MODIFY_DIAGNOSTIC_GCC(ignored, "-Wstringop-overread");
-#endif
+}  // namespace
 
 span<const std::byte> BuildId() {
   // Read the sizes at the beginning of the note section.
   ElfNoteInfo build_id_note_sizes;
-  memcpy(
+  std::memcpy(
       &build_id_note_sizes, &gnu_build_id_begin, sizeof(build_id_note_sizes));
   // Skip the "name" entry of the note section, and return a span to the
   // descriptor.
-  return as_bytes(span(&gnu_build_id_begin + sizeof(build_id_note_sizes) +
-                           build_id_note_sizes.name_size,
-                       build_id_note_sizes.descriptor_size));
+  const std::byte* descriptor_ptr =
+      reinterpret_cast<const std::byte*>(&gnu_build_id_begin) +
+      sizeof(build_id_note_sizes) + build_id_note_sizes.name_size;
+  return span(descriptor_ptr, build_id_note_sizes.descriptor_size);
 }
-
-PW_MODIFY_DIAGNOSTICS_POP();
 
 }  // namespace pw::build_info

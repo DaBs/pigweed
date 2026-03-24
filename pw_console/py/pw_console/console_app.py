@@ -65,6 +65,7 @@ from ptpython.key_bindings import (  # type: ignore
 )
 from pyperclip import PyperclipException  # type: ignore
 
+from pw_console.background_command_runner import BackgroundCommandRunner
 from pw_console.command_runner import CommandRunner, CommandRunnerItem
 from pw_console.console_log_server import (
     ConsoleLogHTTPRequestHandler,
@@ -79,7 +80,11 @@ from pw_console.pw_ptpython_repl import PwPtPythonRepl
 from pw_console.python_logging import all_loggers
 from pw_console.quit_dialog import QuitDialog
 from pw_console.repl_pane import ReplPane
-from pw_console.style import generate_styles, THEME_NAME_MAPPING
+from pw_console.style import (
+    generate_styles,
+    add_user_ui_themes,
+    THEME_NAME_MAPPING,
+)
 from pw_console.test_mode import start_fake_logger
 from pw_console.widgets import (
     FloatingWindowPane,
@@ -87,7 +92,7 @@ from pw_console.widgets import (
     to_checkbox_text,
     to_keybind_indicator,
 )
-from pw_console.window_manager import WindowManager
+from pw_console.window_manager import Direction, WindowManager
 
 _LOG = logging.getLogger(__package__)
 _ROOT_LOG = logging.getLogger('')
@@ -189,13 +194,11 @@ class ConsoleApp:
         local_vars = local_vars or global_vars
 
         jinja_templates = {
-            t: importlib.resources.read_text(
-                f'{PW_CONSOLE_MODULE}.templates', t
-            )
-            for t in importlib.resources.contents(
+            resource.name: resource.read_text()
+            for resource in importlib.resources.files(
                 f'{PW_CONSOLE_MODULE}.templates'
-            )
-            if t.endswith('.jinja')
+            ).iterdir()
+            if resource.is_file() and resource.name.endswith('.jinja')
         }
 
         # Setup the Jinja environment
@@ -216,17 +219,18 @@ class ConsoleApp:
 
         # History instance for search toolbars.
         self.search_history: History = ThreadedHistory(
-            FileHistory(self.search_history_filename)
+            FileHistory(str(self.search_history_filename))
         )
 
         # Event loop for executing user repl code.
         self.user_code_loop = asyncio.new_event_loop()
         self.test_mode_log_loop = asyncio.new_event_loop()
 
-        self.app_title = app_title if app_title else 'Pigweed Console'
+        self.background_command_runner = BackgroundCommandRunner(
+            application=self
+        )
 
-        # Top level UI state toggles.
-        self.load_theme(self.prefs.ui_theme)
+        self.app_title = app_title if app_title else 'Pigweed Console'
 
         # Pigweed upstream RST user guide
         self.user_guide_window = HelpWindow(self, title='User Guide')
@@ -290,12 +294,12 @@ class ConsoleApp:
             python_repl=self.pw_ptpython_repl,
             startup_message=repl_startup_message,
         )
-        self.pw_ptpython_repl.use_code_colorscheme(self.prefs.code_theme)
+
+        # Load UI and code themes.
+        self._current_theme = generate_styles()
+        self._load_theme_prefs()
 
         self.system_command_output_pane: LogPane | None = None
-
-        if self.prefs.swap_light_and_dark:
-            self.toggle_light_theme()
 
         # Window panes are added via the window_manager
         self.window_manager = WindowManager(self)
@@ -460,6 +464,9 @@ class ConsoleApp:
             min_redraw_interval=MIN_REDRAW_INTERVAL,
         )
 
+        # Must be called after self.application is set.
+        self._apply_swap_light_and_dark()
+
     def get_template(self, file_name: str):
         return self.jinja_env.get_template(file_name)
 
@@ -495,19 +502,25 @@ class ConsoleApp:
             )
         )
 
+    def _save_and_set_ui_theme(self, theme_name: str) -> None:
+        self.prefs.ui_theme = theme_name
+        self.load_theme(theme_name)
+
     def set_ui_theme(self, theme_name: str) -> Callable:
         call_function = functools.partial(
             self.run_pane_menu_option,
-            functools.partial(self.load_theme, theme_name),
+            functools.partial(self._save_and_set_ui_theme, theme_name),
         )
         return call_function
+
+    def _save_and_set_code_theme(self, theme_name: str) -> None:
+        self.prefs.code_theme = theme_name
+        self.pw_ptpython_repl.use_code_colorscheme(theme_name)
 
     def set_code_theme(self, theme_name: str) -> Callable:
         call_function = functools.partial(
             self.run_pane_menu_option,
-            functools.partial(
-                self.pw_ptpython_repl.use_code_colorscheme, theme_name
-            ),
+            functools.partial(self._save_and_set_code_theme, theme_name),
         )
         return call_function
 
@@ -568,13 +581,14 @@ class ConsoleApp:
         self.root_container.menu_items = self.menu_items
 
     def open_command_runner_main_menu(self) -> None:
+        self.update_menu_items()
         self.command_runner.set_completions()
         if not self.command_runner_is_open():
             self.command_runner.open_dialog()
 
     def open_command_runner_loggers(self) -> None:
         self.command_runner.set_completions(
-            window_title='Open Logger',
+            window_title='Open Python Logger',
             load_completions=self._create_logger_completions,
         )
         if not self.command_runner_is_open():
@@ -642,9 +656,12 @@ class ConsoleApp:
 
         html_package_path = f'{PW_CONSOLE_MODULE}.html'
         self.html_files = {
-            '/{}'.format(t): importlib.resources.read_text(html_package_path, t)
-            for t in importlib.resources.contents(html_package_path)
-            if Path(t).suffix in ['.css', '.html', '.js', '.json']
+            '/{}'.format(resource.name): resource.read_text()
+            for resource in importlib.resources.files(
+                html_package_path
+            ).iterdir()
+            if resource.is_file()
+            and Path(resource.name).suffix in ['.css', '.html', '.js', '.json']
         }
 
         server_thread = Thread(
@@ -719,22 +736,15 @@ class ConsoleApp:
                 '[File]',
                 children=[
                     MenuItem(
-                        'Insert Repl Snippet',
-                        handler=self.open_command_runner_snippets,
-                    ),
-                    MenuItem(
-                        'Insert Repl History',
-                        handler=self.open_command_runner_history,
-                    ),
-                    MenuItem(
-                        'Open Logger', handler=self.open_command_runner_loggers
+                        'Open Python Logger',
+                        handler=self.open_command_runner_loggers,
                     ),
                     MenuItem(
                         'Log Table View',
                         children=[
                             # pylint: disable=line-too-long
                             MenuItem(
-                                '{check} Hide Date'.format(
+                                '{check} Hide Date from Time'.format(
                                     check=to_checkbox_text(
                                         self.prefs.hide_date_from_log_time,
                                         end='',
@@ -749,44 +759,17 @@ class ConsoleApp:
                                 ),
                             ),
                             MenuItem(
-                                '{check} Show Source File'.format(
+                                '{check} Recolor log lines to match level'.format(
                                     check=to_checkbox_text(
-                                        self.prefs.show_source_file, end=''
+                                        self.prefs.recolor_log_lines_to_match_level,
+                                        end='',
                                     )
                                 ),
                                 handler=functools.partial(
                                     self.run_pane_menu_option,
                                     functools.partial(
                                         self.toggle_pref_option,
-                                        'show_source_file',
-                                    ),
-                                ),
-                            ),
-                            MenuItem(
-                                '{check} Show Python File'.format(
-                                    check=to_checkbox_text(
-                                        self.prefs.show_python_file, end=''
-                                    )
-                                ),
-                                handler=functools.partial(
-                                    self.run_pane_menu_option,
-                                    functools.partial(
-                                        self.toggle_pref_option,
-                                        'show_python_file',
-                                    ),
-                                ),
-                            ),
-                            MenuItem(
-                                '{check} Show Python Logger'.format(
-                                    check=to_checkbox_text(
-                                        self.prefs.show_python_logger, end=''
-                                    )
-                                ),
-                                handler=functools.partial(
-                                    self.run_pane_menu_option,
-                                    functools.partial(
-                                        self.toggle_pref_option,
-                                        'show_python_logger',
+                                        'recolor_log_lines_to_match_level',
                                     ),
                                 ),
                             ),
@@ -799,7 +782,9 @@ class ConsoleApp:
                         children=themes_submenu,
                     ),
                     MenuItem('-'),
-                    MenuItem('Exit', handler=self.exit_console),
+                    MenuItem(
+                        'Exit             Ctrl-d', handler=self.exit_console
+                    ),
                 ],
             ),
         ]
@@ -808,6 +793,14 @@ class ConsoleApp:
             MenuItem(
                 '[Edit]',
                 children=[
+                    MenuItem(
+                        'Insert Repl Snippet       Ctrl-t',
+                        handler=self.open_command_runner_snippets,
+                    ),
+                    MenuItem(
+                        'Insert Repl History       Ctrl-r',
+                        handler=self.open_command_runner_history,
+                    ),
                     # pylint: disable=line-too-long
                     MenuItem(
                         'Paste to Python Input',
@@ -816,11 +809,11 @@ class ConsoleApp:
                     # pylint: enable=line-too-long
                     MenuItem('-'),
                     MenuItem(
-                        'Copy all Python Output',
+                        'Copy All Python Output',
                         handler=self.repl_pane.copy_all_output_text,
                     ),
                     MenuItem(
-                        'Copy all Python Input',
+                        'Copy All Python Input',
                         handler=self.repl_pane.copy_all_input_text,
                     ),
                     MenuItem('-'),
@@ -835,99 +828,143 @@ class ConsoleApp:
             ),
         ]
 
+        # pylint: disable=line-too-long
         view_menu = [
             MenuItem(
                 '[View]',
                 children=[
-                    #         [Menu Item             ][Keybind  ]
                     MenuItem(
-                        'Focus Next Window/Tab   Ctrl-Alt-n',
+                        # [Menu Item                    ][    Keybind]
+                        'Focus Next Window/Tab              Ctrl-Alt-n',
                         handler=self.window_manager.focus_next_pane,
                     ),
-                    #         [Menu Item             ][Keybind  ]
                     MenuItem(
-                        'Focus Prev Window/Tab   Ctrl-Alt-p',
+                        # [Menu Item                    ][    Keybind]
+                        'Focus Prev Window/Tab              Ctrl-Alt-p',
                         handler=self.window_manager.focus_previous_pane,
                     ),
-                    MenuItem('-'),
-                    #         [Menu Item             ][Keybind  ]
                     MenuItem(
-                        'Move Window Up         Ctrl-Alt-Up',
+                        # [Menu Item                    ][    Keybind]
+                        'Focus Pane Up                        Ctrl-w k',
+                        handler=functools.partial(
+                            self.window_manager.focus_pane_direction,
+                            Direction.UP,
+                        ),
+                    ),
+                    MenuItem(
+                        # [Menu Item                    ][    Keybind]
+                        'Focus Pane Down                      Ctrl-w j',
+                        handler=functools.partial(
+                            self.window_manager.focus_pane_direction,
+                            Direction.DOWN,
+                        ),
+                    ),
+                    MenuItem(
+                        # [Menu Item                    ][    Keybind]
+                        'Focus Pane Left                      Ctrl-w h',
+                        handler=functools.partial(
+                            self.window_manager.focus_pane_direction,
+                            Direction.LEFT,
+                        ),
+                    ),
+                    MenuItem(
+                        # [Menu Item                    ][    Keybind]
+                        'Focus Pane Right                     Ctrl-w l',
+                        handler=functools.partial(
+                            self.window_manager.focus_pane_direction,
+                            Direction.RIGHT,
+                        ),
+                    ),
+                    MenuItem('-'),
+                    MenuItem(
+                        # [Menu Item                    ][    Keybind]
+                        'Move Window Up in Group           Ctrl-Alt-Up',
                         handler=functools.partial(
                             self.run_pane_menu_option,
                             self.window_manager.move_pane_up,
                         ),
                     ),
-                    #         [Menu Item             ][Keybind  ]
                     MenuItem(
-                        'Move Window Down     Ctrl-Alt-Down',
+                        # [Menu Item                    ][    Keybind]
+                        'Move Window Down in Group       Ctrl-Alt-Down',
                         handler=functools.partial(
                             self.run_pane_menu_option,
                             self.window_manager.move_pane_down,
                         ),
                     ),
-                    #         [Menu Item             ][Keybind  ]
+                    MenuItem('-'),
                     MenuItem(
-                        'Move Window Left     Ctrl-Alt-Left',
+                        # [Menu Item                    ][    Keybind]
+                        'Move Window to Previous Group   Ctrl-Alt-Left',
                         handler=functools.partial(
                             self.run_pane_menu_option,
-                            self.window_manager.move_pane_left,
+                            self.window_manager.move_pane_to_prev_group,
                         ),
                     ),
-                    #         [Menu Item             ][Keybind  ]
                     MenuItem(
-                        'Move Window Right   Ctrl-Alt-Right',
+                        # [Menu Item                    ][    Keybind]
+                        'Move Window to Next Group      Ctrl-Alt-Right',
                         handler=functools.partial(
                             self.run_pane_menu_option,
-                            self.window_manager.move_pane_right,
+                            self.window_manager.move_pane_to_next_group,
                         ),
                     ),
                     MenuItem('-'),
-                    #         [Menu Item             ][Keybind  ]
                     MenuItem(
-                        'Shrink Height            Alt-Minus',
+                        # [Menu Item                    ][    Keybind]
+                        'Shrink Window Height                Alt-Minus',
                         handler=functools.partial(
                             self.run_pane_menu_option,
                             self.window_manager.shrink_pane,
                         ),
                     ),
-                    #         [Menu Item             ][Keybind  ]
                     MenuItem(
-                        'Enlarge Height               Alt-=',
+                        # [Menu Item                    ][    Keybind]
+                        'Grow Window Height                      Alt-=',
                         handler=functools.partial(
                             self.run_pane_menu_option,
                             self.window_manager.enlarge_pane,
                         ),
                     ),
-                    MenuItem('-'),
-                    #         [Menu Item             ][Keybind  ]
                     MenuItem(
-                        'Shrink Column                Alt-,',
+                        # [Menu Item                    ][    Keybind]
+                        'Shrink Group Width/Height               Alt-,',
                         handler=functools.partial(
                             self.run_pane_menu_option,
                             self.window_manager.shrink_split,
                         ),
                     ),
-                    #         [Menu Item             ][Keybind  ]
                     MenuItem(
-                        'Enlarge Column               Alt-.',
+                        # [Menu Item                    ][    Keybind]
+                        'Grow Group Width/Height                 Alt-.',
                         handler=functools.partial(
                             self.run_pane_menu_option,
                             self.window_manager.enlarge_split,
                         ),
                     ),
                     MenuItem('-'),
-                    #         [Menu Item            ][Keybind  ]
                     MenuItem(
-                        'Balance Window Sizes       Ctrl-u',
+                        # [Menu Item                    ][    Keybind]
+                        'Balance Window Sizes                   Ctrl-u',
                         handler=functools.partial(
                             self.run_pane_menu_option,
                             self.window_manager.balance_window_sizes,
                         ),
                     ),
+                    MenuItem('-'),
+                    MenuItem(
+                        '{check} Vertical/Horizontal Group Splitting'.format(
+                            check=to_checkbox_text(
+                                self.window_manager.vertical_window_list_splitting(),
+                                end='',
+                            )
+                        ),
+                        handler=self.window_manager.toggle_vertical_window_list_splitting,
+                    ),
                 ],
             ),
         ]
+        # pylint: enable=line-too-long
 
         window_menu_items = self.window_manager.create_window_menu_items()
 
@@ -1033,23 +1070,40 @@ class ConsoleApp:
             # window pane.
             self.window_manager.focus_first_visible_pane()
 
+    def _swap_pigweed_code_theme(self) -> None:
+        """Load pigweed-code-light theme when using a light mode ui theme."""
+        if 'pigweed-code' not in self.prefs.code_theme:
+            return
+
+        if '-light' in self.prefs.ui_theme:
+            self._save_and_set_code_theme('pigweed-code-light')
+        else:
+            self._save_and_set_code_theme('pigweed-code')
+
     def toggle_light_theme(self):
         """Toggle light and dark theme colors."""
         # Use ptpython's style_transformation to swap dark and light colors.
         self.pw_ptpython_repl.swap_light_and_dark = (
             not self.pw_ptpython_repl.swap_light_and_dark
         )
+
         if self.application:
             self.focus_main_menu()
 
     def toggle_pref_option(self, setting_name):
         self.prefs.toggle_bool_option(setting_name)
 
-    def load_theme(self, theme_name=None):
+        # Redraw all log windows.
+        for log_pane in self.all_log_panes():
+            log_pane.log_view.refresh_visible_table_columns()
+
+    def load_theme(self, theme_name: str | None) -> None:
         """Regenerate styles for the current theme_name."""
         self._current_theme = generate_styles(theme_name)
         if theme_name:
-            self.prefs.set_ui_theme(theme_name)
+            self.prefs.ui_theme = theme_name
+
+        self._swap_pigweed_code_theme()
 
     def _create_log_pane(
         self, title: str = '', log_store: LogStore | None = None
@@ -1067,8 +1121,18 @@ class ConsoleApp:
         # Re-apply user settings.
         if self.prefs.user_file:
             self.prefs.load_config_file(self.prefs.user_file)
+        self._load_theme_prefs()
+        self._apply_swap_light_and_dark()
 
-        # Reset colors
+    def _apply_swap_light_and_dark(self) -> None:
+        if self.prefs.swap_light_and_dark:
+            self.toggle_light_theme()
+
+    def _load_theme_prefs(self) -> None:
+        # Include user defined themes
+        if self.prefs.ui_themes:
+            add_user_ui_themes(self.prefs.ui_themes)
+
         self.load_theme(self.prefs.ui_theme)
         self.pw_ptpython_repl.use_code_colorscheme(self.prefs.code_theme)
 
@@ -1080,19 +1144,15 @@ class ConsoleApp:
         self.update_menu_items()
         self._update_help_window()
 
-    def all_log_stores(self) -> list[LogStore]:
-        log_stores: list[LogStore] = []
+    def all_log_panes(self) -> Iterable[LogPane]:
         for pane in self.window_manager.active_panes():
-            if not isinstance(pane, LogPane):
-                continue
-            if pane.log_view.log_store not in log_stores:
-                log_stores.append(pane.log_view.log_store)
-        return log_stores
+            if isinstance(pane, LogPane):
+                yield pane
 
     def add_log_handler(
         self,
         window_title: str,
-        logger_instances: Iterable[logging.Logger] | LogStore,
+        logger_instances: Iterable[logging.Logger | str] | LogStore,
         separate_log_panes: bool = False,
         log_level_name: str | None = None,
     ) -> LogPane | None:
@@ -1216,6 +1276,7 @@ class ConsoleApp:
     def exit_console(self):
         """Quit the console prompt_toolkit application UI."""
         self.application.exit()
+        self.background_command_runner.stop_all_background_commands()
 
     def logs_redraw(self):
         emit_time = time.time()

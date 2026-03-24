@@ -77,6 +77,8 @@ class TransferParameters {
 // Information about a single transfer.
 class Context {
  public:
+  friend class TransferThread;
+
   static constexpr uint32_t kUnassignedSessionId = 0;
 
   Context(const Context&) = delete;
@@ -94,6 +96,11 @@ class Context {
 
   // True if the transfer is active.
   bool active() const { return transfer_state_ >= TransferState::kInitiating; }
+
+  // True if the transfer is in the handshake phase.
+  bool is_initiating() const {
+    return transfer_state_ == TransferState::kInitiating;
+  }
 
   constexpr TransferType type() const {
     return static_cast<TransferType>(flags_ & kFlagsType);
@@ -116,7 +123,7 @@ class Context {
   void HandleEvent(const Event& event);
 
  protected:
-  ~Context() = default;
+  virtual ~Context() = default;
 
   constexpr Context()
       : initial_offset_(0),

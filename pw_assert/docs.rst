@@ -54,7 +54,8 @@ Example
      PW_CHECK(sensor_running, "Sensor failed to start; code: %s", msg);
 
      int temperature_c = ReadSensorCelcius();
-     PW_CHECK_INT_LE(temperature_c, 100,
+     PW_CHECK_INT_LE(temperature_c,
+                     100,
                      "System is way out of heat spec; state=%s",
                      ReadSensorStateString());
    }
@@ -181,7 +182,7 @@ invoke to assert. These macros are found in the ``pw_assert/check.h`` header.
 
   .. code-block:: cpp
 
-     Foo* foo = GetTheFoo()
+     Foo* foo = GetTheFoo();
      PW_CHECK_NOTNULL(foo);
 
      Bar* bar = GetSomeBar();
@@ -212,8 +213,7 @@ invoke to assert. These macros are found in the ``pw_assert/check.h`` header.
 
   .. code-block:: cpp
 
-     PW_CHECK_FLOAT_EXACT_GE(BatteryVoltage(), 3.2,
-                             "System state=%s", SysState());
+     PW_CHECK_FLOAT_EXACT_GE(BatteryVoltage(), 3.2, "System state=%s", SysState());
 
   Below is the full list of binary comparison assert macros, along with the
   type specifier. The specifier is irrelevant to application authors but is
@@ -361,8 +361,8 @@ invoke to assert. These macros are found in the ``pw_assert/check.h`` header.
 
   .. code-block:: cpp
 
-     PW_CHECK_FLOAT_NEAR(FirstOperation(), RedundantOperation(), 0.1,
-                         "System state=%s", SysState());
+     PW_CHECK_FLOAT_NEAR(
+         FirstOperation(), RedundantOperation(), 0.1, "System state=%s", SysState());
 
 .. cpp:function:: PW_CHECK_OK(status)
 .. cpp:function:: PW_CHECK_OK(status, format, ...)
@@ -403,6 +403,8 @@ invoke to assert. These macros are found in the ``pw_assert/check.h`` header.
     code; for example ``status == RESOURCE_EXHAUSTED`` instead of ``status ==
     5``.
 
+.. _module-pw_assert-mod:
+
 ``%`` in conditions
 ===================
 ``PW_CHECK`` conditions cannot contain the ``%`` character (e.g. from the
@@ -423,6 +425,15 @@ To avoid errors like this, do not use ``%`` in ``PW_CHECK`` conditions. Modulus
 can be moved to a separate statement outside of the ``PW_CHECK`` or invoked via
 a function or `std::modulus
 <https://en.cppreference.com/w/cpp/utility/functional/modulus>`_.
+
+.. DOCSTAG: [contributing-docs-examples]
+
+.. literalinclude:: examples.cc
+   :language: cpp
+   :start-after: [pw_assert-mod-example]
+   :end-before: [pw_assert-mod-example]
+
+.. DOCSTAG: [contributing-docs-examples]
 
 This restriction may be removed in the future (`b/235149326
 <https://issues.pigweed.dev/issues/235149326>`_)

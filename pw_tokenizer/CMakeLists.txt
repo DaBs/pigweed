@@ -112,6 +112,18 @@ pw_add_library(pw_tokenizer.decoder STATIC
     pw_varint
 )
 
+pw_add_library(pw_tokenizer.detokenize_from_this_program STATIC
+  HEADERS
+    public/pw_tokenizer/detokenize_from_this_program.h
+  PUBLIC_INCLUDES
+    public
+  PUBLIC_DEPS
+    pw_result
+    pw_tokenizer.decoder
+  SOURCES
+    detokenize_from_this_program.cc
+)
+
 pw_add_library(pw_tokenizer._csv STATIC
   HEADERS
     pw_tokenizer_private/csv.h
@@ -195,6 +207,7 @@ pw_add_test(pw_tokenizer.detokenize_test
     detokenize_test.cc
     pw_tokenizer_private/tokenize_test.h
   PRIVATE_DEPS
+    pw_base64
     pw_tokenizer.decoder
     pw_tokenizer.detokenizer_elf_test_blob
     pw_stream
@@ -240,8 +253,10 @@ pw_add_test(pw_tokenizer.tokenize_test
     tokenize_test.cc
     pw_tokenizer_private/tokenize_test.h
   PRIVATE_DEPS
-    pw_varint
+    pw_compilation_testing._pigweed_only_negative_compilation
+    pw_string.string
     pw_tokenizer
+    pw_varint
   GROUPS
     modules
     pw_tokenizer

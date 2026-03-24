@@ -17,7 +17,8 @@ load("@io_bazel_rules_go//go:def.bzl", "go_test")
 load("@rules_cc//cc:cc_binary.bzl", "cc_binary")
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("@rules_python//sphinxdocs:sphinx_docs_library.bzl", "sphinx_docs_library")
-load("//pw_build:compatibility.bzl", "incompatible_with_mcu")
+load("//pw_build:compatibility.bzl", "boolean_constraint_value", "incompatible_with_mcu")
+load("//pw_build:merge_flags.bzl", "flags_from_dict")
 load(
     "//pw_protobuf_compiler:pw_proto_library.bzl",
     "pw_proto_filegroup",
@@ -25,16 +26,35 @@ load(
     "pwpb_rpc_proto_library",
 )
 load("//pw_unit_test:pw_cc_test.bzl", "pw_cc_test")
+load(":config.bzl", "PW_GRPC_PW_RPC_CONFIG_OVERRIDES")
 
 package(
     default_visibility = ["//visibility:public"],
-    features = ["-layering_check"],
 )
 
 log_defines = [
     "PW_LOG_MODULE_NAME=\\\"GRPC\\\"",
     "PW_LOG_LEVEL=PW_LOG_LEVEL_INFO",
 ]
+
+# In order to use this module, it must be explicitly enabled by the platform
+# since it requires a non-default pw_rpc config_override to build and function.
+# The required pw_rpc config options are provided by the
+# PW_GRPC_PW_RPC_CONFIG_OVERRIDES defines array in config.bzl.
+#
+# Since we can't automatically determine whether those overrides are set, we
+# require the module to be explicitly enabled using this constraint.
+boolean_constraint_value(
+    name = "enabled",
+)
+
+# Required config options to apply to //pw_rpc:config_override. This can be used
+# to override the pw_rpc config on the command line or on a platforms flags:
+#   --//pw_rpc:config_override=//pw_grpc:pw_rpc_config
+cc_library(
+    name = "pw_rpc_config",
+    defines = PW_GRPC_PW_RPC_CONFIG_OVERRIDES,
+)
 
 cc_library(
     name = "connection",
@@ -47,26 +67,27 @@ cc_library(
     implementation_deps = ["//pw_assert:check"],
     local_defines = log_defines,
     strip_include_prefix = "public",
-    target_compatible_with = select({
-        ":pw_rpc_config_setting": [],
-        "//conditions:default": ["@platforms//:incompatible"],
-    }),
+    target_compatible_with = [":enabled"],
     deps = [
+        ":default_send_queue",
         ":hpack",
         ":send_queue",
         "//pw_allocator:allocator",
+        "//pw_allocator:synchronized_allocator",
         "//pw_async:dispatcher",
         "//pw_async_basic:dispatcher",
         "//pw_bytes",
+        "//pw_chrono:system_clock",
+        "//pw_containers:dynamic_queue",
         "//pw_function",
         "//pw_log",
-        "//pw_multibuf",
-        "//pw_multibuf:allocator",
+        "//pw_numeric:checked_arithmetic",
         "//pw_result",
         "//pw_span",
         "//pw_status",
         "//pw_stream",
         "//pw_string",
+        "//pw_string:string",
         "//pw_sync:inline_borrowable",
         "//pw_thread:thread",
         "//pw_thread:thread_core",
@@ -75,18 +96,35 @@ cc_library(
 
 cc_library(
     name = "send_queue",
-    srcs = ["send_queue.cc"],
-    hdrs = ["public/pw_grpc/send_queue.h"],
+    hdrs = [
+        "public/pw_grpc/send_queue.h",
+    ],
     local_defines = log_defines,
     strip_include_prefix = "public",
     deps = [
+        "//pw_allocator",
+        "//pw_function",
+        "//pw_status",
+    ],
+)
+
+cc_library(
+    name = "default_send_queue",
+    srcs = ["default_send_queue.cc"],
+    hdrs = [
+        "public/pw_grpc/default_send_queue.h",
+    ],
+    local_defines = log_defines,
+    strip_include_prefix = "public",
+    deps = [
+        ":send_queue",
+        "//pw_allocator",
         "//pw_async:dispatcher",
         "//pw_async_basic:dispatcher",
         "//pw_bytes",
+        "//pw_containers:dynamic_deque",
         "//pw_function",
         "//pw_log",
-        "//pw_multibuf",
-        "//pw_multibuf:allocator",
         "//pw_result",
         "//pw_span",
         "//pw_status",
@@ -116,18 +154,18 @@ cc_library(
     hdrs = ["public/pw_grpc/pw_rpc_handler.h"],
     local_defines = log_defines,
     strip_include_prefix = "public",
-    target_compatible_with = select({
-        ":pw_rpc_config_setting": [],
-        "//conditions:default": ["@platforms//:incompatible"],
-    }),
+    target_compatible_with = [":enabled"],
     deps = [
         ":connection",
         ":grpc_channel_output",
         "//pw_bytes",
         "//pw_log",
+        "//pw_result",
         "//pw_rpc",
         "//pw_rpc_transport:rpc_transport",
+        "//pw_status",
         "//pw_string",
+        "//pw_sync:inline_borrowable",
     ],
 )
 
@@ -149,7 +187,9 @@ cc_library(
         "//pw_result",
         "//pw_span",
         "//pw_status",
-        "//pw_string",
+        "//pw_string:builder",
+        "//pw_string:string",
+        "//pw_string:util",
     ],
 )
 
@@ -159,21 +199,19 @@ pw_cc_test(
     tags = ["noclangtidy"],
     deps = [
         ":hpack",
+        "//pw_bytes",
     ],
 )
 
 cc_binary(
     name = "test_pw_rpc_server",
     srcs = ["test_pw_rpc_server.cc"],
-    target_compatible_with = select({
-        ":pw_rpc_config_setting": [],
-        "//conditions:default": ["@platforms//:incompatible"],
-    }),
     deps = [
         ":connection",
         ":echo_pwpb_rpc",
         ":grpc_channel_output",
         ":pw_rpc_handler",
+        "//pw_allocator:best_fit",
         "//pw_allocator:libc_allocator",
         "//pw_assert_basic:pw_assert_basic_handler",
         "//pw_assert_log:assert_backend",
@@ -181,7 +219,6 @@ cc_binary(
         "//pw_bytes",
         "//pw_checksum",
         "//pw_log",
-        "//pw_multibuf:simple_allocator",
         "//pw_result",
         "//pw_rpc",
         "//pw_rpc_transport:service_registry",
@@ -217,31 +254,20 @@ pwpb_rpc_proto_library(
     deps = [":echo_proto"],
 )
 
-# Required config options to apply to //pw_rpc:config_override
-cc_library(
-    name = "pw_rpc_config",
-    defines = [
-        "PW_RPC_COMPLETION_REQUEST_CALLBACK=1",
-        "PW_RPC_METHOD_STORES_TYPE=1",
-    ],
-)
-
-config_setting(
-    name = "pw_rpc_config_setting",
-    flag_values = {
-        "//pw_rpc:config_override": ":pw_rpc_config",
-    },
+platform(
+    name = "test_platform",
+    constraint_values = [":enabled"],
+    flags = flags_from_dict({
+        "@pigweed//pw_rpc:config_override": "@pigweed//pw_grpc:pw_rpc_config",
+    }),
+    parents = ["@bazel_tools//tools:host_platform"],
+    visibility = ["//visibility:private"],
 )
 
 # This test requires a special configuration. It's run in CI, and can be
 # run manually via:
 #
-#   bazel test --//pw_rpc:config_override=//pw_grpc:pw_rpc_config //pw_grpc:integration_test
-#
-# deps.bzl contains the bazel repositories used in deps for this integration test.
-# It is generated from go.mod using gazelle:
-#   gazelle update-repos -from_file=go.mod -to_macro=deps.bzl%pw_grpc_deps -prune
-# See https://github.com/bazelbuild/bazel-gazelle?tab=readme-ov-file#update-repos
+#   bazel test --platforms=//pw_grpc:test_platform //pw_grpc:integration_test
 go_test(
     name = "integration_test",
     srcs = ["integration_test.go"],
@@ -255,6 +281,7 @@ go_test(
         "@org_golang_google_grpc//credentials/insecure",
         "@org_golang_google_grpc//status",
         "@org_golang_google_grpc_examples//features/proto/echo",
+        "@org_golang_google_grpc_examples//helloworld/helloworld",
     ],
 )
 

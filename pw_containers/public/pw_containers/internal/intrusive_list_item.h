@@ -21,6 +21,8 @@ namespace pw::containers::internal {
 template <typename>
 class GenericIntrusiveList;
 
+class GenericIntrusiveQueue;
+
 /// Base class for items that can be included in intrusive lists.
 ///
 /// This class provides a pointer to the next item in a list and provides a
@@ -93,6 +95,8 @@ class IntrusiveListItemBase {
 
   template <typename>
   friend class GenericIntrusiveList;
+
+  friend class GenericIntrusiveQueue;
 
   template <typename, typename>
   friend class Incrementable;

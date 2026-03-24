@@ -33,7 +33,8 @@ enum RfcommFrameType:
   UNNUMBERED_ACK_AND_POLL_FINAL                           = 0x73
   DISCONNECT_MODE                                         = 0x0f
   DISCONNECT_MODE_AND_POLL_FINAL                          = 0x1f
-  DISCONNECT                                              = 0xc3
+  DISCONNECT                                              = 0x43
+  DISCONNECT_AND_POLL_FINAL                               = 0x53
   UNNUMBERED_INFORMATION_WITH_HEADER_CHECK                = 0xef
   UNNUMBERED_INFORMATION_WITH_HEADER_CHECK_AND_POLL_FINAL = 0xff
     -- RFCOMM extension. With Poll/Final bit set in UIH control byte, a credits
@@ -47,6 +48,7 @@ enum RfcommFixedChannel:
 
 
 enum RfcommCommandResponseAndDirection:
+  -- TODO(b/482441914): Deprecated, use bit flags directly.
   -- RFCOMM Spec v1.2 Section 5.4
   -- GSM 07.10 section 5.2.1.2
   -- Commands and responses from the responder have C/R = 0. Commands and
@@ -67,8 +69,26 @@ enum RfcommLengthExtended:
   EXTENDED = 0
 
 
+enum RfcommHeaderLength:
+  [maximum_bits: 3]
+  WITHOUT_LENGTH = 2
+  WITH_LENGTH = 3
+  WITH_EXTENDED_LENGTH = 4
+
+enum RfcommDataFrameOverhead:
+  [maximum_bits: 3]
+  WITH_SHORT_HEADER = 4
+  WITH_LONG_HEADER = 5
+
+enum RfcommMaxInfoSize:
+  [maximum_bits: 16]
+  ONE_BYTE_LENGTH = 127
+  TWO_BYTE_LENGTH = 32767
+
+
 struct RfcommFrame:
   -- RFCOMM adaptation of ETSI TS section 5.2 frame
+  -- RFCOMM Spec v1.2 Section 5.4
 
   [requires: extended_address == true]
 
@@ -77,6 +97,14 @@ struct RfcommFrame:
     0                  [+1]                 Flag                               extended_address
 
     1                  [+2]                 RfcommCommandResponseAndDirection  command_response_direction
+
+    1                  [+1]                 Flag                               command_response
+      -- Commands and responses from the responder have C/R = 0. Commands and
+      -- responses from the initiator have C/R = 1.
+
+    2                  [+1]                 Flag                               direction
+      -- For an RFCOMM session, the initiating device is given the direction bit D=1
+      -- (and conversely, D=0 in the other device)
 
     3                  [+5]                 UInt                               channel
       -- ETSI TS 07.10 section 5.2.1.2

@@ -14,6 +14,8 @@
 
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("@rules_python//sphinxdocs:sphinx_docs_library.bzl", "sphinx_docs_library")
+load("//pw_bloat:pw_size_diff.bzl", "pw_size_diff")
+load("//pw_bloat:pw_size_table.bzl", "pw_size_table")
 load("//pw_build:compatibility.bzl", "host_backend_alias", "incompatible_with_mcu")
 load("//pw_build:pw_facade.bzl", "pw_facade")
 load("//pw_unit_test:pw_cc_test.bzl", "pw_cc_test")
@@ -55,16 +57,30 @@ cc_library(
     srcs = ["sha256_mbedtls.cc"],
     hdrs = [
         "public/pw_crypto/sha256_mbedtls.h",
-        "public_overrides/mbedtls/pw_crypto/sha256_backend.h",
     ],
-    includes = [
-        "public",
-        "public_overrides/mbedtls",
-    ],
+    strip_include_prefix = "public",
     deps = [
+        ":mbedtls_sha256_engine",
+        ":mbedtls_sha256_public_overrides",
         ":sha256.facade",
         "@mbedtls",
     ],
+)
+
+label_flag(
+    name = "mbedtls_sha256_engine",
+    build_setting_default = "@rules_cc//:empty_lib",
+)
+
+# TODO: https://pwbug.dev/452106129 - This target will be renamed/moved
+# after backend headers are reorganized. This header is always overlaid onto
+# the build. We only put it in its own cc_library for strip_include_prefix.
+cc_library(
+    name = "mbedtls_sha256_public_overrides",
+    hdrs = ["public_overrides/mbedtls/pw_crypto/sha256_backend.h"],
+    strip_include_prefix = "public_overrides/mbedtls",
+    tags = ["noclangtidy"],
+    visibility = ["//visibility:private"],
 )
 
 pw_cc_test(
@@ -141,8 +157,10 @@ pw_facade(
         "public/pw_crypto/aes_backend_defs.h",
     ],
     backend = ":aes_backend",
+    features = ["-conversion_warnings"],
     includes = ["public"],
     deps = [
+        "//pw_assert:assert",
         "//pw_bytes",
         "//pw_log",
         "//pw_status",
@@ -152,6 +170,8 @@ pw_facade(
 cc_library(
     name = "aes_cmac",
     hdrs = ["public/pw_crypto/aes_cmac.h"],
+    features = ["-conversion_warnings"],
+    strip_include_prefix = "public",
     deps = [":aes"],
 )
 
@@ -172,6 +192,7 @@ cc_library(
         "public/pw_crypto/aes_boringssl.h",
         "public_overrides/boringssl/pw_crypto/aes_backend.h",
     ],
+    features = ["-conversion_warnings"],
     implementation_deps = ["//pw_assert:check"],
     includes = ["public_overrides/boringssl"],
     target_compatible_with = incompatible_with_mcu() + select({
@@ -190,14 +211,33 @@ cc_library(
     srcs = ["aes_mbedtls.cc"],
     hdrs = [
         "public/pw_crypto/aes_mbedtls.h",
-        "public_overrides/mbedtls/pw_crypto/aes_backend.h",
     ],
+    features = ["-conversion_warnings"],
     implementation_deps = ["//pw_assert:check"],
-    includes = ["public_overrides/mbedtls"],
+    strip_include_prefix = "public",
     deps = [
         ":aes.facade",
+        ":mbedtls_aes_engine",
+        ":mbedtls_aes_public_overrides",
         "@mbedtls",
     ],
+)
+
+# Label flag to provide an alt AES implementation to mbedTLS.
+label_flag(
+    name = "mbedtls_aes_engine",
+    build_setting_default = "@rules_cc//:empty_lib",
+)
+
+# TODO: https://pwbug.dev/452106129 - This target will be renamed/moved
+# after backend headers are reorganized. This header is always overlaid onto
+# the build. We only put it in its own cc_library for strip_include_prefix.
+cc_library(
+    name = "mbedtls_aes_public_overrides",
+    hdrs = ["public_overrides/mbedtls/pw_crypto/aes_backend.h"],
+    strip_include_prefix = "public_overrides/mbedtls",
+    tags = ["noclangtidy"],
+    visibility = ["//visibility:private"],
 )
 
 pw_cc_test(
@@ -205,11 +245,73 @@ pw_cc_test(
     srcs = [
         "aes_test.cc",
     ],
+    features = ["-conversion_warnings"],
     deps = [
         ":aes",
         ":aes_cmac",
         "//pw_assert:assert",
         "//pw_containers:vector",
+    ],
+)
+
+pw_facade(
+    name = "ecdh",
+    hdrs = ["public/pw_crypto/ecdh.h"],
+    backend = ":ecdh_backend",
+    features = ["-conversion_warnings"],
+    strip_include_prefix = "public",
+    deps = [
+        "//pw_bytes",
+        "//pw_result",
+        "//pw_status",
+    ],
+)
+
+label_flag(
+    name = "ecdh_backend",
+    build_setting_default = ":unspecified_ecdh_backend",
+)
+
+host_backend_alias(
+    name = "unspecified_ecdh_backend",
+    backend = ":ecdh_mbedtls",
+)
+
+pw_cc_test(
+    name = "ecdh_test",
+    srcs = ["ecdh_test.cc"],
+    deps = [":ecdh"],
+)
+
+cc_library(
+    name = "ecdh_boringssl",
+    srcs = ["ecdh_boringssl.cc"],
+    hdrs = [
+        "public_overrides/boringssl/pw_crypto/ecdh_backend.h",
+    ],
+    implementation_deps = ["//pw_assert:check"],
+    strip_include_prefix = "public_overrides/boringssl",
+    target_compatible_with = incompatible_with_mcu() + select({
+        "@platforms//os:windows": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
+    deps = [
+        ":ecdh.facade",
+        "@boringssl//:crypto",
+    ],
+)
+
+cc_library(
+    name = "ecdh_mbedtls",
+    srcs = ["ecdh_mbedtls.cc"],
+    hdrs = [
+        "public_overrides/mbedtls/pw_crypto/ecdh_backend.h",
+    ],
+    implementation_deps = ["//pw_assert:check"],
+    strip_include_prefix = "public_overrides/mbedtls",
+    deps = [
+        ":ecdh.facade",
+        "@mbedtls",
     ],
 )
 
@@ -221,10 +323,33 @@ filegroup(
     ],
 )
 
+pw_size_diff(
+    name = "sha256_simple_size_diff",
+    base = "//pw_bloat:bloat_base",
+    label = "SHA256",
+    target = "//pw_crypto/size_report:sha256_simple",
+)
+
+pw_size_diff(
+    name = "ecdsa_p256_verify_size_diff",
+    base = "//pw_bloat:bloat_base",
+    label = "ECDSA P256 Verify",
+    target = "//pw_crypto/size_report:ecdsa_p256_verify",
+)
+
+pw_size_table(
+    name = "pw_crypto_size_report",
+    reports = [
+        ":sha256_simple_size_diff",
+        ":ecdsa_p256_verify_size_diff",
+    ],
+)
+
 sphinx_docs_library(
     name = "docs",
     srcs = [
         "docs.rst",
+        ":pw_crypto_size_report",
     ],
     prefix = "pw_crypto/",
     target_compatible_with = incompatible_with_mcu(),

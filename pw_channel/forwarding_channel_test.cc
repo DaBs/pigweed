@@ -18,17 +18,18 @@
 #include <array>
 
 #include "pw_allocator/testing.h"
-#include "pw_multibuf/header_chunk_region_tracker.h"
+#include "pw_async2/dispatcher_for_test.h"
 #include "pw_multibuf/simple_allocator.h"
+#include "pw_multibuf/v1/header_chunk_region_tracker.h"
 #include "pw_string/string.h"
 #include "pw_unit_test/framework.h"
 
 namespace {
 
-using ::pw::Result;
 using ::pw::async2::Context;
 using ::pw::async2::Pending;
 using ::pw::async2::Poll;
+using ::pw::async2::PollResult;
 using ::pw::async2::Ready;
 using ::pw::async2::Task;
 using ::pw::async2::Waker;
@@ -41,7 +42,7 @@ class InitializedMultiBuf {
  public:
   InitializedMultiBuf(std::string_view contents) {
     std::optional<pw::multibuf::OwnedChunk> chunk =
-        pw::multibuf::HeaderChunkRegionTracker::AllocateRegionAsChunk(
+        pw::multibuf::v1::HeaderChunkRegionTracker::AllocateRegionAsChunk(
             allocator_, contents.size());
     std::memcpy(chunk.value().data(), contents.data(), contents.size());
     buf_.PushFrontChunk(std::move(*chunk));
@@ -87,7 +88,7 @@ class TestChannelPair {
 // TODO: b/330788671 - Have the test tasks run in multiple stages to ensure that
 //     wakers are stored / woken properly by ForwardingChannel.
 TEST(ForwardingDatagramChannel, ForwardsEmptyDatagrams) {
-  pw::async2::Dispatcher dispatcher;
+  pw::async2::DispatcherForTest dispatcher;
 
   class : public pw::async2::Task {
    public:
@@ -138,12 +139,12 @@ TEST(ForwardingDatagramChannel, ForwardsEmptyDatagrams) {
 
   dispatcher.Post(test_task);
 
-  EXPECT_TRUE(dispatcher.RunUntilStalled().IsReady());
+  dispatcher.RunToCompletion();
   EXPECT_EQ(test_task.test_completed, 1);
 }
 
 TEST(ForwardingDatagramChannel, ForwardsNonEmptyDatagrams) {
-  pw::async2::Dispatcher dispatcher;
+  pw::async2::DispatcherForTest dispatcher;
 
   class : public pw::async2::Task {
    public:
@@ -185,12 +186,12 @@ TEST(ForwardingDatagramChannel, ForwardsNonEmptyDatagrams) {
 
   dispatcher.Post(test_task);
 
-  EXPECT_TRUE(dispatcher.RunUntilStalled().IsReady());
+  dispatcher.RunToCompletion();
   EXPECT_EQ(test_task.test_completed, 1);
 }
 
 TEST(ForwardingDatagramChannel, ForwardsDatagrams) {
-  pw::async2::Dispatcher dispatcher;
+  pw::async2::DispatcherForTest dispatcher;
 
   class : public pw::async2::Task {
    public:
@@ -241,7 +242,7 @@ TEST(ForwardingDatagramChannel, ForwardsDatagrams) {
 
   dispatcher.Post(test_task);
 
-  EXPECT_TRUE(dispatcher.RunUntilStalled().IsReady());
+  dispatcher.RunToCompletion();
   EXPECT_EQ(test_task.test_completed, 1);
 }
 
@@ -255,7 +256,7 @@ TEST(ForwardingDatagramchannel, PendCloseAwakensAndClosesPeer) {
 
    private:
     pw::async2::Poll<> DoPend(Context& cx) final {
-      Poll<Result<MultiBuf>> read = reader_.PendRead(cx);
+      PollResult<MultiBuf> read = reader_.PendRead(cx);
       if (read.IsPending()) {
         PW_ASYNC_STORE_WAKER(
             cx, waker, "TryToReadUntilClosed is waiting for reader");
@@ -274,13 +275,13 @@ TEST(ForwardingDatagramchannel, PendCloseAwakensAndClosesPeer) {
     DatagramReader& reader_;
   };
 
-  pw::async2::Dispatcher dispatcher;
+  pw::async2::DispatcherForTest dispatcher;
   TestChannelPair<pw::channel::DataType::kDatagram> pair;
   TryToReadUntilClosed read_task(pair->first());
   dispatcher.Post(read_task);
 
-  EXPECT_EQ(dispatcher.RunUntilStalled(), Pending());
-  EXPECT_EQ(dispatcher.RunUntilStalled(), Pending());
+  EXPECT_TRUE(dispatcher.RunUntilStalled());
+  EXPECT_TRUE(dispatcher.RunUntilStalled());
 
   Waker empty_waker;
   Context empty_cx(dispatcher, empty_waker);
@@ -297,20 +298,20 @@ TEST(ForwardingDatagramchannel, PendCloseAwakensAndClosesPeer) {
 
   // First should read the packet and immediately be marked closed.
   EXPECT_EQ(read_task.packets_read, 0);
-  EXPECT_EQ(dispatcher.RunUntilStalled(), Pending());
+  EXPECT_TRUE(dispatcher.RunUntilStalled());
   EXPECT_EQ(read_task.packets_read, 1);
 
   EXPECT_FALSE(pair->first().is_read_or_write_open());
 
-  std::move(read_task.waker).Wake();  // wake the task so it runs again
-  EXPECT_EQ(dispatcher.RunUntilStalled(), Ready());  // runs to completion
+  read_task.waker.Wake();        // wake the task so it runs again
+  dispatcher.RunToCompletion();  // runs to completion
 
   EXPECT_FALSE(pair->first().is_read_or_write_open());
   EXPECT_EQ(read_task.packets_read, 1);
 }
 
 TEST(ForwardingByteChannel, IgnoresEmptyWrites) {
-  pw::async2::Dispatcher dispatcher;
+  pw::async2::DispatcherForTest dispatcher;
 
   class : public pw::async2::Task {
    public:
@@ -349,7 +350,7 @@ TEST(ForwardingByteChannel, IgnoresEmptyWrites) {
 
   dispatcher.Post(test_task);
 
-  EXPECT_TRUE(dispatcher.RunUntilStalled().IsReady());
+  dispatcher.RunToCompletion();
   EXPECT_EQ(test_task.test_completed, 1);
 }
 
@@ -398,18 +399,18 @@ TEST(ForwardingByteChannel, WriteData) {
   ReadTask read_task(*pair);
   WriteTask write_task(*pair, data.Take());
 
-  pw::async2::Dispatcher dispatcher;
+  pw::async2::DispatcherForTest dispatcher;
 
   dispatcher.Post(read_task);
-  ASSERT_FALSE(dispatcher.RunUntilStalled().IsReady());
-  ASSERT_FALSE(dispatcher.RunUntilStalled().IsReady());
+  EXPECT_TRUE(dispatcher.RunUntilStalled());
+  EXPECT_TRUE(dispatcher.RunUntilStalled());
 
   dispatcher.Post(write_task);
-  ASSERT_TRUE(dispatcher.RunUntilStalled().IsReady());
+  dispatcher.RunToCompletion();
 }
 
 TEST(ForwardingByteChannel, WriteDataInMultiplePieces) {
-  pw::async2::Dispatcher dispatcher;
+  pw::async2::DispatcherForTest dispatcher;
 
   class : public pw::async2::Task {
    public:
@@ -461,7 +462,7 @@ TEST(ForwardingByteChannel, WriteDataInMultiplePieces) {
 
   dispatcher.Post(test_task);
 
-  EXPECT_TRUE(dispatcher.RunUntilStalled().IsReady());
+  dispatcher.RunToCompletion();
   EXPECT_EQ(test_task.test_completed, 1);
 }
 
@@ -475,7 +476,7 @@ TEST(ForwardingByteChannel, PendCloseAwakensAndClosesPeer) {
 
    private:
     pw::async2::Poll<> DoPend(Context& cx) final {
-      Poll<Result<MultiBuf>> read = reader_.PendRead(cx);
+      PollResult<MultiBuf> read = reader_.PendRead(cx);
       if (read.IsPending()) {
         PW_ASYNC_STORE_WAKER(
             cx, waker, "TryToReadUntilClosed is waiting for reader");
@@ -494,13 +495,13 @@ TEST(ForwardingByteChannel, PendCloseAwakensAndClosesPeer) {
     ByteReader& reader_;
   };
 
-  pw::async2::Dispatcher dispatcher;
+  pw::async2::DispatcherForTest dispatcher;
   TestChannelPair<pw::channel::DataType::kByte> pair;
   TryToReadUntilClosed read_task(pair->first());
   dispatcher.Post(read_task);
 
-  EXPECT_EQ(dispatcher.RunUntilStalled(), Pending());
-  EXPECT_EQ(dispatcher.RunUntilStalled(), Pending());
+  EXPECT_TRUE(dispatcher.RunUntilStalled());
+  EXPECT_TRUE(dispatcher.RunUntilStalled());
 
   Waker empty_waker;
   Context empty_cx(dispatcher, empty_waker);
@@ -519,13 +520,13 @@ TEST(ForwardingByteChannel, PendCloseAwakensAndClosesPeer) {
 
   // First should read the packet and immediately be marked closed.
   EXPECT_EQ(read_task.bytes_read, 0);
-  EXPECT_EQ(dispatcher.RunUntilStalled(), Pending());
+  EXPECT_TRUE(dispatcher.RunUntilStalled());
   EXPECT_EQ(read_task.bytes_read, 5);
 
   EXPECT_FALSE(pair->second().is_read_or_write_open());
 
-  std::move(read_task.waker).Wake();  // wake the task so it runs again
-  EXPECT_EQ(dispatcher.RunUntilStalled(), Ready());  // runs to completion
+  read_task.waker.Wake();        // wake the task so it runs again
+  dispatcher.RunToCompletion();  // runs to completion
 
   EXPECT_FALSE(pair->first().is_read_or_write_open());
   EXPECT_EQ(read_task.bytes_read, 5);

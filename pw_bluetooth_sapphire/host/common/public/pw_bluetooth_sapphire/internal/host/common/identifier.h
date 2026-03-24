@@ -19,6 +19,7 @@
 #include <cstdint>
 #include <functional>
 #include <string>
+#include <type_traits>
 
 namespace bt {
 
@@ -58,6 +59,9 @@ class Identifier {
   bool operator!=(const Identifier& other) const {
     return value_ != other.value_;
   }
+
+  // Postfix increment operator
+  Identifier operator++(int) { return Identifier(value_++); }
 
   // Returns a string representation of this identifier. This function allocates
   // memory.

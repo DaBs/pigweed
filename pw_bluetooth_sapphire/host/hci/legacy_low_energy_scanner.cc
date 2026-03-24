@@ -22,7 +22,7 @@ namespace pwemb = pw::bluetooth::emboss;
 
 LegacyLowEnergyScanner::LegacyLowEnergyScanner(
     LocalAddressDelegate* local_addr_delegate,
-    const PacketFilterConfig& packet_filter_config,
+    const AdvertisingPacketFilter::Config& packet_filter_config,
     Transport::WeakPtr transport,
     pw::async::Dispatcher& pw_dispatcher)
     : LowEnergyScanner(local_addr_delegate,
@@ -64,7 +64,7 @@ bool LegacyLowEnergyScanner::StartScan(const ScanOptions& options,
 }
 
 CommandPacket LegacyLowEnergyScanner::BuildSetScanParametersPacket(
-    const DeviceAddress& local_address, const ScanOptions& options) {
+    const DeviceAddress& local_address, const ScanOptions& options) const {
   auto packet = hci::CommandPacket::New<
       pw::bluetooth::emboss::LESetScanParametersCommandWriter>(
       hci_spec::kLESetScanParameters);
@@ -92,7 +92,7 @@ CommandPacket LegacyLowEnergyScanner::BuildSetScanParametersPacket(
 
 CommandPacket LegacyLowEnergyScanner::BuildEnablePacket(
     const ScanOptions& options,
-    pw::bluetooth::emboss::GenericEnableParam enable) {
+    pw::bluetooth::emboss::GenericEnableParam enable) const {
   auto packet =
       CommandPacket::New<pw::bluetooth::emboss::LESetScanEnableCommandWriter>(
           hci_spec::kLESetScanEnable);
@@ -124,7 +124,7 @@ void LegacyLowEnergyScanner::HandleScanResponse(const DeviceAddress& address,
   pending->result().set_resolved(resolved);
   pending->result().set_rssi(rssi);
 
-  delegate()->OnPeerFound(pending->result());
+  NotifyPeerFound(pending->result());
 
   // The callback handler may stop the scan, destroying objects within the
   // LowEnergyScanner. Avoid doing anything more to prevent use after free
@@ -263,12 +263,12 @@ void LegacyLowEnergyScanner::OnAdvertisingReportEvent(
     result.set_rssi(report.rssi().Read());
 
     if (directed) {
-      delegate()->OnDirectedAdvertisement(result);
+      NotifyDirectedAdvertisement(result);
       continue;
     }
 
     if (!needs_scan_rsp) {
-      delegate()->OnPeerFound(result);
+      NotifyPeerFound(result);
       continue;
     }
 

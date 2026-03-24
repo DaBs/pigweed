@@ -49,13 +49,20 @@ Status Decoder::SkipField() {
 }
 
 uint32_t Decoder::FieldNumber() const {
-  uint64_t key;
-  varint::Decode(proto_, &key);
-  if (!FieldKey::IsValidKey(key)) {
+  Result<FieldKey> key = GetFieldKey();
+  if (!key.ok()) {
     return 0;
   }
+  return key.value().field_number();
+}
+
+Result<FieldKey> Decoder::GetFieldKey() const {
+  uint64_t key;
+  if (varint::Decode(proto_, &key) == 0 || !FieldKey::IsValidKey(key)) {
+    return Status::DataLoss();
+  }
   PW_DCHECK(key <= std::numeric_limits<uint32_t>::max());
-  return FieldKey(static_cast<uint32_t>(key)).field_number();
+  return FieldKey(static_cast<uint32_t>(key));
 }
 
 Status Decoder::ReadUint32(uint32_t* out) {
@@ -80,7 +87,7 @@ Status Decoder::ReadSint32(int32_t* out) {
   if (value > std::numeric_limits<int32_t>::max()) {
     return Status::OutOfRange();
   }
-  *out = static_cast<uint32_t>(value);
+  *out = static_cast<int32_t>(value);
   return OkStatus();
 }
 
@@ -124,13 +131,13 @@ Decoder::FieldSize Decoder::GetFieldSize() const {
 
   span<const std::byte> remainder = proto_.subspan(key_size);
   uint64_t value = 0;
-  size_t expected_size = 0;
+  size_t expected_value_size = 0;
 
   PW_DCHECK(key <= std::numeric_limits<uint32_t>::max());
   switch (FieldKey(static_cast<uint32_t>(key)).wire_type()) {
     case WireType::kVarint:
-      expected_size = varint::Decode(remainder, &value);
-      if (expected_size == 0) {
+      expected_value_size = varint::Decode(remainder, &value);
+      if (expected_value_size == 0) {
         return FieldSize::Invalid();
       }
       break;
@@ -142,23 +149,23 @@ Decoder::FieldSize Decoder::GetFieldSize() const {
         return FieldSize::Invalid();
       }
       key_size += delimited_size;
-      expected_size += value;
+      expected_value_size += value;
       break;
     }
     case WireType::kFixed32:
-      expected_size = sizeof(uint32_t);
+      expected_value_size = sizeof(uint32_t);
       break;
 
     case WireType::kFixed64:
-      expected_size = sizeof(uint64_t);
+      expected_value_size = sizeof(uint64_t);
       break;
   }
 
-  if (remainder.size() < expected_size) {
+  if (key_size + expected_value_size > proto_.size()) {
     return FieldSize::Invalid();
   }
 
-  return FieldSize{key_size, expected_size};
+  return FieldSize{key_size, expected_value_size};
 }
 
 Status Decoder::ConsumeKey(WireType expected_type) {

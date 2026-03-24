@@ -15,10 +15,12 @@
 #include "pw_metric/metric.h"
 
 #include <array>
+#include <atomic>
+#include <limits>
 
 #include "pw_assert/check.h"
 #include "pw_log/log.h"
-#include "pw_preprocessor/compiler.h"
+#include "pw_numeric/checked_arithmetic.h"
 #include "pw_span/span.h"
 #include "pw_tokenizer/base64.h"
 
@@ -52,47 +54,73 @@ const char* Indent(int level) {
 }  // namespace
 
 // Enable easier registration when used as a member.
-Metric::Metric(Token name, float value, IntrusiveList<Metric>& metrics)
+Metric::Metric(Token name, float value, MetricList& metrics)
     : Metric(name, value) {
-  metrics.push_front(*this);
+  metrics.list().push_front(*this);
 }
-Metric::Metric(Token name, uint32_t value, IntrusiveList<Metric>& metrics)
+Metric::Metric(Token name, uint32_t value, MetricList& metrics)
     : Metric(name, value) {
-  metrics.push_front(*this);
+  metrics.list().push_front(*this);
+}
+
+Metric::~Metric() {
+  if (!unlisted()) {
+    unlist();
+  }
 }
 
 float Metric::as_float() const {
   PW_DCHECK(is_float());
-  return float_;
+  return float_.load(std::memory_order_relaxed);
 }
 
 uint32_t Metric::as_int() const {
   PW_DCHECK(is_int());
-  return uint_;
+  return uint_.load(std::memory_order_relaxed);
 }
 
 void Metric::Increment(uint32_t amount) {
   PW_DCHECK(is_int());
-  if (PW_ADD_OVERFLOW(uint_, amount, &uint_)) {
-    uint_ = std::numeric_limits<uint32_t>::max();
+
+  uint32_t value = uint_.load();
+  uint32_t updated;
+
+  if (value == std::numeric_limits<uint32_t>::max()) {
+    return;
   }
+
+  do {
+    if (!CheckedAdd(value, amount, updated)) {
+      updated = std::numeric_limits<uint32_t>::max();
+    }
+  } while (!uint_.compare_exchange_weak(value, updated));
 }
 
 void Metric::Decrement(uint32_t amount) {
   PW_DCHECK(is_int());
-  if (PW_SUB_OVERFLOW(uint_, amount, &uint_)) {
-    uint_ = 0;
-  }
+
+  uint32_t value = uint_.load();
+  uint32_t updated;
+
+  do {
+    if (value == 0) {
+      return;
+    }
+
+    if (!CheckedSub(value, amount, updated)) {
+      updated = 0;
+    }
+  } while (!uint_.compare_exchange_weak(value, updated));
 }
 
 void Metric::SetInt(uint32_t value) {
   PW_DCHECK(is_int());
-  uint_ = value;
+  uint_.store(value, std::memory_order_relaxed);
 }
 
 void Metric::SetFloat(float value) {
   PW_DCHECK(is_float());
-  float_ = value;
+  float_.store(value, std::memory_order_relaxed);
 }
 
 void Metric::Dump(int level, bool last) const {
@@ -116,16 +144,25 @@ void Metric::Dump(int level, bool last) const {
   }
 }
 
-void Metric::Dump(const IntrusiveList<Metric>& metrics, int level) {
-  auto iter = metrics.begin();
-  while (iter != metrics.end()) {
+void Metric::Dump(const MetricList& metrics, int level) {
+  const auto& list = metrics.list();
+  auto iter = list.begin();
+  while (iter != list.end()) {
     const Metric& m = *iter++;
-    m.Dump(level, iter == metrics.end());
+    m.Dump(level, iter == list.end());
   }
 }
 
-Group::Group(Token name, IntrusiveList<Group>& groups) : name_(name) {
-  groups.push_front(*this);
+Group::Group(Token name, GroupList& groups) : name_(name) {
+  groups.list().push_front(*this);
+}
+
+Group::Group(Token name) : name_(name) {}
+
+Group::~Group() {
+  if (!unlisted()) {
+    unlist();
+  }
 }
 
 void Group::Dump() const {
@@ -144,11 +181,12 @@ void Group::Dump(int level, bool last) const {
   PW_LOG_INFO("%s}%s", indent, comma);
 }
 
-void Group::Dump(const IntrusiveList<Group>& groups, int level) {
-  auto iter = groups.begin();
-  while (iter != groups.end()) {
+void Group::Dump(const GroupList& groups, int level) {
+  const auto& list = groups.list();
+  auto iter = list.begin();
+  while (iter != list.end()) {
     const Group& g = *iter++;
-    g.Dump(level, iter == groups.end());
+    g.Dump(level, iter == list.end());
   }
 }
 

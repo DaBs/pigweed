@@ -12,16 +12,18 @@
 # License for the specific language governing permissions and limitations under
 # the License.
 
-load("@rules_python//python:defs.bzl", "py_library")
+load("@bazel_skylib//rules:common_settings.bzl", "bool_flag")
+load("@bazel_skylib//rules:native_binary.bzl", "native_binary")
+load("@bazel_skylib//rules:write_file.bzl", "write_file")
 load("@rules_python//python/entry_points:py_console_script_binary.bzl", "py_console_script_binary")
 load("//pw_build:pw_py_importable_runfile.bzl", "pw_py_importable_runfile")
-load("//pw_build:python.bzl", "pw_py_binary", "pw_py_test")
+load("//pw_build:python.bzl", "pw_py_binary", "pw_py_library", "pw_py_test")
 
 package(default_visibility = ["//visibility:public"])
 
 licenses(["notice"])
 
-py_library(
+pw_py_library(
     name = "pw_presubmit",
     srcs = [
         "pw_presubmit/__init__.py",
@@ -31,16 +33,6 @@ py_library(
         "pw_presubmit/build.py",
         "pw_presubmit/cli.py",
         "pw_presubmit/cpp_checks.py",
-        "pw_presubmit/format/__init__.py",
-        "pw_presubmit/format/bazel.py",
-        "pw_presubmit/format/core.py",
-        "pw_presubmit/format/cpp.py",
-        "pw_presubmit/format/gn.py",
-        "pw_presubmit/format/private/__init__.py",
-        "pw_presubmit/format/private/cli.py",
-        "pw_presubmit/format/private/cli_support.py",
-        "pw_presubmit/format/python.py",
-        "pw_presubmit/format/test_data/__init__.py",
         "pw_presubmit/format_code.py",
         "pw_presubmit/git_repo.py",
         "pw_presubmit/gitmodules.py",
@@ -53,61 +45,81 @@ py_library(
         "pw_presubmit/ninja_parser.py",
         "pw_presubmit/npm_presubmit.py",
         "pw_presubmit/owners_checks.py",
+        "pw_presubmit/pigweed_local_presubmit.py",
         "pw_presubmit/pigweed_presubmit.py",
         "pw_presubmit/presubmit.py",
         "pw_presubmit/presubmit_context.py",
+        "pw_presubmit/pw_internal_namespace.py",
         "pw_presubmit/python_checks.py",
         "pw_presubmit/repo.py",
-        "pw_presubmit/rst_format.py",
         "pw_presubmit/shell_checks.py",
         "pw_presubmit/source_in_build.py",
         "pw_presubmit/todo_check.py",
         "pw_presubmit/tools.py",
-    ],
-    data = [
-        "pw_presubmit/format/test_data/bazel_test_data.bazel",
-        "pw_presubmit/format/test_data/bazel_test_data_golden.bazel",
-        "pw_presubmit/format/test_data/clang_format_config",
-        "pw_presubmit/format/test_data/cpp_test_data.cc",
-        "pw_presubmit/format/test_data/cpp_test_data_golden.cc",
-        "pw_presubmit/format/test_data/gn_test_data.gn",
-        "pw_presubmit/format/test_data/gn_test_data_golden.gn",
-        "pw_presubmit/format/test_data/malformed_file.txt",
-        "pw_presubmit/format/test_data/python_test_data.py",
-        "pw_presubmit/format/test_data/python_test_data_golden.py",
+        "pw_presubmit/upstream_checks.py",
     ],
     imports = ["."],
+    # TODO: b/433321728 - Imports private parts of pw_env_setup.
+    tags = [
+        "nomypy",
+        "nopylint",
+    ],
     deps = [
+        ":format_core",
+        "//pw_build/py:pw_build",
         "//pw_cli/py:pw_cli",
+        "//pw_config_loader/py:pw_config_loader",
         "//pw_env_setup/py:pw_env_setup",
         "//pw_package/py:pw_package",
         "@rules_python//python/runfiles",
     ],
 )
 
-py_library(
+pw_py_library(
     name = "format_core",
     srcs = [
         "pw_presubmit/format/__init__.py",
         "pw_presubmit/format/bazel.py",
+        "pw_presubmit/format/cmake.py",
         "pw_presubmit/format/core.py",
         "pw_presubmit/format/cpp.py",
+        "pw_presubmit/format/css.py",
         "pw_presubmit/format/gn.py",
+        "pw_presubmit/format/go.py",
+        "pw_presubmit/format/java.py",
+        "pw_presubmit/format/javascript.py",
+        "pw_presubmit/format/json.py",
+        "pw_presubmit/format/markdown.py",
+        "pw_presubmit/format/owners.py",
+        "pw_presubmit/format/prettier.py",
         "pw_presubmit/format/private/__init__.py",
         "pw_presubmit/format/private/cli.py",
         "pw_presubmit/format/private/cli_support.py",
+        "pw_presubmit/format/protobuf.py",
         "pw_presubmit/format/python.py",
+        "pw_presubmit/format/rst.py",
+        "pw_presubmit/format/rust.py",
+        "pw_presubmit/format/starlark.py",
+        "pw_presubmit/format/typescript.py",
+        "pw_presubmit/format/whitespace.py",
     ],
     imports = ["."],
     visibility = ["//visibility:private"],
     deps = [
         "//pw_cli/py:pw_cli",
+        "//pw_config_loader/py:pw_config_loader",
     ],
 )
 
 py_console_script_binary(
     name = "black",
-    pkg = "@python_packages//black",
+    pkg = "@pigweed_python_packages//black",
+    tags = [
+        # TODO: https://github.com/bazel-contrib/rules_python/issues/3126 - Remove
+        # this tag once the bug in rules_python is fixed.
+        "nomypy",
+        "manual",
+    ],
     visibility = ["//visibility:private"],
 )
 
@@ -115,23 +127,344 @@ pw_py_importable_runfile(
     name = "black_runfiles",
     src = ":black",
     executable = True,
+    tags = ["manual"],
     visibility = ["//visibility:private"],
+)
+
+pw_py_importable_runfile(
+    name = "buildifier_runfiles",
+    src = "@buildifier",
+    executable = True,
+    tags = ["manual"],
+    visibility = ["//visibility:private"],
+)
+
+pw_py_importable_runfile(
+    name = "gofmt_runfiles",
+    src = "@go//:bin/gofmt",
+    executable = True,
+    tags = ["manual"],
+    visibility = ["//visibility:private"],
+)
+
+pw_py_importable_runfile(
+    name = "gn_runfiles",
+    src = "@gn",
+    executable = True,
+    tags = ["manual"],
+    visibility = ["//visibility:private"],
+)
+
+pw_py_importable_runfile(
+    name = "prettier_runfiles",
+    src = "//pw_web:prettier",
+    executable = True,
+    tags = ["manual"],
+    visibility = ["//visibility:private"],
+)
+
+pw_py_importable_runfile(
+    name = "rustfmt_runfiles",
+    src = "@rules_rust//tools/upstream_wrapper:rustfmt",
+    executable = True,
+    tags = ["manual"],
+    target_compatible_with = select({
+        "@platforms//os:none": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
+    visibility = ["//visibility:private"],
+)
+
+bool_flag(
+    name = "enable_python_formatter",
+    build_setting_default = True,
+)
+
+bool_flag(
+    name = "enable_bazel_formatter",
+    build_setting_default = True,
+)
+
+bool_flag(
+    name = "enable_cpp_formatter",
+    build_setting_default = True,
+)
+
+bool_flag(
+    name = "enable_cmake_formatter",
+    build_setting_default = True,
+)
+
+bool_flag(
+    name = "enable_css_formatter",
+    build_setting_default = True,
+)
+
+bool_flag(
+    name = "enable_gn_formatter",
+    build_setting_default = False,
+)
+
+bool_flag(
+    name = "enable_go_formatter",
+    build_setting_default = False,
+)
+
+bool_flag(
+    name = "enable_java_formatter",
+    build_setting_default = True,
+)
+
+bool_flag(
+    name = "enable_javascript_formatter",
+    build_setting_default = False,
+)
+
+bool_flag(
+    name = "enable_json_formatter",
+    build_setting_default = True,
+)
+
+bool_flag(
+    name = "enable_markdown_formatter",
+    build_setting_default = True,
+)
+
+bool_flag(
+    name = "enable_owners_formatter",
+    build_setting_default = True,
+)
+
+bool_flag(
+    name = "enable_protobuf_formatter",
+    build_setting_default = True,
+)
+
+bool_flag(
+    name = "enable_rst_formatter",
+    build_setting_default = True,
+)
+
+bool_flag(
+    name = "enable_rust_formatter",
+    build_setting_default = False,
+)
+
+bool_flag(
+    name = "enable_starlark_formatter",
+    build_setting_default = True,
+)
+
+bool_flag(
+    name = "enable_typescript_formatter",
+    build_setting_default = False,
+)
+
+config_setting(
+    name = "python_formatter_is_enabled",
+    flag_values = {":enable_python_formatter": "True"},
+)
+
+config_setting(
+    name = "bazel_formatter_is_enabled",
+    flag_values = {":enable_bazel_formatter": "True"},
+)
+
+config_setting(
+    name = "cpp_formatter_is_enabled",
+    flag_values = {":enable_cpp_formatter": "True"},
+)
+
+config_setting(
+    name = "cmake_formatter_is_enabled",
+    flag_values = {":enable_cmake_formatter": "True"},
+)
+
+config_setting(
+    name = "css_formatter_is_enabled",
+    flag_values = {":enable_css_formatter": "True"},
+)
+
+config_setting(
+    name = "gn_formatter_is_enabled",
+    flag_values = {":enable_gn_formatter": "True"},
+)
+
+config_setting(
+    name = "go_formatter_is_enabled",
+    flag_values = {":enable_go_formatter": "True"},
+)
+
+config_setting(
+    name = "java_formatter_is_enabled",
+    flag_values = {":enable_java_formatter": "True"},
+)
+
+config_setting(
+    name = "javascript_formatter_is_enabled",
+    flag_values = {":enable_javascript_formatter": "True"},
+)
+
+config_setting(
+    name = "json_formatter_is_enabled",
+    flag_values = {":enable_json_formatter": "True"},
+)
+
+config_setting(
+    name = "markdown_formatter_is_enabled",
+    flag_values = {":enable_markdown_formatter": "True"},
+)
+
+config_setting(
+    name = "owners_formatter_is_enabled",
+    flag_values = {":enable_owners_formatter": "True"},
+)
+
+config_setting(
+    name = "protobuf_formatter_is_enabled",
+    flag_values = {":enable_protobuf_formatter": "True"},
+)
+
+config_setting(
+    name = "rst_formatter_is_enabled",
+    flag_values = {":enable_rst_formatter": "True"},
+)
+
+config_setting(
+    name = "rust_formatter_is_enabled",
+    flag_values = {":enable_rust_formatter": "True"},
+)
+
+config_setting(
+    name = "starlark_formatter_is_enabled",
+    flag_values = {":enable_starlark_formatter": "True"},
+)
+
+config_setting(
+    name = "typescript_formatter_is_enabled",
+    flag_values = {":enable_typescript_formatter": "True"},
+)
+
+# This file is loaded by the formatter entry point at runtime and disables
+# formatters by their mnemonic.
+write_file(
+    name = "disabled_formatters",
+    out = "pigweed_format/disabled_formatters.txt",
+    content = select({
+        ":python_formatter_is_enabled": [],
+        "//conditions:default": ["Python"],
+    }) + select({
+        ":bazel_formatter_is_enabled": [],
+        "//conditions:default": ["Bazel"],
+    }) + select({
+        ":cpp_formatter_is_enabled": [],
+        "//conditions:default": ["C/C++"],
+    }) + select({
+        ":cmake_formatter_is_enabled": [],
+        "//conditions:default": ["CMake"],
+    }) + select({
+        ":css_formatter_is_enabled": [],
+        "//conditions:default": ["CSS"],
+    }) + select({
+        ":gn_formatter_is_enabled": [],
+        "//conditions:default": ["GN"],
+    }) + select({
+        ":go_formatter_is_enabled": [],
+        "//conditions:default": ["Go"],
+    }) + select({
+        ":java_formatter_is_enabled": [],
+        "//conditions:default": ["Java"],
+    }) + select({
+        ":javascript_formatter_is_enabled": [],
+        "//conditions:default": ["JavaScript"],
+    }) + select({
+        ":json_formatter_is_enabled": [],
+        "//conditions:default": ["JSON"],
+    }) + select({
+        ":markdown_formatter_is_enabled": [],
+        "//conditions:default": ["Markdown"],
+    }) + select({
+        ":owners_formatter_is_enabled": [],
+        "//conditions:default": ["Owners"],
+    }) + select({
+        ":protobuf_formatter_is_enabled": [],
+        "//conditions:default": ["Protobuf"],
+    }) + select({
+        ":rst_formatter_is_enabled": [],
+        "//conditions:default": ["reStructuredText"],
+    }) + select({
+        ":rust_formatter_is_enabled": [],
+        "//conditions:default": ["Rust"],
+    }) + select({
+        ":starlark_formatter_is_enabled": [],
+        "//conditions:default": ["Starlark"],
+    }) + select({
+        ":typescript_formatter_is_enabled": [],
+        "//conditions:default": ["TypeScript"],
+    }),
+    visibility = ["//visibility:private"],
+)
+
+pw_py_library(
+    name = "formatters",
+    srcs = ["pw_presubmit/format/formatters.py"],
+    data = [
+        ":disabled_formatters",
+    ],
+    deps = [
+        ":format_core",
+        "//pw_build/py:pw_build",
+    ] + select({
+        ":python_formatter_is_enabled": [":black_runfiles"],
+        "//conditions:default": [],
+    }) + select({
+        ":bazel_formatter_is_enabled": [":buildifier_runfiles"],
+        ":starlark_formatter_is_enabled": [":buildifier_runfiles"],
+        "//conditions:default": [],
+    }) + select({
+        ":cpp_formatter_is_enabled": ["@llvm_toolchain//:py_clang_format"],
+        ":java_formatter_is_enabled": ["@llvm_toolchain//:py_clang_format"],
+        ":protobuf_formatter_is_enabled": ["@llvm_toolchain//:py_clang_format"],
+        "//conditions:default": [],
+    }) + select({
+        ":gn_formatter_is_enabled": [":gn_runfiles"],
+        "//conditions:default": [],
+    }) + select({
+        ":go_formatter_is_enabled": [":gofmt_runfiles"],
+        "//conditions:default": [],
+    }) + select({
+        ":javascript_formatter_is_enabled": [":prettier_runfiles"],
+        ":typescript_formatter_is_enabled": [":prettier_runfiles"],
+        "//conditions:default": [],
+    }) + select({
+        ":rust_formatter_is_enabled": [":rustfmt_runfiles"],
+        "//conditions:default": [],
+    }),
 )
 
 pw_py_binary(
     name = "format",
     srcs = ["pigweed_format/__main__.py"],
-    data = [
-        "//pw_presubmit/py:black",
-    ],
     main = "pigweed_format/__main__.py",
     deps = [
-        ":black_runfiles",
+        ":formatters",
         "//pw_build/py:pw_build",
-    ] + select({
-        "@platforms//os:macos": ["@llvm_toolchain_macos//:py_clang_format"],
-        "//conditions:default": ["@llvm_toolchain//:py_clang_format"],
-    }),
+        "@rules_python//python/runfiles",
+    ],
+)
+
+pw_py_binary(
+    name = "local_presubmit",
+    srcs = ["pw_presubmit/pigweed_local_presubmit.py"],
+    main = "pw_presubmit/pigweed_local_presubmit.py",
+    deps = [":pw_presubmit"],
+)
+
+pw_py_binary(
+    name = "keep_sorted",
+    srcs = ["pw_presubmit/keep_sorted.py"],
+    main = "pw_presubmit/keep_sorted.py",
+    deps = [":pw_presubmit"],
 )
 
 pw_py_test(
@@ -142,9 +475,16 @@ pw_py_test(
     ],
 )
 
-py_library(
+pw_py_library(
     name = "format_testing_utils",
     srcs = ["format_testing_utils.py"],
+    deps = ["//pw_cli/py:pw_cli"],
+)
+
+pw_py_test(
+    name = "block_submission_test",
+    srcs = ["block_submission_test.py"],
+    deps = [":pw_presubmit"],
 )
 
 pw_py_test(
@@ -156,19 +496,22 @@ pw_py_test(
 pw_py_test(
     name = "bazel_format_test",
     srcs = ["bazel_format_test.py"],
-    # TODO(b/314139942): Requires buildifier on the path.
-    tags = ["manual"],
+    data = [
+        "pw_presubmit/format/test_data/bazel_test_data.bazel",
+        "pw_presubmit/format/test_data/bazel_test_data_golden.bazel",
+        "pw_presubmit/format/test_data/malformed_file.txt",
+    ],
     deps = [
+        ":buildifier_runfiles",
         ":format_testing_utils",
         ":pw_presubmit",
+        "//pw_build/py:pw_build",
     ],
 )
 
 pw_py_test(
     name = "context_test",
     srcs = ["context_test.py"],
-    # TODO(b/374120469): Make PW_PROJECT_ROOT optional for pw presubmit
-    tags = ["manual"],
     deps = [
         ":pw_presubmit",
     ],
@@ -185,11 +528,16 @@ pw_py_test(
 pw_py_test(
     name = "cpp_format_test",
     srcs = ["cpp_format_test.py"],
-    # TODO(b/314139942): Requires clang-format on the path.
-    tags = ["manual"],
+    data = [
+        "pw_presubmit/format/test_data/clang_format_config",
+        "pw_presubmit/format/test_data/cpp_test_data.cc",
+        "pw_presubmit/format/test_data/cpp_test_data_golden.cc",
+    ],
     deps = [
         ":format_testing_utils",
         ":pw_presubmit",
+        "//pw_build/py:pw_build",
+        "@llvm_toolchain//:py_clang_format",
     ],
 )
 
@@ -204,7 +552,7 @@ pw_py_test(
 pw_py_test(
     name = "gitmodules_test",
     srcs = ["gitmodules_test.py"],
-    # TODO(b/314139942): Requires git on the path.
+    # TODO: b/314139942 - Requires git on the path.
     tags = ["manual"],
     deps = [
         ":pw_presubmit",
@@ -214,11 +562,16 @@ pw_py_test(
 pw_py_test(
     name = "gn_format_test",
     srcs = ["gn_format_test.py"],
-    # TODO(b/314139942): Requires GN on the path.
-    tags = ["manual"],
+    data = [
+        "pw_presubmit/format/test_data/gn_test_data.gn",
+        "pw_presubmit/format/test_data/gn_test_data_golden.gn",
+        "pw_presubmit/format/test_data/malformed_file.txt",
+    ],
     deps = [
         ":format_testing_utils",
+        ":gn_runfiles",
         ":pw_presubmit",
+        "//pw_build/py:pw_build",
     ],
 )
 
@@ -257,12 +610,71 @@ pw_py_test(
 pw_py_test(
     name = "python_format_test",
     srcs = ["python_format_test.py"],
-    # TODO(b/314139942): Requires black on the path.
-    tags = ["manual"],
+    data = [
+        "pw_presubmit/format/test_data/black_config.toml",
+        "pw_presubmit/format/test_data/malformed_file.txt",
+        "pw_presubmit/format/test_data/python_test_data.py",
+        "pw_presubmit/format/test_data/python_test_data_golden.py",
+    ],
+    deps = [
+        ":black_runfiles",
+        ":format_testing_utils",
+        ":pw_presubmit",
+        "//pw_build/py:pw_build",
+        "@pigweed_python_packages//black",
+    ],
+)
+
+pw_py_test(
+    name = "rust_format_test",
+    srcs = ["rust_format_test.py"],
+    data = [
+        "pw_presubmit/format/test_data/malformed_file.txt",
+        "pw_presubmit/format/test_data/rust_test_data.rs",
+        "pw_presubmit/format/test_data/rust_test_data_golden.rs",
+        "pw_presubmit/format/test_data/rustfmt.toml",
+    ],
     deps = [
         ":format_testing_utils",
         ":pw_presubmit",
-        "@python_packages//black",
+        ":rustfmt_runfiles",
+        "//pw_build/py:pw_build",
+    ],
+)
+
+pw_py_test(
+    name = "whitespace_format_test",
+    srcs = ["whitespace_format_test.py"],
+    deps = [
+        ":format_core",
+    ],
+)
+
+pw_py_test(
+    name = "json_format_test",
+    srcs = ["json_format_test.py"],
+    data = [
+        "pw_presubmit/format/test_data/json_test_data.json",
+        "pw_presubmit/format/test_data/json_test_data_golden.json",
+        "pw_presubmit/format/test_data/malformed_file.txt",
+    ],
+    deps = [
+        ":format_core",
+    ],
+)
+
+pw_py_test(
+    name = "rst_format_test",
+    srcs = ["rst_format_test.py"],
+    data = [
+        "pw_presubmit/format/test_data/rst_test_data.rst",
+        "pw_presubmit/format/test_data/rst_test_data_golden.rst",
+    ],
+    deps = [
+        ":format_core",
+        ":format_testing_utils",
+        "//pw_build/py:pw_build",
+        "@llvm_toolchain//:py_clang_format",
     ],
 )
 
@@ -288,4 +700,13 @@ pw_py_test(
     deps = [
         ":pw_presubmit",
     ],
+)
+
+# This can't be a native_test because tests run in the sandbox, and won't find
+# any files.
+native_binary(
+    name = "check_formatting",
+    src = ":format",
+    args = ["--check"],
+    tags = ["manual"],
 )

@@ -64,7 +64,10 @@ class ErrorTransferIntegrationTest(test_fixture.TransferIntegrationTest):
         config = self.default_config()
         resource_id = 5
 
-        with tempfile.NamedTemporaryFile() as f_payload, tempfile.NamedTemporaryFile() as f_server_output:
+        with (
+            tempfile.NamedTemporaryFile() as f_payload,
+            tempfile.NamedTemporaryFile() as f_server_output,
+        ):
             # Add the resource at a different resource ID.
             config.server.resources[resource_id + 1].destination_paths.append(
                 f_server_output.name
@@ -196,7 +199,10 @@ class ErrorTransferIntegrationTest(test_fixture.TransferIntegrationTest):
         config = self.default_config()
         resource_id = 5
 
-        with tempfile.NamedTemporaryFile() as f_payload, tempfile.NamedTemporaryFile() as f_client_output:
+        with (
+            tempfile.NamedTemporaryFile() as f_payload,
+            tempfile.NamedTemporaryFile() as f_client_output,
+        ):
             # Add the resource at a different resource ID.
             config.server.resources[resource_id + 1].source_paths.append(
                 f_payload.name

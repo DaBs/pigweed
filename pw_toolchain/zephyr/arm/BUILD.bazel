@@ -64,9 +64,6 @@ cc_args(
     actions = [
         "@rules_cc//cc/toolchains/actions:compile_actions",
     ],
-    args = [
-        "-specs=picolibc.specs",
-    ],
 )
 
 cc_feature(
@@ -80,10 +77,21 @@ cc_args(
     actions = ["@rules_cc//cc/toolchains/actions:link_actions"],
     args = [
         "-Wl,--gc-sections",
-        "-specs=picolibc.specs",
         "-lstdc++",
         "-lc",
         "-lm",
+    ],
+)
+
+cc_args(
+    name = "cortex-m4",
+    actions = [
+        "@rules_cc//cc/toolchains/actions:assembly_actions",
+        "@rules_cc//cc/toolchains/actions:compile_actions",
+        "@rules_cc//cc/toolchains/actions:link_actions",
+    ],
+    args = [
+        "-mcpu=cortex-m4",
     ],
 )
 
@@ -113,6 +121,7 @@ cc_toolchain(
         "//pw_toolchain/cc/args:color_diagnostics",
     ] + select({
         # TODO: https://pwbug.dev/380001331 - Add support for other cortex MCUs
+        "//pw_build/constraints/arm:cortex-m4": [":cortex-m4"],
         "//pw_build/constraints/arm:cortex-m7": [":cortex-m7"],
         "//pw_build/constraints/arm:none": [],
     }) + [
@@ -138,14 +147,27 @@ cc_toolchain(
         # This MUST be the last feature!!!!
         ":cortex_libc",
     ],
+    known_features = [
+        "//pw_toolchain/cc/capability:known_toolchain_types",
+    ],
     target_compatible_with = select({
         # TODO: https://pwbug.dev/380001331 - Add support for other cortex MCUs
+        "//pw_build/constraints/arm:cortex-m4": [],
         "//pw_build/constraints/arm:cortex-m7": [],
         "//pw_build/constraints/arm:none": ["@platforms//:incompatible"],
         "//conditions:default": ["@platforms//:incompatible"],
     }),
     tool_map = "@zephyr_toolchain//:arm_tools",
     visibility = ["//pw_toolchain:__pkg__"],
+)
+
+toolchain(
+    name = "toolchain_cortex-m4",
+    target_compatible_with = [
+        "//pw_build/constraints/arm:cortex-m4",
+    ],
+    toolchain = ":arm_cortex-m",
+    toolchain_type = "@bazel_tools//tools/cpp:toolchain_type",
 )
 
 toolchain(

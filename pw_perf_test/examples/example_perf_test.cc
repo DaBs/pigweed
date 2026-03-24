@@ -21,7 +21,9 @@ namespace {
 
 // DOCSTAG: [pw_perf_test_examples-simulate_work]
 void SimulateWork(size_t a, size_t b) {
-  for (volatile size_t i = 0; i < a * b * 100000; i = i + 1) {
+  volatile size_t i = 0;
+  while (i < a * b * 100000) {
+    i = i + 1;
   }
 }
 // DOCSTAG: [pw_perf_test_examples-simulate_work]

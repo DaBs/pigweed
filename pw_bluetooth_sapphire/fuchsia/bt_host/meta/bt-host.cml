@@ -32,6 +32,15 @@
     },
     use: [
         {
+            protocol: "fuchsia.power.system.ActivityGovernor",
+            availability: "optional",
+        },
+        {
+            config: "fuchsia.power.SuspendEnabled",
+            key: "enable_suspend",
+            type: "bool",
+        },
+        {
             // If the flag is true, then we have the option of using legacy pairing. This will only
             // occur if the peer does NOT support SSP. If the flag is false and the peer does not
             // support SSP, pairing will fail. If the peer supports SSP, then SSP will be used
@@ -41,9 +50,31 @@
             type: "bool",
         },
         {
-            directory: "dev-bt-hci",
+            // The offloaded index to use for SCO offload, when the OFFLOAD path is specified
+            // by the requester.  This is in process of deprecation and should be used
+            // sparingly. See fxbug.dev/42140527
+            config: "fuchsia.bluetooth.ScoOffloadPathIndex",
+            key: "sco_offload_path_index",
+            type: "uint8",
+            availability: "optional",
+            default: 6,
+        },
+        {
+            // If this is set, override the vendor capabilities version that is returned by the firmware
+            // and parse it based on this version.
+            // Provided as a uint16_t, the minor version is usually in the upper 8 bits, with the major 
+            // version being in the lower 8 bits.  i.e. `(minor << 8) | major`
+            // See fxbug.dev/450278813
+            config: "fuchsia.bluetooth.OverrideVendorCapabilitiesVersion",
+            key: "override_vendor_capabilites_version",
+            type: "uint16",
+            availability: "optional",
+            default: 0,
+        },
+        {
+            directory: "dev-bt-hci-instance",
             rights: [ "r*" ],
-            path: "/dev/class/bt-hci",
+            path: "/dev/class/bt-hci/default",
         },
         {
             protocol: [ "fuchsia.bluetooth.host.Receiver" ],

@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Callable, Sequence
 
 from pw_cli.file_filter import FileFilter
-from pw_presubmit import build, format_code, git_repo, presubmit_context
+from pw_presubmit import build, format_code, git_repo
 from pw_presubmit.presubmit import Check, filter_paths
 from pw_presubmit.presubmit_context import (
     PresubmitContext,
@@ -34,7 +34,11 @@ _LOG: logging.Logger = logging.getLogger(__name__)
 # filter within the check or we won't properly ignore files that the caller
 # asked to be ignored.
 
-_DEFAULT_BAZEL_EXTENSIONS = (*format_code.C_FORMAT.extensions,)
+_DEFAULT_BAZEL_EXTENSIONS = (
+    '.py',
+    '.rst',
+    *format_code.C_FORMAT.extensions,
+)
 
 
 def bazel(
@@ -54,12 +58,9 @@ def bazel(
     def source_is_in_bazel_build(ctx: PresubmitContext):
         """Checks that source files are in the Bazel build."""
 
-        paths = source_filter.filter(ctx.all_paths)
-        paths = presubmit_context.apply_exclusions(ctx, paths)
-
         missing = build.check_bazel_build_for_files(
             files_and_extensions_to_check,
-            paths,
+            ctx.paths,
             bazel_dirs=[ctx.root],
         )
 
@@ -101,12 +102,9 @@ def gn(  # pylint: disable=invalid-name
     def source_is_in_gn_build(ctx: PresubmitContext):
         """Checks that source files are in the GN build."""
 
-        paths = source_filter.filter(ctx.all_paths)
-        paths = presubmit_context.apply_exclusions(ctx, paths)
-
         missing = build.check_gn_build_for_files(
             files_and_extensions_to_check,
-            paths,
+            ctx.paths,
             gn_build_files=git_repo.list_files(
                 pathspecs=['BUILD.gn', '*BUILD.gn'], repo_path=ctx.root
             ),
@@ -148,13 +146,10 @@ def cmake(
     def source_is_in_cmake_build(ctx: PresubmitContext):
         """Checks that source files are in the CMake build."""
 
-        paths = source_filter.filter(ctx.all_paths)
-        paths = presubmit_context.apply_exclusions(ctx, paths)
-
         run_cmake(ctx)
         missing = build.check_compile_commands_for_files(
             ctx.output_dir / 'compile_commands.json',
-            (f for f in paths if str(f).endswith(to_check)),
+            (f for f in ctx.paths if str(f).endswith(to_check)),
         )
 
         if missing:
@@ -192,12 +187,9 @@ def soong(  # pylint: disable=invalid-name
     def source_is_in_soong_build(ctx: PresubmitContext):
         """Checks that source files are in the Soong build."""
 
-        paths = source_filter.filter(ctx.all_paths)
-        paths = presubmit_context.apply_exclusions(ctx, paths)
-
         # For now, only check modules where there is an Android.bp file.
         relevant_paths: list[Path] = []
-        for path in paths:
+        for path in ctx.paths:
             # For now, don't require tests be included in Android.bp files.
             split = path.stem.split('_')
             if 'test' in split or 'mock' in split:

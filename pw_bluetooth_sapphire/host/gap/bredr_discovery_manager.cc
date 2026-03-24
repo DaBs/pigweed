@@ -173,18 +173,19 @@ void BrEdrDiscoveryManager::MaybeStartInquiry() {
         hci_spec::kWriteInquiryMode);
     packet.view_t().inquiry_mode().Write(desired_inquiry_mode_);
     cmd_->SendCommand(
-        std::move(packet),
-        [self, mode = desired_inquiry_mode_](auto /*unused*/,
-                                             const hci::EventPacket& event) {
-          if (!self.is_alive()) {
-            return;
-          }
+            std::move(packet),
+            [self, mode = desired_inquiry_mode_](
+                auto /*unused*/, const hci::EventPacket& event) {
+              if (!self.is_alive()) {
+                return;
+              }
 
-          if (!HCI_IS_ERROR(
-                  event, ERROR, "gap-bredr", "write inquiry mode failed")) {
-            self->current_inquiry_mode_ = mode;
-          }
-        });
+              if (!HCI_IS_ERROR(
+                      event, ERROR, "gap-bredr", "write inquiry mode failed")) {
+                self->current_inquiry_mode_ = mode;
+              }
+            })
+        .IgnoreError();
   }
 
   auto inquiry =
@@ -196,48 +197,51 @@ void BrEdrDiscoveryManager::MaybeStartInquiry() {
   view.num_responses().Write(0);
 
   cmd_->SendExclusiveCommand(
-      std::move(inquiry),
-      [self](auto, const hci::EventPacket& event) {
-        if (!self.is_alive()) {
-          return;
-        }
-        auto status = event.ToResult();
-        if (bt_is_error(status, WARN, "gap-bredr", "inquiry error")) {
-          // Failure of some kind, signal error to the sessions.
-          self->InvalidateDiscoverySessions();
+          std::move(inquiry),
+          [self](auto, const hci::EventPacket& event) {
+            if (!self.is_alive()) {
+              return;
+            }
+            auto status = event.ToResult();
+            if (bt_is_error(status, WARN, "gap-bredr", "inquiry error")) {
+              // Failure of some kind, signal error to the sessions.
+              self->InvalidateDiscoverySessions();
 
-          // Fallthrough for callback to pending sessions.
-        }
+              // Fallthrough for callback to pending sessions.
+            }
 
-        // Resolve the request if the controller sent back a Command Complete or
-        // Status event.
-        // TODO(fxbug.dev/42062242): Make it impossible for Command Complete to
-        // happen here and remove handling for it.
-        if (event.event_code() == hci_spec::kCommandStatusEventCode ||
-            event.event_code() == hci_spec::kCommandCompleteEventCode) {
-          // Inquiry started, make sessions for our waiting callbacks.
-          while (!self->pending_discovery_.empty()) {
-            auto callback = std::move(self->pending_discovery_.front());
-            self->pending_discovery_.pop();
-            callback(status,
-                     (status.is_ok() ? self->AddDiscoverySession() : nullptr));
-          }
-          return;
-        }
+            // Resolve the request if the controller sent back a Command
+            // Complete or Status event.
+            // TODO(fxbug.dev/42062242): Make it impossible for Command Complete
+            // to happen here and remove handling for it.
+            if (event.event_code() == hci_spec::kCommandStatusEventCode ||
+                event.event_code() == hci_spec::kCommandCompleteEventCode) {
+              // Inquiry started, make sessions for our waiting callbacks.
+              while (!self->pending_discovery_.empty()) {
+                auto callback = std::move(self->pending_discovery_.front());
+                self->pending_discovery_.pop();
+                callback(
+                    status,
+                    (status.is_ok() ? self->AddDiscoverySession() : nullptr));
+              }
+              return;
+            }
 
-        PW_DCHECK(event.event_code() == hci_spec::kInquiryCompleteEventCode);
-        self->zombie_discovering_.clear();
+            PW_DCHECK(event.event_code() ==
+                      hci_spec::kInquiryCompleteEventCode);
+            self->zombie_discovering_.clear();
 
-        if (bt_is_error(status, TRACE, "gap", "inquiry complete error")) {
-          return;
-        }
+            if (bt_is_error(status, TRACE, "gap", "inquiry complete error")) {
+              return;
+            }
 
-        // We've stopped scanning because we timed out.
-        bt_log(TRACE, "gap-bredr", "inquiry complete, restart");
-        self->MaybeStartInquiry();
-      },
-      hci_spec::kInquiryCompleteEventCode,
-      {hci_spec::kRemoteNameRequest});
+            // We've stopped scanning because we timed out.
+            bt_log(TRACE, "gap-bredr", "inquiry complete, restart");
+            self->MaybeStartInquiry();
+          },
+          hci_spec::kInquiryCompleteEventCode,
+          {hci_spec::kRemoteNameRequest})
+      .IgnoreError();
 }
 
 // Stops the inquiry procedure.
@@ -248,11 +252,13 @@ void BrEdrDiscoveryManager::StopInquiry() {
   const hci::CommandPacket inq_cancel =
       hci::CommandPacket::New<pw::bluetooth::emboss::InquiryCancelCommandView>(
           hci_spec::kInquiryCancel);
-  cmd_->SendCommand(
-      std::move(inq_cancel), [](int64_t, const hci::EventPacket& event) {
-        // Warn if the command failed.
-        HCI_IS_ERROR(event, WARN, "gap-bredr", "inquiry cancel failed");
-      });
+  cmd_->SendCommand(std::move(inq_cancel),
+                    [](int64_t, const hci::EventPacket& event) {
+                      // Warn if the command failed.
+                      HCI_IS_ERROR(
+                          event, WARN, "gap-bredr", "inquiry cancel failed");
+                    })
+      .IgnoreError();
 }
 
 hci::CommandChannel::EventCallbackResult BrEdrDiscoveryManager::InquiryResult(
@@ -326,15 +332,17 @@ void BrEdrDiscoveryManager::UpdateEIRResponseData(
   eir_response_buf.mutable_view(2).Write(
       reinterpret_cast<const uint8_t*>(name.data()), name_size);
 
-  self->cmd_->SendCommand(
-      std::move(write_eir),
-      [self, local_name = std::move(name), cb = std::move(callback)](
-          auto, const hci::EventPacket& event) mutable {
-        if (!HCI_IS_ERROR(event, WARN, "gap", "write EIR failed")) {
-          self->local_name_ = std::move(local_name);
-        }
-        cb(event.ToResult());
-      });
+  self->cmd_
+      ->SendCommand(
+          std::move(write_eir),
+          [self, local_name = std::move(name), cb = std::move(callback)](
+              auto, const hci::EventPacket& event) mutable {
+            if (!HCI_IS_ERROR(event, WARN, "gap", "write EIR failed")) {
+              self->local_name_ = std::move(local_name);
+            }
+            cb(event.ToResult());
+          })
+      .IgnoreError();
 }
 
 void BrEdrDiscoveryManager::UpdateLocalName(std::string name,
@@ -354,17 +362,18 @@ void BrEdrDiscoveryManager::UpdateLocalName(std::string name,
   local_name.CopyFrom(name_buf, name_size);
 
   cmd_->SendCommand(
-      std::move(write_name),
-      [self, name_as_str = std::move(name), cb = std::move(callback)](
-          auto, const hci::EventPacket& event) mutable {
-        if (HCI_IS_ERROR(event, WARN, "gap", "set local name failed")) {
-          cb(event.ToResult());
-          return;
-        }
-        // If the WriteLocalName command was successful, update the extended
-        // inquiry data.
-        self->UpdateEIRResponseData(std::move(name_as_str), std::move(cb));
-      });
+          std::move(write_name),
+          [self, name_as_str = std::move(name), cb = std::move(callback)](
+              auto, const hci::EventPacket& event) mutable {
+            if (HCI_IS_ERROR(event, WARN, "gap", "set local name failed")) {
+              cb(event.ToResult());
+              return;
+            }
+            // If the WriteLocalName command was successful, update the extended
+            // inquiry data.
+            self->UpdateEIRResponseData(std::move(name_as_str), std::move(cb));
+          })
+      .IgnoreError();
 }
 
 void BrEdrDiscoveryManager::AttachInspect(inspect::Node& parent,
@@ -515,7 +524,7 @@ void BrEdrDiscoveryManager::RequestPeerName(PeerId id) {
                                  std::move(cb),
                                  hci_spec::kRemoteNameRequestCompleteEventCode,
                                  {hci_spec::kInquiry});
-  if (cmd_id) {
+  if (cmd_id.ok()) {
     requesting_names_.insert(id);
   }
 }
@@ -609,29 +618,33 @@ void BrEdrDiscoveryManager::SetInquiryScan() {
     write_enable_view.scan_enable().page().Write(
         scan_type & static_cast<uint8_t>(hci_spec::ScanEnableBit::kPage));
     resolve_pending.cancel();
-    self->cmd_->SendCommand(
-        std::move(write_enable),
-        [self](auto, const hci::EventPacket& response) {
-          if (!self.is_alive()) {
-            return;
-          }
+    self->cmd_
+        ->SendCommand(
+            std::move(write_enable),
+            [self](auto, const hci::EventPacket& response) {
+              if (!self.is_alive()) {
+                return;
+              }
 
-          // Warn if the command failed
-          HCI_IS_ERROR(response, WARN, "gap-bredr", "write scan enable failed");
+              // Warn if the command failed
+              HCI_IS_ERROR(
+                  response, WARN, "gap-bredr", "write scan enable failed");
 
-          while (!self->pending_discoverable_.empty()) {
-            auto cb = std::move(self->pending_discoverable_.front());
-            self->pending_discoverable_.pop();
-            cb(response.ToResult());
-          }
-          self->UpdateInspectProperties();
-        });
+              while (!self->pending_discoverable_.empty()) {
+                auto cb = std::move(self->pending_discoverable_.front());
+                self->pending_discoverable_.pop();
+                cb(response.ToResult());
+              }
+              self->UpdateInspectProperties();
+            })
+        .IgnoreError();
   };
 
   auto read_enable = hci::CommandPacket::New<
       pw::bluetooth::emboss::ReadScanEnableCommandWriter>(
       hci_spec::kReadScanEnable);
-  cmd_->SendCommand(std::move(read_enable), std::move(scan_enable_cb));
+  cmd_->SendCommand(std::move(read_enable), std::move(scan_enable_cb))
+      .IgnoreError();
 }
 
 void BrEdrDiscoveryManager::WriteInquiryScanSettings(uint16_t interval,
@@ -645,16 +658,18 @@ void BrEdrDiscoveryManager::WriteInquiryScanSettings(uint16_t interval,
   activity_params.inquiry_scan_interval().Write(interval);
   activity_params.inquiry_scan_window().Write(window);
 
-  cmd_->SendCommand(
-      std::move(write_activity), [](auto, const hci::EventPacket& event) {
-        if (HCI_IS_ERROR(event,
-                         WARN,
-                         "gap-bredr",
-                         "write inquiry scan activity failed")) {
-          return;
-        }
-        bt_log(TRACE, "gap-bredr", "inquiry scan activity updated");
-      });
+  cmd_->SendCommand(std::move(write_activity),
+                    [](auto, const hci::EventPacket& event) {
+                      if (HCI_IS_ERROR(event,
+                                       WARN,
+                                       "gap-bredr",
+                                       "write inquiry scan activity failed")) {
+                        return;
+                      }
+                      bt_log(
+                          TRACE, "gap-bredr", "inquiry scan activity updated");
+                    })
+      .IgnoreError();
 
   auto write_type = hci::CommandPacket::New<
       pw::bluetooth::emboss::WriteInquiryScanTypeCommandWriter>(
@@ -664,14 +679,17 @@ void BrEdrDiscoveryManager::WriteInquiryScanSettings(uint16_t interval,
       interlaced ? pw::bluetooth::emboss::InquiryScanType::INTERLACED
                  : pw::bluetooth::emboss::InquiryScanType::STANDARD);
 
-  cmd_->SendCommand(
-      std::move(write_type), [](auto, const hci::EventPacket& event) {
-        if (HCI_IS_ERROR(
-                event, WARN, "gap-bredr", "write inquiry scan type failed")) {
-          return;
-        }
-        bt_log(TRACE, "gap-bredr", "inquiry scan type updated");
-      });
+  cmd_->SendCommand(std::move(write_type),
+                    [](auto, const hci::EventPacket& event) {
+                      if (HCI_IS_ERROR(event,
+                                       WARN,
+                                       "gap-bredr",
+                                       "write inquiry scan type failed")) {
+                        return;
+                      }
+                      bt_log(TRACE, "gap-bredr", "inquiry scan type updated");
+                    })
+      .IgnoreError();
 }
 
 std::unique_ptr<BrEdrDiscoverySession>

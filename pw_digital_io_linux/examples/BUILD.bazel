@@ -18,7 +18,6 @@ load("//pw_unit_test:pw_cc_test.bzl", "pw_cc_test")
 
 package(
     default_visibility = ["//visibility:public"],
-    features = ["-layering_check"],
 )
 
 licenses(["notice"])
@@ -28,26 +27,36 @@ licenses(["notice"])
 pw_cc_test(
     name = "input",
     srcs = ["input.cc"],
+    features = ["-conversion_warnings"],
     deps = [
         "//pw_digital_io_linux",
+        "//pw_log",
+        "//pw_status",
     ],
 )
 
 pw_cc_test(
     name = "output",
     srcs = ["output.cc"],
+    features = ["-conversion_warnings"],
     deps = [
         "//pw_digital_io_linux",
+        "//pw_status",
     ],
 )
 
 pw_cc_test(
     name = "interrupt",
     srcs = ["interrupt.cc"],
+    features = ["-conversion_warnings"],
     deps = [
         "//pw_chrono:system_clock",
         "//pw_digital_io_linux",
+        "//pw_log",
+        "//pw_status",
         "//pw_thread:sleep",
+        "//pw_thread:thread",
+        "//pw_thread_stl:options",
     ],
 )
 

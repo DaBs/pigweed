@@ -16,11 +16,11 @@
 
 #include "pico/stdlib.h"
 #include "pw_assert/check.h"
-#include "pw_async2/dispatcher_base.h"
+#include "pw_async2/dispatcher.h"
 #include "pw_log/log.h"
 #include "pw_multibuf/allocator.h"
-#include "pw_multibuf/allocator_async.h"
 #include "pw_multibuf/multibuf.h"
+#include "pw_multibuf/v1/allocator_async.h"
 #include "pw_status/status.h"
 
 namespace pw::channel {
@@ -29,20 +29,20 @@ namespace {
 using ::pw::async2::Context;
 using ::pw::async2::Pending;
 using ::pw::async2::Poll;
+using ::pw::async2::PollOptional;
+using ::pw::async2::PollResult;
 using ::pw::async2::Ready;
 using ::pw::async2::Waker;
 using ::pw::multibuf::MultiBuf;
-using ::pw::multibuf::MultiBufAllocationFuture;
 using ::pw::multibuf::MultiBufAllocator;
+using ::pw::multibuf::v1::MultiBufAllocationFuture;
 
 Waker global_chars_available_waker;
 
 void InitStdio() {
   stdio_init_all();
   stdio_set_chars_available_callback(
-      []([[maybe_unused]] void* arg) {
-        std::move(global_chars_available_waker).Wake();
-      },
+      []([[maybe_unused]] void* arg) { global_chars_available_waker.Wake(); },
       nullptr);
 }
 
@@ -100,12 +100,12 @@ class Rp2StdioChannel final : public pw::channel::Implement<ByteReaderWriter> {
 
   Poll<Status> PendGetReadBuffer(Context& cx);
 
-  Poll<Result<MultiBuf>> DoPendRead(Context& cx) override;
+  PollResult<MultiBuf> DoPendRead(Context& cx) override;
 
   Poll<Status> DoPendReadyToWrite(Context& cx) override;
 
-  Poll<std::optional<MultiBuf>> DoPendAllocateWriteBuffer(
-      Context& cx, size_t min_bytes) override {
+  PollOptional<MultiBuf> DoPendAllocateWriteBuffer(Context& cx,
+                                                   size_t min_bytes) override {
     write_allocation_future_.SetDesiredSize(min_bytes);
     return write_allocation_future_.Pend(cx);
   }
@@ -127,9 +127,8 @@ Poll<Status> Rp2StdioChannel::PendGetReadBuffer(Context& cx) {
   }
 
   read_allocation_future_.SetDesiredSizes(
-      kMinimumReadSize, kDesiredReadSize, pw::multibuf::kNeedsContiguous);
-  Poll<std::optional<MultiBuf>> maybe_multibuf =
-      read_allocation_future_.Pend(cx);
+      kMinimumReadSize, kDesiredReadSize, pw::multibuf::v1::kNeedsContiguous);
+  PollOptional<MultiBuf> maybe_multibuf = read_allocation_future_.Pend(cx);
   if (maybe_multibuf.IsPending()) {
     return Pending();
   }
@@ -142,7 +141,7 @@ Poll<Status> Rp2StdioChannel::PendGetReadBuffer(Context& cx) {
   return OkStatus();
 }
 
-Poll<Result<MultiBuf>> Rp2StdioChannel::DoPendRead(Context& cx) {
+PollResult<MultiBuf> Rp2StdioChannel::DoPendRead(Context& cx) {
   Poll<Status> buffer_ready = PendGetReadBuffer(cx);
   if (buffer_ready.IsPending() || !buffer_ready->ok()) {
     return buffer_ready;

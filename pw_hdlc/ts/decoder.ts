@@ -152,6 +152,9 @@ export class Decoder {
 
     // Record every byte except the flag character.
     if (byte != protocol.FLAG) {
+      // TODO: b/455910627 - Remove this suppression after TS 5.9.2 upgrade
+      //   TS2322: Type 'Uint8Array<ArrayBufferLike>' is not assignable to type 'Uint8Array<ArrayBuffer>'.
+      // @ts-ignore
       this.rawData = util.concatenate(this.rawData, Uint8Array.of(byte));
     }
 
@@ -173,6 +176,9 @@ export class Decoder {
         } else if (byte == protocol.ESCAPE) {
           this.state = DecoderState.FRAME_ESCAPE;
         } else {
+          // TODO: b/455910627 - Remove this suppression after TS 5.9.2 upgrade
+          //   TS2322: Type 'Uint8Array<ArrayBufferLike>' is not assignable to type 'Uint8Array<ArrayBuffer>'.
+          // @ts-ignore
           this.decodedData = util.concatenate(
             this.decodedData,
             Uint8Array.of(byte),
@@ -186,6 +192,9 @@ export class Decoder {
           this.state = DecoderState.FRAME;
         } else if (protocol.VALID_ESCAPED_BYTES.includes(byte)) {
           this.state = DecoderState.FRAME;
+          // TODO: b/455910627 - Remove this suppression after TS 5.9.2 upgrade
+          //   TS2322: Type 'Uint8Array<ArrayBufferLike>' is not assignable to type 'Uint8Array<ArrayBuffer>'.
+          // @ts-ignore
           this.decodedData = util.concatenate(
             this.decodedData,
             Uint8Array.of(protocol.escape(byte)),

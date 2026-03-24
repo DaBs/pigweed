@@ -216,8 +216,7 @@ class _ParserAdder(Protocol):
 
     def __call__(
         self, subcommand_handler: Callable[..., None], *args: Any, **kwargs: Any
-    ) -> argparse.ArgumentParser:
-        ...
+    ) -> argparse.ArgumentParser: ...
 
 
 def _parser_adder(subcommand_parser) -> _ParserAdder:
@@ -376,11 +375,6 @@ def _build_argument_parser() -> argparse.ArgumentParser:
         type=VscSettingsType,
         metavar='SETTINGS_TYPE',
         help='do not update these settings types',
-    )
-    parser_vscode.add_argument(
-        '--build-extension',
-        action='store_true',
-        help='build the extension from source',
     )
 
     return parser_root

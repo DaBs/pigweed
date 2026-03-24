@@ -15,6 +15,8 @@
 
 #include <queue>
 
+#include "pw_allocator/testing.h"
+#include "pw_containers/dynamic_vector.h"
 #include "pw_rpc_transport/egress_ingress.h"
 #include "pw_rpc_transport/service_registry.h"
 #include "pw_work_queue/test_thread.h"
@@ -42,8 +44,8 @@ class TestLoopbackTransport : public RpcFrameSender {
   size_t MaximumTransmissionUnit() const override { return mtu_; }
 
   Status Send(RpcFrame frame) override {
-    buffer_queue_.emplace();
-    std::vector<std::byte>& buffer = buffer_queue_.back();
+    buffer_queue_.emplace(allocator_);
+    pw::DynamicVector<std::byte>& buffer = buffer_queue_.back();
     std::copy(
         frame.header.begin(), frame.header.end(), std::back_inserter(buffer));
     std::copy(
@@ -60,7 +62,8 @@ class TestLoopbackTransport : public RpcFrameSender {
 
  private:
   size_t mtu_;
-  std::queue<std::vector<std::byte>> buffer_queue_;
+  pw::allocator::test::AllocatorForTest<4096> allocator_;
+  std::queue<pw::DynamicVector<std::byte>> buffer_queue_;
   RpcIngressHandler* ingress_ = nullptr;
   Thread work_thread_;
   work_queue::WorkQueueWithBuffer<1> work_queue_;

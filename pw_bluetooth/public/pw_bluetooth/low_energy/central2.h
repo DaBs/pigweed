@@ -15,7 +15,7 @@
 
 #include <optional>
 
-#include "pw_async2/once_sender.h"
+#include "pw_async2/value_future.h"
 #include "pw_bluetooth/internal/raii_ptr.h"
 #include "pw_bluetooth/low_energy/connection2.h"
 #include "pw_bluetooth/low_energy/phy.h"
@@ -24,6 +24,8 @@
 #include "pw_result/expected.h"
 
 namespace pw::bluetooth::low_energy {
+
+/// @module{pw_bluetooth}
 
 /// Represents the LE central role. Used to scan and connect to peripherals.
 class Central2 {
@@ -151,17 +153,11 @@ class Central2 {
     /// Returns the next `ScanResult` if available. Otherwise, invokes
     /// `cx.waker()` when a `ScanResult` is available. Only one waker is
     /// supported at a time.
-    /// @return @rst
     ///
-    /// .. pw-status-codes::
-    ///
-    ///    OK: ScanResult was returned.
-    ///
-    ///    CANCELLED: An internal error occurred and the scan was cancelled.
-    ///
-    /// @endrst
-    virtual async2::Poll<pw::Result<ScanResult>> PendResult(
-        async2::Context& cx) = 0;
+    /// @returns
+    /// * @OK: `ScanResult` was returned.
+    /// * @CANCELLED: An internal error occurred and the scan was cancelled.
+    virtual async2::PollResult<ScanResult> PendResult(async2::Context& cx) = 0;
 
    private:
     /// Stop the current scan. This method is called by the ~ScanHandle::Ptr()
@@ -223,7 +219,7 @@ class Central2 {
   /// an error occurs.
   ///
   /// Possible errors are documented in `ConnectError`.
-  virtual async2::OnceReceiver<ConnectResult> Connect(
+  virtual async2::OptionalValueFuture<ConnectResult> Connect(
       PeerId peer_id, Connection2::ConnectionOptions options) = 0;
 
   /// Scans for nearby LE peripherals and broadcasters. The lifetime of the scan
@@ -240,7 +236,7 @@ class Central2 {
   /// peers that satisfy the filters indicated in `options`. The initial results
   /// may report recently discovered peers. Subsequent results will be reported
   /// only when peers have been scanned or updated since the last call.
-  virtual async2::OnceReceiver<ScanStartResult> Scan(
+  virtual async2::OptionalValueFuture<ScanStartResult> Scan(
       const ScanOptions& options) = 0;
 };
 

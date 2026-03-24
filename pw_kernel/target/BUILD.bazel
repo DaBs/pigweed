@@ -12,44 +12,46 @@
 # License for the specific language governing permissions and limitations under
 # the License.
 
-load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("@rules_rust//rust:defs.bzl", "rust_library")
 
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "target_interface",
-    srcs = ["target_interface.rs"],
+    name = "target_common",
+    srcs = ["target_common.rs"],
+    edition = "2024",
+    tags = ["kernel"],
+    deps = [
+        "//pw_kernel/lib/pw_assert",
+        "//pw_log/rust:pw_log",
+    ],
 )
 
-rust_library(
+label_flag(
+    name = "system_config_file",
+    build_setting_default = ":no_system_config_file",
+    tags = ["kernel"],
+)
+
+filegroup(
+    name = "no_system_config_file",
+    tags = ["kernel"],
+    target_compatible_with = ["@platforms//:incompatible"],
+)
+
+config_setting(
+    name = "system_config_not_set",
+    flag_values = {
+        ":system_config_file": ":no_system_config_file",
+    },
+)
+
+constraint_setting(
     name = "target",
-    srcs = ["target.rs"],
-    deps = [
-        ":target_backend",
-        ":target_interface",
-    ],
+    default_constraint_value = "none",
 )
 
-label_flag(
-    name = "target_backend",
-    build_setting_default = ":target_backend_generic",
-)
-
-rust_library(
-    name = "target_backend_generic",
-    srcs = ["target_backend_generic.rs"],
-    crate_name = "target_backend",
-    deps = [
-        ":target_interface",
-    ],
-)
-
-label_flag(
-    name = "linker_script",
-    build_setting_default = ":no_linker_script",
-)
-
-cc_library(
-    name = "no_linker_script",
+constraint_value(
+    name = "none",
+    constraint_setting = ":target",
 )

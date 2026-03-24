@@ -16,9 +16,9 @@ import("//build_overrides/pigweed.gni")
 
 import("$dir_pw_build/target_types.gni")
 import("$dir_pw_chrono/backend.gni")
-import("$dir_pw_docgen/docs.gni")
 import("$dir_pw_protobuf_compiler/proto.gni")
 import("$dir_pw_unit_test/test.gni")
+import("backend.gni")
 
 config("public_include_path") {
   include_dirs = [ "public" ]
@@ -27,8 +27,19 @@ config("public_include_path") {
 pw_source_set("address") {
   public_configs = [ ":public_include_path" ]
   public = [ "public/pw_i2c/address.h" ]
-  deps = [ "$dir_pw_assert" ]
+  public_deps = [ "$dir_pw_assert" ]
   sources = [ "address.cc" ]
+}
+
+pw_source_set("message") {
+  public_configs = [ ":public_include_path" ]
+  public = [ "public/pw_i2c/message.h" ]
+  public_deps = [
+    ":address",
+    "$dir_pw_assert",
+    "$dir_pw_bytes",
+    "$dir_pw_status",
+  ]
 }
 
 pw_source_set("initiator") {
@@ -36,10 +47,49 @@ pw_source_set("initiator") {
   public = [ "public/pw_i2c/initiator.h" ]
   public_deps = [
     ":address",
+    ":message",
     "$dir_pw_bytes",
     "$dir_pw_chrono:system_clock",
+    "$dir_pw_containers:vector",
     "$dir_pw_status",
   ]
+  sources = [ "initiator.cc" ]
+}
+
+pw_source_set("responder") {
+  public_configs = [ ":public_include_path" ]
+  public = [ "public/pw_i2c/responder.h" ]
+  public_deps = [
+    ":address",
+    "$dir_pw_bytes",
+    "$dir_pw_result",
+    "$dir_pw_status",
+  ]
+}
+
+pw_source_set("responder_test_interface") {
+  public_configs = [ ":public_include_path" ]
+  public = [ "public/pw_i2c/responder_test_interface.h" ]
+  public_deps = [
+    ":address",
+    ":responder",
+    "$dir_pw_bytes",
+    "$dir_pw_function",
+    "$dir_pw_result",
+    "$dir_pw_status",
+    "$dir_pw_unit_test",
+  ]
+}
+
+if (pw_i2c_RESPONDER_TEST_BACKEND != "") {
+  pw_test("responder_test") {
+    sources = [ "responder_test.cc" ]
+    deps = [
+      ":responder_test_interface",
+      "$dir_pw_unit_test",
+      pw_i2c_RESPONDER_TEST_BACKEND,
+    ]
+  }
 }
 
 pw_source_set("device") {
@@ -108,11 +158,28 @@ pw_source_set("mock") {
   ]
 }
 
+pw_source_set("message_mock") {
+  public_configs = [ ":public_include_path" ]
+  public = [ "public/pw_i2c/initiator_message_mock.h" ]
+  sources = [ "initiator_message_mock.cc" ]
+  public_deps = [
+    ":initiator",
+    "$dir_pw_bytes",
+    "$dir_pw_containers",
+    "$dir_pw_containers:algorithm",
+    "$dir_pw_containers:to_array",
+  ]
+  deps = [
+    "$dir_pw_assert",
+    "$dir_pw_unit_test",
+  ]
+}
+
 pw_source_set("gmock") {
   public_configs = [ ":public_include_path" ]
   public_deps = [
     ":initiator",
-    "$dir_pw_third_party/googletest",
+    "$pw_external_googletest",
   ]
   public = [ "public/pw_i2c/initiator_gmock.h" ]
 }
@@ -122,15 +189,45 @@ pw_test_group("tests") {
   tests = [
     ":address_test",
     ":device_test",
+    ":device_message_test",
     ":initiator_mock_test",
+    ":initiator_message_mock_test",
+    ":initiator_test",
+    ":message_test",
     ":register_device_test",
     ":i2c_service_test",
+    ":i2c_message_service_test",
   ]
+  if (pw_i2c_RESPONDER_TEST_BACKEND != "") {
+    tests += [ ":responder_test" ]
+  }
 }
 
 pw_test("address_test") {
   sources = [ "address_test.cc" ]
   deps = [ ":address" ]
+
+  # Disable deprecation warning for Address() constructor.
+  cflags = [ "-Wno-deprecated-declarations" ]
+}
+
+pw_test("message_test") {
+  sources = [ "message_test.cc" ]
+  deps = [
+    ":address",
+    ":message",
+  ]
+}
+
+pw_test("initiator_test") {
+  enable_if = pw_chrono_SYSTEM_CLOCK_BACKEND != ""
+  sources = [ "initiator_test.cc" ]
+  deps = [
+    ":address",
+    ":initiator",
+    ":message",
+    "$dir_pw_chrono:system_clock",
+  ]
 }
 
 pw_test("device_test") {
@@ -141,6 +238,18 @@ pw_test("device_test") {
     ":mock",
     "$dir_pw_chrono:system_clock",
     "$dir_pw_containers",
+  ]
+}
+
+pw_test("device_message_test") {
+  enable_if = pw_chrono_SYSTEM_CLOCK_BACKEND != ""
+  sources = [ "device_message_test.cc" ]
+  deps = [
+    ":device",
+    ":message_mock",
+    "$dir_pw_bytes",
+    "$dir_pw_chrono:system_clock",
+    "$dir_pw_containers:algorithm",
   ]
 }
 
@@ -169,6 +278,18 @@ pw_test("initiator_mock_test") {
   ]
 }
 
+pw_test("initiator_message_mock_test") {
+  enable_if = pw_chrono_SYSTEM_CLOCK_BACKEND != ""
+  sources = [ "initiator_message_mock_test.cc" ]
+  deps = [
+    ":address",
+    ":message_mock",
+    "$dir_pw_chrono:system_clock",
+    "$dir_pw_containers:to_array",
+    dir_pw_span,
+  ]
+}
+
 pw_test("i2c_service_test") {
   enable_if = pw_chrono_SYSTEM_CLOCK_BACKEND != ""
   sources = [ "i2c_service_test.cc" ]
@@ -188,11 +309,23 @@ pw_test("i2c_service_test") {
   }
 }
 
-pw_doc_group("docs") {
-  sources = [
-    "backends.rst",
-    "docs.rst",
-    "guides.rst",
-    "reference.rst",
+pw_test("i2c_message_service_test") {
+  enable_if = pw_chrono_SYSTEM_CLOCK_BACKEND != ""
+  sources = [ "i2c_message_service_test.cc" ]
+  deps = [
+    ":address",
+    ":i2c_service",
+    ":initiator",
+    "$dir_pw_chrono:system_clock",
+    "$dir_pw_containers:vector",
+    "$dir_pw_i2c:message_mock",
+    "$dir_pw_rpc/pwpb:test_method_context",
+    "$dir_pw_status",
   ]
+
+  # TODO: https://pwbug.dev/325509758 - Doesn't work on the Pico yet; hangs
+  # indefinitely.
+  if (pw_build_EXECUTABLE_TARGET_TYPE == "pico_executable") {
+    enable_if = false
+  }
 }

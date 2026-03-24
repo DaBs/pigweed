@@ -40,6 +40,7 @@ pw_source_set("common") {
   ]
   public = [
     "public/pw_bluetooth_sapphire/internal/host/common/advertising_data.h",
+    "public/pw_bluetooth_sapphire/internal/host/common/bidirectional_map.h",
     "public/pw_bluetooth_sapphire/internal/host/common/bounded_inspect_list_node.h",
     "public/pw_bluetooth_sapphire/internal/host/common/byte_buffer.h",
     "public/pw_bluetooth_sapphire/internal/host/common/device_address.h",
@@ -73,6 +74,7 @@ pw_source_set("common") {
   ]
   public_configs = [ ":public_include_path" ]
   public_deps = [
+    "$dir_pw_allocator:libc_allocator",
     "$dir_pw_async:dispatcher",
     "$dir_pw_async:task",
     "$dir_pw_bluetooth:emboss_hci_group",
@@ -80,7 +82,8 @@ pw_source_set("common") {
     "$dir_pw_bluetooth_sapphire/lib/cpp-string",
     "$dir_pw_bluetooth_sapphire/lib/cpp-type",
     "$dir_pw_chrono:system_clock",
-    "$dir_pw_third_party/fuchsia:fit",
+    "$pw_external_fuchsia:fit",
+    dir_pw_allocator,
     dir_pw_assert,
     dir_pw_intrusive_ptr,
     dir_pw_log,
@@ -106,9 +109,9 @@ pw_source_set("uuid_string_util") {
 }
 
 pw_test("common_test") {
-  enable_if = pw_unit_test_BACKEND == "$dir_pw_unit_test:googletest"
   sources = [
     "advertising_data_test.cc",
+    "bidirectional_map_test.cc",
     "bounded_inspect_list_node_test.cc",
     "byte_buffer_test.cc",
     "device_address_test.cc",

@@ -32,6 +32,7 @@
 #include "pw_bluetooth_sapphire/internal/host/gap/low_energy_connection_manager.h"
 #include "pw_bluetooth_sapphire/internal/host/gap/low_energy_discovery_manager.h"
 #include "pw_bluetooth_sapphire/internal/host/gap/peer_cache.h"
+#include "pw_bluetooth_sapphire/internal/host/gap/periodic_advertising_sync_manager.h"
 #include "pw_bluetooth_sapphire/internal/host/gap/types.h"
 #include "pw_bluetooth_sapphire/internal/host/gatt/gatt.h"
 #include "pw_bluetooth_sapphire/internal/host/l2cap/channel_manager.h"
@@ -77,6 +78,10 @@ class Adapter {
     // When True, BR/EDR pairing may attempt to use legacy pairing if the peer
     // does not support SSP.
     bool legacy_pairing_enabled = false;
+    // When non-zero force the AndroidVendorCapabilites to be parsed as if the
+    // version bytes were set to these.
+    // TODO(b/450278813): remove this once we have a long term solution
+    uint16_t override_vendor_capabilites_version = 0;
   };
 
   static constexpr const char* kMetricsInspectNodeName = "metrics";
@@ -84,11 +89,14 @@ class Adapter {
   // Optionally, a FakeL2cap  may be passed for testing purposes as |l2cap|. If
   // nullptr is passed, then the Adapter will create and initialize its own
   // L2cap.
+  // |wake_lease_provider| will be used to acquire wake leases and must outlive
+  // the returned Adapter.
   static std::unique_ptr<Adapter> Create(
       pw::async::Dispatcher& pw_dispatcher,
       hci::Transport::WeakPtr hci,
       gatt::GATT::WeakPtr gatt,
       Config config,
+      pw::bluetooth_sapphire::LeaseProvider& wake_lease_provider,
       std::unique_ptr<l2cap::ChannelManager> l2cap = nullptr);
   virtual ~Adapter() = default;
 
@@ -129,6 +137,10 @@ class Adapter {
   // Interface to the LE features of the adapter.
   class LowEnergy {
    public:
+    using SyncOptions = PeriodicAdvertisingSyncManager::SyncOptions;
+    using PeriodicAdvertisingSyncDelegate =
+        PeriodicAdvertisingSyncManager::Delegate;
+
     virtual ~LowEnergy() = default;
 
     // Allows a caller to claim shared ownership over a connection to the
@@ -251,6 +263,17 @@ class Adapter {
     virtual void StartDiscovery(bool active,
                                 std::vector<hci::DiscoveryFilter> filters,
                                 SessionCallback callback) = 0;
+
+    // Synchronizes to the periodic advertising train identified by |peer| and
+    // |advertising_sid| with the configuration specified by |options|.
+    // Advertising events are reported via |delegate|.
+    // Synchronous errors are returned immediately.
+    // On success, returns a handle that stops synchronization when destroyed.
+    virtual hci::Result<PeriodicAdvertisingSyncHandle>
+    SyncToPeriodicAdvertisement(PeerId peer,
+                                uint8_t advertising_sid,
+                                SyncOptions options,
+                                PeriodicAdvertisingSyncDelegate& delegate) = 0;
 
     // Enable or disable the privacy feature. When enabled, the controller
     // will be configured to use a new random address if it is currently

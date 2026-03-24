@@ -16,6 +16,7 @@
 
 #include <cstring>
 
+#include "pw_unit_test/constexpr.h"
 #include "pw_unit_test/framework.h"
 
 namespace pw::base64 {
@@ -374,6 +375,113 @@ TEST(Base64, ExampleFromRfc4648Section9) {
   EXPECT_EQ(6u, Decode("Zm9vYmFy", output));
   EXPECT_STREQ("foobar", output);
 }
+
+TEST(Base64, DecodeIgnoresOnePaddingByte) {
+  std::array<char, 6> decode_buffer{'?', '?', '?', '?', '?', '?'};
+  EXPECT_EQ(Decode("AAAAAAA=", decode_buffer.data()), 5u);
+  EXPECT_EQ(decode_buffer[0], '\0');
+  EXPECT_EQ(decode_buffer[1], '\0');
+  EXPECT_EQ(decode_buffer[2], '\0');
+  EXPECT_EQ(decode_buffer[3], '\0');
+  EXPECT_EQ(decode_buffer[4], '\0');
+  EXPECT_EQ(decode_buffer[5], '?');
+}
+
+TEST(Base64, DecodeIgnoresTwoPaddingBytes) {
+  std::array<char, 6> decode_buffer{'?', '?', '?', '?', '?', '?'};
+  EXPECT_EQ(Decode("AAAAAA==", decode_buffer.data()), 4u);
+  EXPECT_EQ(decode_buffer[0], '\0');
+  EXPECT_EQ(decode_buffer[1], '\0');
+  EXPECT_EQ(decode_buffer[2], '\0');
+  EXPECT_EQ(decode_buffer[3], '\0');
+  EXPECT_EQ(decode_buffer[4], '?');
+  EXPECT_EQ(decode_buffer[5], '?');
+}
+
+TEST(Base64, IsValid) {
+  EXPECT_TRUE(IsValid(""));
+  for (const EncodedData& data : kSingleCharTestData) {
+    ASSERT_TRUE(IsValid(data.encoded_data));
+  }
+  for (const EncodedData& data : kRandomTestData) {
+    ASSERT_TRUE(IsValid(data.encoded_data));
+  }
+}
+
+TEST(Base64, IsValidCharValid) {
+  for (char ch : {'0', '9', 'A', 'Z', 'a', 'Z', '-', '_', '/', '+'}) {
+    ASSERT_TRUE(IsValidChar(ch));
+  }
+}
+
+TEST(Base64, IsValidCharInvalid) {
+  for (char ch : "=!@#$%^&*()\\") {
+    ASSERT_FALSE(IsValidChar(ch));
+  }
+  ASSERT_FALSE(IsValidChar(static_cast<char>(128)));
+  ASSERT_FALSE(IsValidChar(static_cast<char>(255)));
+}
+
+TEST(Base64, IsValidIncorrectLength) {
+  EXPECT_FALSE(IsValid("a"));
+  EXPECT_FALSE(IsValid("aa"));
+  EXPECT_FALSE(IsValid("aaa"));
+
+  EXPECT_FALSE(IsValid("AAAAa"));
+  EXPECT_FALSE(IsValid("AAAAaa"));
+  EXPECT_FALSE(IsValid("AAAAaaa"));
+}
+
+TEST(Base64, IsValidIncorrectPadding) {
+  EXPECT_FALSE(IsValid("AAA=aaaa"));
+  EXPECT_FALSE(IsValid("AAAAaa=a"));
+  EXPECT_FALSE(IsValid("AAA=aa=a"));
+  EXPECT_FALSE(IsValid("AAAAaa=a"));
+  EXPECT_TRUE(IsValid("AAAAaaa="));
+
+  EXPECT_FALSE(IsValid("aa=a"));
+  EXPECT_TRUE(IsValid("aaa="));
+
+  EXPECT_FALSE(IsValid("="));
+  EXPECT_FALSE(IsValid("=="));
+  EXPECT_FALSE(IsValid("==="));
+  EXPECT_FALSE(IsValid("===="));
+  EXPECT_FALSE(IsValid("====="));
+}
+
+PW_CONSTEXPR_TEST(Base64, DecodedSize_Valid, {
+  PW_TEST_EXPECT_EQ(DecodedSize(""), 0u);
+  PW_TEST_EXPECT_EQ(DecodedSize("ab=="), 1u);
+  PW_TEST_EXPECT_EQ(DecodedSize("abc="), 2u);
+  PW_TEST_EXPECT_EQ(DecodedSize("abcd"), 3u);
+  PW_TEST_EXPECT_EQ(DecodedSize("1234ab=="), 4u);
+  PW_TEST_EXPECT_EQ(DecodedSize("1234abc="), 5u);
+  PW_TEST_EXPECT_EQ(DecodedSize("1234abcd"), 6u);
+});
+
+PW_CONSTEXPR_TEST(Base64, DecodedSize_Invalid, {
+  PW_TEST_EXPECT_EQ(DecodedSize("a"), 0u);
+  PW_TEST_EXPECT_EQ(DecodedSize("ab"), 0u);
+  PW_TEST_EXPECT_EQ(DecodedSize("abc"), 0u);
+  PW_TEST_EXPECT_EQ(DecodedSize("1234ab"), 0u);
+  PW_TEST_EXPECT_EQ(DecodedSize("1234abc"), 0u);
+});
+
+PW_CONSTEXPR_TEST(Base64, MaxDecodedSize_Valid, {
+  PW_TEST_EXPECT_EQ(MaxDecodedSize(0), 0u);
+  PW_TEST_EXPECT_EQ(MaxDecodedSize(4), 3u);
+  PW_TEST_EXPECT_EQ(MaxDecodedSize(8), 6u);
+  PW_TEST_EXPECT_EQ(MaxDecodedSize(12), 9u);
+  PW_TEST_EXPECT_EQ(MaxDecodedSize(16), 12u);
+});
+
+PW_CONSTEXPR_TEST(Base64, MaxDecodedSize_Invalid, {
+  for (unsigned i = 0; i < 20; ++i) {
+    if ((i % 4) != 0) {
+      PW_TEST_EXPECT_EQ(MaxDecodedSize(i), 0u);
+    }
+  }
+});
 
 // Functions that call the Base64 API from C. These are defined in
 // base64_test.c; no point in having a separate header.

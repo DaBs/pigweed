@@ -16,6 +16,9 @@
 // file system, socket and linux/windows specific features. See
 // include/mbedtls/config.h for a detail explanation of these configurations.
 
+// This header is deprecated, but provided for existing projects that may still
+// be including it in their own MbedTLS configs.
+
 #pragma once
 
 // No file system support.

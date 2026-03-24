@@ -19,8 +19,12 @@
     "pw_cli": {
       "plugins": {
         "build": {
-          "module": "pw_build.pigweed_upstream_build",
+          "module": "pigweed_upstream_build.__main__",
           "function": "pigweed_upstream_main"
+        },
+        "change": {
+          "module": "pw_change.main",
+          "function": "main"
         },
         "console": {
           "module": "pw_system.console",
@@ -42,6 +46,10 @@
           "module": "pw_presubmit.format_code",
           "function": "main"
         },
+        "review": {
+          "module": "pw_change.review",
+          "function": "main"
+        },
         "heap-viewer": {
           "module": "pw_allocator.heap_viewer",
           "function": "main"
@@ -56,6 +64,10 @@
         },
         "presubmit": {
           "module": "pw_presubmit.pigweed_presubmit",
+          "function": "main"
+        },
+        "push": {
+          "module": "pw_change.push",
           "function": "main"
         },
         "requires": {
@@ -78,6 +90,10 @@
           "module": "pw_env_setup_zephyr.zephyr",
           "function": "main"
         },
+        "twister-runner": {
+          "module": "pw_build.zephyr_twister_runner",
+          "function": "main"
+        },
         "sensor-desc": {
           "module": "pw_sensor.sensor_desc",
           "function": "main"
@@ -87,14 +103,12 @@
     "pw_env_setup": {
       "root_variable": "PW_ROOT",
       "relative_pigweed_root": ".",
-      "rosetta": "never",
       "project_actions": [
         {
           "import_path": "pw_env_setup",
           "module_name": "npm_action"
         }
       ],
-      "gni_file": "build_overrides/pigweed_environment.gni",
       "cipd_package_files": [
         "pw_env_setup/py/pw_env_setup/cipd_setup/upstream.json"
       ],
@@ -132,59 +146,26 @@
       "remote_cache": true,
       "upload_local_results": true,
       "programs": {
-        "default": [
-          [
-            "mod",
-            "deps",
-            "--lockfile_mode=error"
-          ],
-          [
-            "build",
-            "//..."
-          ],
-          [
-            "test",
-            "//..."
-          ],
-          [
-            "build",
-            "--@rules_rust//rust/toolchain/channel=nightly",
-            "//..."
-          ],
-          [
-            "test",
-            "--@rules_rust//rust/toolchain/channel=nightly",
-            "//..."
-          ],
-          [
-            "test",
-            "--config=googletest",
-            "//..."
-          ],
-          [
-            "build",
-            "--aspects=@rules_rust//rust:defs.bzl%rust_clippy_aspect",
-            "--output_groups=clippy_checks",
-            "//..."
-          ],
-          [
-            "build",
-            "--@rules_rust//rust/toolchain/channel=nightly",
-            "--aspects=@rules_rust//rust:defs.bzl%rust_clippy_aspect",
-            "--output_groups=clippy_checks",
-            "//..."
-          ],
-          [
-            "build",
-            "--config=asan",
-            "--config=fuzztest",
-            "//..."
-          ]
-        ],
         "docs": [
           [
             "build",
             "//docs"
+          ]
+        ],
+        "lintformat": [
+          [
+            "run",
+            "//pw_presubmit/py:check_formatting"
+          ],
+          [
+            "build",
+            "--config=pylint",
+            "//..."
+          ],
+          [
+            "build",
+            "--config=mypy",
+            "//..."
           ]
         ],
         "integration": [
@@ -192,84 +173,6 @@
             "test",
             "--build_tag_filters=integration",
             "--test_tag_filters=integration",
-            "//..."
-          ]
-        ],
-        "kernel": [
-          [
-            "build",
-            "--config=k_host",
-            "//pw_kernel/..."
-          ],
-          [
-            "build",
-            "--config=k_lint",
-            "//pw_kernel/..."
-          ],
-          [
-            "test",
-            "--config=k_host",
-            "//pw_kernel/..."
-          ],
-          [
-            "build",
-            "--config=k_qemu_mps2_an505",
-            "//pw_kernel/..."
-          ],
-          [
-            "test",
-            "--config=k_qemu_mps2_an505",
-            "//pw_kernel/..."
-          ],
-          [
-            "build",
-            "--config=k_rp2350",
-            "//pw_kernel/..."
-          ]
-        ],
-        "clang-tidy": [
-          [
-            "build",
-            "--config=clang-tidy",
-            "//..."
-          ]
-        ],
-        "asan": [
-          [
-            "test",
-            "--config=asan",
-            "//..."
-          ],
-          [
-            "test",
-            "--config=asan",
-            "--config=googletest",
-            "//..."
-          ]
-        ],
-        "tsan": [
-          [
-            "test",
-            "--config=tsan",
-            "//..."
-          ],
-          [
-            "test",
-            "--config=tsan",
-            "--config=googletest",
-            "//..."
-          ]
-        ],
-        "ubsan": [
-          [
-            "test",
-            "--config=ubsan",
-            "//..."
-          ],
-          [
-            "test",
-            "--config=ubsan",
-            "--config=googletest",
             "//..."
           ]
         ]

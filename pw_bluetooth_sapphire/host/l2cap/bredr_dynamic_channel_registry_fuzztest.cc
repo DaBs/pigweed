@@ -21,6 +21,7 @@
 #include "pw_bluetooth_sapphire/internal/host/l2cap/bredr_dynamic_channel.h"
 #include "pw_bluetooth_sapphire/internal/host/l2cap/bredr_signaling_channel.h"
 #include "pw_bluetooth_sapphire/internal/host/l2cap/fake_channel.h"
+#include "pw_bluetooth_sapphire/null_lease_provider.h"
 
 constexpr static bt::hci_spec::ConnectionHandle kTestHandle = 0x0001;
 
@@ -49,16 +50,22 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
   // Dispatcher needed for signaling channel response timeout.
   pw::async::test::FakeDispatcher dispatcher;
 
+  pw::bluetooth_sapphire::NullLeaseProvider lease_provider;
+
   auto fake_chan = std::make_unique<bt::l2cap::testing::FakeChannel>(
       bt::l2cap::kSignalingChannelId,
       bt::l2cap::kSignalingChannelId,
       kTestHandle,
       bt::LinkType::kACL);
+  // Sending packets will fail and close the channel if the send callback isn't
+  // configured.
+  fake_chan->SetSendCallback([](auto) {});
 
   bt::l2cap::internal::BrEdrSignalingChannel sig_chan(
       fake_chan->GetWeakPtr(),
       pw::bluetooth::emboss::ConnectionRole::CENTRAL,
-      dispatcher);
+      dispatcher,
+      lease_provider);
 
   auto open_cb = []([[maybe_unused]] auto chan) {};
   auto close_cb = []([[maybe_unused]] auto chan) {};
@@ -76,11 +83,15 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
         bt::l2cap::internal::DynamicChannelRegistry::ServiceInfo(
             params, service_chan_cb));
   };
+  // Random channel IDs are disabled because they result in infinite loops in
+  // RandomGenerator::GetInt when the remaining fuzzer data is all 0 or there
+  // is insufficient remaining data.
   bt::l2cap::internal::BrEdrDynamicChannelRegistry registry(
       &sig_chan,
       close_cb,
       service_cb,
-      /*random_channel_ids=*/true);
+      /*random_channel_ids=*/false,
+      dispatcher);
 
   while (provider.remaining_bytes() > 0) {
     // Receive an l2cap packet.

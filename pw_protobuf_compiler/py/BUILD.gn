@@ -15,7 +15,7 @@
 import("//build_overrides/pigweed.gni")
 
 import("$dir_pw_build/python.gni")
-import("$dir_pw_third_party/nanopb/nanopb.gni")
+import("$pw_external_nanopb/nanopb.gni")
 
 pw_python_package("py") {
   setup = [
@@ -31,6 +31,7 @@ pw_python_package("py") {
   tests = [
     "compiled_protos_test.py",
     "python_protos_test.py",
+    "generate_protos_test.py",
   ]
   python_deps = [ "$dir_pw_cli/py" ]
   python_test_deps = [ "..:test_protos.python" ]

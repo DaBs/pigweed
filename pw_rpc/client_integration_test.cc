@@ -135,6 +135,7 @@ TEST(RawRpcIntegrationTest, DISABLED_OnNextOverwritesItsOwnCall) {
 }  // namespace rpc_test
 
 int main(int argc, char* argv[]) {
+  ::testing::InitGoogleTest(&argc, argv);
   if (!pw::rpc::integration_test::InitializeClient(argc, argv).ok()) {
     return 1;
   }

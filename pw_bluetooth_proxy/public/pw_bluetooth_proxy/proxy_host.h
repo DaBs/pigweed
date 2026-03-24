@@ -16,20 +16,36 @@
 
 #include "pw_bluetooth_proxy/gatt_notify_channel.h"
 #include "pw_bluetooth_proxy/internal/acl_data_channel.h"
-#include "pw_bluetooth_proxy/internal/h4_storage.h"
 #include "pw_bluetooth_proxy/internal/hci_transport.h"
 #include "pw_bluetooth_proxy/internal/l2cap_channel_manager.h"
 #include "pw_bluetooth_proxy/l2cap_channel_common.h"
 #include "pw_bluetooth_proxy/l2cap_coc.h"
 #include "pw_bluetooth_proxy/l2cap_status_delegate.h"
-#include "pw_bluetooth_proxy/rfcomm_channel.h"
+#include "pw_function/function.h"
+#include "pw_multibuf/multibuf.h"
 #include "pw_status/status.h"
 
+#if PW_BLUETOOTH_PROXY_ASYNC == 0
+#include "pw_bluetooth_proxy/internal/proxy_host_sync.h"
+
+// TODO: b/472522742 - Forward-declare the dispatcher until downstream support
+// for pw_async2 is resolved.
+namespace pw::async2 {
+class Dispatcher;
+}  // namespace pw::async2
+#else
+#include "pw_async2/dispatcher.h"
+#include "pw_bluetooth_proxy/internal/proxy_host_async.h"
+#endif  // PW_BLUETOOTH_PROXY_ASYNC
+
+/// Lightweight proxy for augmenting Bluetooth functionality
 namespace pw::bluetooth::proxy {
+
+/// @module{pw_bluetooth_proxy}
 
 /// `ProxyHost` acts as the main coordinator for proxy functionality. After
 /// creation, the container then passes packets through the proxy.
-class ProxyHost {
+class ProxyHost : public L2capChannelManagerInterface {
  public:
   /// Creates an `ProxyHost` that will process HCI packets.
   /// @param[in] send_to_host_fn Callback that will be called when proxy wants
@@ -40,10 +56,14 @@ class ProxyHost {
   /// proxy out of any LE ACL buffers received from controller.
   /// @param[in] br_edr_acl_credits_to_reserve - How many buffers to reserve for
   /// the proxy out of any BR/EDR ACL buffers received from controller.
+  /// @param[in] allocator - General purpose allocator to use for internal
+  /// packet buffers and objects. On multi-threaded systems this should be a
+  /// SynchronizedAllocator. Must not be null.
   ProxyHost(pw::Function<void(H4PacketWithHci&& packet)>&& send_to_host_fn,
             pw::Function<void(H4PacketWithH4&& packet)>&& send_to_controller_fn,
             uint16_t le_acl_credits_to_reserve,
-            uint16_t br_edr_acl_credits_to_reserve);
+            uint16_t br_edr_acl_credits_to_reserve,
+            pw::Allocator* allocator);
 
   ProxyHost() = delete;
   ProxyHost(const ProxyHost&) = delete;
@@ -52,7 +72,7 @@ class ProxyHost {
   ProxyHost& operator=(ProxyHost&&) = delete;
   /// Deregisters all channels, and if any channels are not yet closed, closes
   /// them and sends `L2capChannelEvent::kChannelClosedByOther`.
-  ~ProxyHost();
+  ~ProxyHost() override;
 
   // ##### Container API
   // Containers are expected to call these functions (in addition to ctor).
@@ -68,6 +88,9 @@ class ProxyHost {
   ///
   /// Container is required to call this function synchronously (one packet at a
   /// time).
+  ///
+  /// If using async mode, this function must only be called from the thread
+  /// that the dispatcher is running on.
   void HandleH4HciFromHost(H4PacketWithH4&& h4_packet);
 
   /// Called by container to ask proxy to handle a H4 packet sent from the
@@ -95,6 +118,9 @@ class ProxyHost {
   ///
   /// Container is required to call this function synchronously (one packet at a
   /// time).
+  ///
+  /// If using async mode, this function must only be called from the thread
+  /// that the dispatcher is running on.
   void HandleH4HciFromController(H4PacketWithHci&& h4_packet);
 
   /// Called when an HCI_Reset Command packet is observed. Proxy resets its
@@ -108,6 +134,19 @@ class ProxyHost {
   /// are destructed post-reset, packets generated post-reset are liable to be
   /// overwritten prematurely.
   void Reset();
+
+  // ##### Container async API
+
+  /// Sets dispatcher to use to run asynchronous tasks.
+  ///
+  /// The dispatcher must outlive the ProxyHost and any clients. This method
+  /// must called from the thread the dispatcher will run on.
+  ///
+  /// @returns
+  /// * @OK: Dispatcher is ready to run tasks.
+  /// * @FAILED_PRECONDITION: Dispatcher is already set.
+  /// * @UNIMPLEMENTED: PW_BLUETOOTH_PROXY_ASYNC is not enabled.
+  Status SetDispatcher(async2::Dispatcher& dispatcher);
 
   // ##### Client APIs
 
@@ -128,46 +167,42 @@ class ProxyHost {
   /// Returns an L2CAP connection-oriented channel that supports writing to and
   /// reading from a remote peer.
   ///
-  /// @param[in] rx_multibuf_allocator
-  ///                               Provides the allocator the channel will use
-  ///                               for its Rx buffers (for both queueing and
-  ///                               returning to the client).
+  /// @param[in] rx_multibuf_allocator  Provides the allocator the channel will
+  ///                                   use for its Rx buffers (for both
+  ///                                   queueing and returning to the client).
   ///
-  /// @param[in] connection_handle  The connection handle of the remote peer.
+  /// @param[in] connection_handle      The connection handle of the remote
+  ///                                   peer.
   ///
-  /// @param[in] rx_config          Parameters applying to reading packets. See
-  ///                               `l2cap_coc.h` for details.
+  /// @param[in] rx_config              Parameters applying to reading packets.
+  ///                                   See `l2cap_coc.h` for details.
   ///
-  /// @param[in] tx_config          Parameters applying to writing packets. See
-  ///                               `l2cap_coc.h` for details.
+  /// @param[in] tx_config              Parameters applying to writing packets.
+  ///                                   See `l2cap_coc.h` for details.
   ///
-  /// @param[in] receive_fn         Read callback to be invoked on Rx SDUs.
+  /// @param[in] receive_fn             Read callback to be invoked on Rx SDUs.
   ///
-  /// @param[in] event_fn          Handle asynchronous events such as errors and
-  ///                              flow control events encountered by the
-  ///                              channel. See `l2cap_channel_event.h`.
+  /// @param[in] event_fn               Handle asynchronous events such as
+  ///                                   errors and flow control events
+  ///                                   encountered by the channel. See
+  ///                                   `l2cap_channel_common.h`.
+  ///                                   Must outlive the channel and remain
+  ///                                   valid until the channel destructor
+  ///                                   returns.
   ///
-  /// @returns @rst
+  /// @returns @Result{the channel}
+  /// * @INVALID_ARGUMENT: Arguments are invalid. Check the logs.
+  /// * @UNAVAILABLE: A channel could not be created because no memory was
+  ///   available to accommodate an additional ACL connection.
   ///
-  /// .. pw-status-codes::
-  ///  INVALID_ARGUMENT: If arguments are invalid (check logs).
-  ///  UNAVAILABLE:      If channel could not be created because no memory was
-  ///                    available to accommodate an additional ACL connection.
-  /// @endrst
+  /// @deprecated use InterceptCreditBasedFlowControlChannel instead.
   pw::Result<L2capCoc> AcquireL2capCoc(
-      pw::multibuf::MultiBufAllocator& rx_multibuf_allocator,
+      multibuf::MultiBufAllocator& rx_multibuf_allocator,
       uint16_t connection_handle,
       L2capCoc::CocConfig rx_config,
       L2capCoc::CocConfig tx_config,
       Function<void(multibuf::MultiBuf&& payload)>&& receive_fn,
       ChannelEventCallback&& event_fn);
-
-  /// TODO: https://pwbug.dev/380076024 - Delete after downstream client uses
-  /// this method on `L2capCoc`.
-  /// @deprecated Use L2capCoc::SendAdditionalRxCredits instead.
-  pw::Status SendAdditionalRxCredits(uint16_t connection_handle,
-                                     uint16_t local_cid,
-                                     uint16_t additional_rx_credits);
 
   /// Returns an L2CAP channel operating in basic mode that supports writing to
   /// and reading from a remote peer.
@@ -189,26 +224,35 @@ class ProxyHost {
   /// @param[in] transport                  Logical link transport type.
   ///
   /// @param[in] payload_from_controller_fn Read callback to be invoked on Rx
-  ///                                       SDUs. Return value of passed-in
-  ///                                       multibuf indicates the packet should
-  ///                                       be forwarded on to host.
+  ///                                       SDUs. If a multibuf is returned by
+  ///                                       the callback, it is copied into the
+  ///                                       payload to be forwarded to the host.
+  ///                                       Optional null return indicates
+  ///                                       packet was handled and no forwarding
+  ///                                       is required.
   ///
   /// @param[in] payload_from_host_fn       Read callback to be invoked on Tx
-  ///                                       SDUs. Return value of passed-in
-  ///                                       multibuf indicates the packet should
-  ///                                       be forwarded on to the controller.
+  ///                                       SDUs. If a multibuf is returned by
+  ///                                       the callback, it is copied into the
+  ///                                       payload to be forwarded to the
+  ///                                       controller. Optional null return
+  ///                                       indicates packet was handled and no
+  ///                                       forwarding is required.
   ///
   /// @param[in] event_fn                   Handle asynchronous events such as
-  ///                                       errors encountered by the channel.
-  ///                                       See `l2cap_channel_common.h`.
+  ///                                       errors and flow control events
+  ///                                       encountered by the channel. See
+  ///                                       `l2cap_channel_common.h`.
+  ///                                       Must outlive the channel and remain
+  ///                                       valid until the channel destructor
+  ///                                       returns.
   ///
-  /// @returns @rst
+  /// @returns @Result{the channel}
+  /// * @INVALID_ARGUMENT: Arguments are invalid. Check the logs.
+  /// * @UNAVAILABLE: A channel could not be created because no memory was
+  ///   available to accommodate an additional ACL connection.
   ///
-  /// .. pw-status-codes::
-  ///  INVALID_ARGUMENT: If arguments are invalid (check logs).
-  ///  UNAVAILABLE:      If channel could not be created because no memory was
-  ///                    available to accommodate an additional ACL connection.
-  /// @endrst
+  /// @deprecated use InterceptBasicModeChannel instead.
   pw::Result<BasicL2capChannel> AcquireBasicL2capChannel(
       multibuf::MultiBufAllocator& rx_multibuf_allocator,
       uint16_t connection_handle,
@@ -222,122 +266,25 @@ class ProxyHost {
   /// Returns a GATT Notify channel channel that supports sending notifications
   /// to a particular connection handle and attribute.
   ///
-  /// @param[in] connection_handle The connection handle of the peer to notify.
-  /// Maximum valid connection handle is 0x0EFF.
+  /// @param[in] connection_handle  The connection handle of the peer to notify.
+  ///                               Maximum valid connection handle is 0x0EFF.
   ///
-  /// @param[in] attribute_handle  The attribute handle the notify should be
-  /// sent on. Cannot be 0.
+  /// @param[in] attribute_handle   The attribute handle the notify should be
+  ///                               sent on. Cannot be 0.
   ///
-  /// @param[in] event_fn          Handle asynchronous events such as errors and
-  ///                              flow control events encountered by the
-  ///                              channel. See `l2cap_channel_event.h`.
+  /// @param[in] event_fn           Handle asynchronous events such as errors
+  ///                               and flow control events encountered by the
+  ///                               channel. See `l2cap_channel_common.h`. Must
+  ///                               outlive the channel and remain valid until
+  ///                               the channel destructor returns.
   ///
-  /// @returns @rst
-  ///
-  /// .. pw-status-codes::
-  ///  INVALID_ARGUMENT: If arguments are invalid (check logs).
-  ///  UNAVAILABLE:      If channel could not be created because no memory was
-  ///                    available to accommodate an additional ACL connection.
-  /// @endrst
+  /// @returns @Result{the channel}
+  /// * @INVALID_ARGUMENT: Arguments are invalid. Check the logs.
+  /// * @UNAVAILABLE: A channel could not be created because no memory was
+  ///   available to accommodate an additional ACL connection.
   pw::Result<GattNotifyChannel> AcquireGattNotifyChannel(
       int16_t connection_handle,
       uint16_t attribute_handle,
-      ChannelEventCallback&& event_fn);
-
-  /// Send a GATT Notify to the indicated connection.
-  ///
-  /// @param[in] connection_handle The connection handle of the peer to notify.
-  /// Maximum valid connection handle is 0x0EFF.
-  ///
-  /// @param[in] attribute_handle  The attribute handle the notify should be
-  /// sent on. Cannot be 0.
-  /// @param[in] attribute_value   The client payload to be sent. Payload will
-  /// be destroyed once its data has been used.
-  ///
-  /// @returns @rst
-  ///
-  /// .. pw-status-codes::
-  ///  OK: If notify was successfully queued for send.
-  ///  UNAVAILABLE: If CHRE doesn't have resources to queue the send at this
-  ///  time (transient error).
-  ///
-  ///  INVALID_ARGUMENT: If arguments are invalid (check logs).
-  /// @endrst
-  ///
-  /// @deprecated - Clients should use `ProxyHost::AcquireGattNotifyChannel` and
-  /// then call `GattNotifyChannel::Write` on that.
-  // TODO: https://pwbug.dev/369709521 - Delete this once all downstreams
-  // have transitioned.
-  StatusWithMultiBuf SendGattNotify(uint16_t connection_handle,
-                                    uint16_t attribute_handle,
-                                    pw::multibuf::MultiBuf&& payload);
-
-  /// Send a GATT Notify to the indicated connection.
-  ///
-  /// Deprecated, use MultiBuf version above instead.
-  ///
-  /// @param[in] connection_handle The connection handle of the peer to notify.
-  ///                              Maximum valid connection handle is 0x0EFF.
-  ///
-  /// @param[in] attribute_handle  The attribute handle the notify should be
-  ///                              sent on. Cannot be 0.
-  /// @param[in] attribute_value   The data to be sent. Data will be copied
-  ///                              before function completes.
-  ///
-  /// @returns @rst
-  ///
-  /// .. pw-status-codes::
-  ///  OK: If notify was successfully queued for send.
-  ///  UNAVAILABLE: If CHRE doesn't have resources to queue the send
-  ///               at this time (transient error).
-  ///  INVALID_ARGUMENT: If arguments are invalid (check logs).
-  /// @endrst
-  /// @deprecated - Clients should use `ProxyHost::AcquireGattNotifyChannel` and
-  /// then call `GattNotifyChannel::Write` on that.
-  // TODO: https://pwbug.dev/379337272 - Delete this once all downstreams
-  // have transitioned.
-  pw::Status SendGattNotify(uint16_t connection_handle,
-                            uint16_t attribute_handle,
-                            pw::span<const uint8_t> attribute_value);
-
-  /// Returns an RFCOMM channel that supports writing to and reading from a
-  /// remote peer.
-  ///
-  /// @param[in] rx_multibuf_allocator
-  ///                              Provides the allocator the channel will use
-  ///                              for its Rx buffers (for both queueing and
-  ///                              returning to the client).
-  ///
-  /// @param[in] connection_handle The connection handle of the remote peer.
-  ///
-  /// @param[in] rx_config         Parameters applying to reading packets.
-  ///                              See `rfcomm_channel.h` for details.
-  ///
-  /// @param[in] tx_config         Parameters applying to writing packets.
-  ///                              See `rfcomm_channel.h` for details.
-  ///
-  /// @param[in] channel_number    RFCOMM channel number to use.
-  ///
-  /// @param[in] payload_from_controller_fn
-  ///                              Read callback to be invoked on Rx frames.
-  ///
-  /// @param[in] event_fn          Handle asynchronous events such as errors
-  ///                              encountered by the channel. See
-  ///                              `l2cap_channel_common.h`.
-  ///
-  /// @returns @rst
-  ///
-  /// .. pw-status-codes::
-  ///  INVALID_ARGUMENT: If arguments are invalid (check logs).
-  ///  UNAVAILABLE: If channel could not be created.
-  /// @endrst
-  pw::Result<RfcommChannel> AcquireRfcommChannel(
-      multibuf::MultiBufAllocator& rx_multibuf_allocator,
-      uint16_t connection_handle,
-      RfcommChannel::Config rx_config,
-      RfcommChannel::Config tx_config,
-      uint8_t channel_number,
-      Function<void(multibuf::MultiBuf&& payload)>&& payload_from_controller_fn,
       ChannelEventCallback&& event_fn);
 
   /// Indicates whether the proxy has the capability of sending LE ACL packets.
@@ -358,23 +305,67 @@ class ProxyHost {
   /// Can be zero if the controller has not yet been initialized by the host.
   uint16_t GetNumFreeBrEdrAclPackets() const;
 
-  /// Returns the max number of LE ACL sends that can be in-flight at one time.
-  /// That is, ACL packets that have been sent and not yet released.
-  static constexpr size_t GetNumSimultaneousAclSendsSupported() {
-    return H4Storage::GetNumH4Buffs();
-  }
-
-  /// Returns the max LE ACL packet size supported to be sent.
-  static constexpr size_t GetMaxAclSendSize() {
-    return H4Storage::GetH4BuffSize() - sizeof(emboss::H4PacketType);
-  }
-
   /// Returns the max number of simultaneous LE ACL connections supported.
   static constexpr size_t GetMaxNumAclConnections() {
     return AclDataChannel::GetMaxNumAclConnections();
   }
 
  private:
+  friend class internal::ProxyHostImpl;
+
+  /// @copydoc ProxyHost::HandleH4HciFromHost
+  void DoHandleH4HciFromHost(H4PacketWithH4&& h4_packet);
+
+  /// @copydoc ProxyHost::HandleH4HciFromController
+  void DoHandleH4HciFromController(H4PacketWithHci&& h4_packet);
+
+  /// @copydoc ProxyHost::Reset
+  void DoReset();
+
+  /// @copydoc ProxyHost::RegisterL2capStatusDelegate
+  void DoRegisterL2capStatusDelegate(L2capStatusDelegate& delegate);
+
+  /// @copydoc ProxyHost::UnregisterL2capStatusDelegate
+  void DoUnregisterL2capStatusDelegate(L2capStatusDelegate& delegate);
+
+  /// @copydoc ProxyHost::AcquireL2capCoc
+  pw::Result<L2capCoc> DoAcquireL2capCoc(
+      multibuf::MultiBufAllocator& rx_multibuf_allocator,
+      uint16_t connection_handle,
+      L2capCoc::CocConfig rx_config,
+      L2capCoc::CocConfig tx_config,
+      Function<void(multibuf::MultiBuf&& payload)>&& receive_fn,
+      ChannelEventCallback&& event_fn);
+
+  /// @copydoc ProxyHost::AcquireBasicL2capChannel
+  pw::Result<BasicL2capChannel> DoAcquireBasicL2capChannel(
+      multibuf::MultiBufAllocator& rx_multibuf_allocator,
+      uint16_t connection_handle,
+      uint16_t local_cid,
+      uint16_t remote_cid,
+      AclTransportType transport,
+      OptionalPayloadReceiveCallback&& payload_from_controller_fn,
+      OptionalPayloadReceiveCallback&& payload_from_host_fn,
+      ChannelEventCallback&& event_fn);
+
+  /// @copydoc ProxyHost::AcquireGattNotifyChannel
+  pw::Result<GattNotifyChannel> DoAcquireGattNotifyChannel(
+      int16_t connection_handle,
+      uint16_t attribute_handle,
+      ChannelEventCallback&& event_fn);
+
+  /// @copydoc ProxyHost::HasSendLeAclCapability
+  bool DoHasSendLeAclCapability() const;
+
+  /// @copydoc ProxyHost::HasSendBrEdrAclCapability
+  bool DoHasSendBrEdrAclCapability() const;
+
+  /// @copydoc ProxyHost::GetNumFreeLeAclPackets
+  uint16_t DoGetNumFreeLeAclPackets() const;
+
+  /// @copydoc ProxyHost::GetNumFreeBrEdrAclPackets
+  uint16_t DoGetNumFreeBrEdrAclPackets() const;
+
   // Handle HCI Event packet from the controller.
   void HandleEventFromController(H4PacketWithHci&& h4_packet);
 
@@ -395,6 +386,43 @@ class ProxyHost {
 
   // Handle HCI ACL data packet from the host.
   void HandleAclFromHost(H4PacketWithH4&& h4_packet);
+
+  // Called when any type of connection complete event is received.
+  void OnConnectionCompleteSuccess(uint16_t connection_handle,
+                                   AclTransportType transport);
+
+  // AclDataChannel callback for when new ACL TX credits are received and more
+  // L2CAP packets can be sent.
+  void OnAclTxCredits();
+
+  // L2capChannelManagerInterface override:
+  Result<UniquePtr<ChannelProxy>> DoInterceptBasicModeChannel(
+      ConnectionHandle connection_handle,
+      uint16_t local_channel_id,
+      uint16_t remote_channel_id,
+      AclTransportType transport,
+      BufferReceiveFunction&& payload_from_controller_fn,
+      BufferReceiveFunction&& payload_from_host_fn,
+      ChannelEventCallback&& event_fn) override;
+
+  Result<UniquePtr<ChannelProxy>> InternalDoInterceptBasicModeChannel(
+      ConnectionHandle connection_handle,
+      uint16_t local_channel_id,
+      uint16_t remote_channel_id,
+      AclTransportType transport,
+      BufferReceiveFunction&& payload_from_controller_fn,
+      BufferReceiveFunction&& payload_from_host_fn,
+      ChannelEventCallback&& event_fn);
+
+  Result<UniquePtr<ChannelProxy>> DoInterceptCreditBasedFlowControlChannel(
+      ConnectionHandle connection_handle,
+      ConnectionOrientedChannelConfig rx_config,
+      ConnectionOrientedChannelConfig tx_config,
+      MultiBufReceiveFunction&& receive_fn,
+      ChannelEventCallback&& event_fn) override;
+
+  // Implementation-specific details that may vary between sync and async modes.
+  internal::ProxyHostImpl impl_;
 
   // For sending non-ACL data to the host and controller. ACL traffic shall be
   // sent through the `acl_data_channel_`.

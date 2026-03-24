@@ -16,6 +16,8 @@
 
 #include "pw_bluetooth_sapphire/internal/host/hci-spec/constants.h"
 #include "pw_bluetooth_sapphire/internal/host/hci-spec/defaults.h"
+#include "pw_bluetooth_sapphire/internal/host/hci/advertising_packet_filter.h"
+#include "pw_bluetooth_sapphire/internal/host/hci/discovery_filter.h"
 #include "pw_bluetooth_sapphire/internal/host/hci/local_address_delegate.h"
 #include "pw_bluetooth_sapphire/internal/host/hci/sequential_command_runner.h"
 #include "pw_bluetooth_sapphire/internal/host/transport/transport.h"
@@ -51,6 +53,13 @@ class LowEnergyScanResult {
   uint8_t advertising_sid() const { return advertising_sid_; }
   void set_advertising_sid(uint8_t value) { advertising_sid_ = value; }
 
+  uint16_t periodic_advertising_interval() const {
+    return periodic_advertising_interval_;
+  }
+  void set_periodic_advertising_interval(uint16_t value) {
+    periodic_advertising_interval_ = value;
+  }
+
   BufferView data() const { return buffer_.view(0, data_size_); }
   void AppendData(const ByteBuffer& data);
 
@@ -76,6 +85,11 @@ class LowEnergyScanResult {
   // Matches the advertising SID subfield in the ADI field of the received
   // advertisement, used to synchronize against a periodic advertising train
   uint8_t advertising_sid_ = hci_spec::kAdvertisingSidInvalid;
+
+  // Interval of periodic advertisements, in increments of 1.25 ms, specified in
+  // the LE extended advertising report.
+  uint16_t periodic_advertising_interval_ =
+      hci_spec::kPeriodicAdvertisingIntervalInvalid;
 
   // The size of the data so far accumulated in |buffer_|.
   size_t data_size_ = 0u;
@@ -207,34 +221,20 @@ class LowEnergyScanner : public LocalAddressClient {
    public:
     virtual ~Delegate() = default;
 
-    // Called when a peer is found. During a passive scan |data| contains the
-    // advertising data. During an active scan |data| contains the combined
+    // Called when a peer is found. During a passive scan |result| contains the
+    // advertising data. During an active scan |result| contains the combined
     // advertising and scan response data (if the peer is scannable).
-    virtual void OnPeerFound(const LowEnergyScanResult&) {}
+    virtual void OnPeerFound(const std::unordered_set<uint16_t>& /*scan_id*/,
+                             const LowEnergyScanResult& /*result*/) {}
 
     // Called when a directed advertising report is received from the peer with
     // the given address.
-    virtual void OnDirectedAdvertisement(const LowEnergyScanResult&) {}
-  };
-
-  // Some Controllers support offloaded packet filtering (e.g. in Android vendor
-  // extensions). PacketFilterConfig allows us to switch on whether this feature
-  // is enabled for the current Controller or not.
-  class PacketFilterConfig {
-   public:
-    PacketFilterConfig(bool offloading_enabled, uint8_t max_filters)
-        : offloading_enabled_(offloading_enabled), max_filters_(max_filters) {}
-
-    bool offloading_enabled() const { return offloading_enabled_; }
-    uint8_t max_filters() const { return max_filters_; }
-
-   private:
-    bool offloading_enabled_ = false;
-    uint8_t max_filters_ = 0;
+    virtual void OnDirectedAdvertisement(
+        const LowEnergyScanResult& /*result*/) {}
   };
 
   LowEnergyScanner(LocalAddressDelegate* local_addr_delegate,
-                   const PacketFilterConfig& packet_filter_config,
+                   const AdvertisingPacketFilter::Config& packet_filter_config,
                    Transport::WeakPtr hci,
                    pw::async::Dispatcher& pw_dispatcher);
   ~LowEnergyScanner() override = default;
@@ -246,6 +246,9 @@ class LowEnergyScanner : public LocalAddressClient {
   bool IsPassiveScanning() const { return state() == State::kPassiveScanning; }
   bool IsScanning() const { return IsActiveScanning() || IsPassiveScanning(); }
   bool IsInitiating() const { return state() == State::kInitiating; }
+  bool IsUsingOffloadedFiltering() const {
+    return packet_filter_.IsUsingOffloadedFiltering();
+  }
 
   // LocalAddressClient override:
   bool AllowsRandomAddressChange() const override {
@@ -254,6 +257,15 @@ class LowEnergyScanner : public LocalAddressClient {
 
   // True if no scan procedure is currently enabled.
   bool IsIdle() const { return state() == State::kIdle; }
+
+  // Associate a set of packet filters with a particular upper layer scan
+  // session with a given scan id.
+  void SetPacketFilters(uint16_t scan_id,
+                        const std::vector<DiscoveryFilter>& filters);
+
+  // Unassociate all packet filters with a particular upper layer scan session
+  // with a given scan id.
+  void UnsetPacketFilters(uint16_t scan_id);
 
   // Initiates a scan. This is an asynchronous operation that abides by the
   // following rules:
@@ -304,20 +316,36 @@ class LowEnergyScanner : public LocalAddressClient {
   // true.
   virtual bool StopScan();
 
+  // Call the Delegate::OnPeerFound method for all cached peers. This method is
+  // useful for relaying peers to an upper layer scan session that joins in the
+  // middle of a real Controller scan.
+  void NotifyCachedPeers(uint16_t scan_id);
+
   // Assigns the delegate for scan events.
   void set_delegate(Delegate* delegate) { delegate_ = delegate; }
 
  protected:
+  bool AnyFiltersPass(const std::vector<DiscoveryFilter>& filters,
+                      const AdvertisingData::ParseResult& ad,
+                      bool connectable,
+                      int8_t rssi) const;
+
+  void NotifyPeerFound(const LowEnergyScanResult& result);
+
+  void NotifyDirectedAdvertisement(const LowEnergyScanResult& result) const {
+    delegate()->OnDirectedAdvertisement(result);
+  }
+
   // Build the HCI command packet to set the scan parameters for the flavor of
   // low energy scanning being implemented.
   virtual CommandPacket BuildSetScanParametersPacket(
-      const DeviceAddress& local_address, const ScanOptions& options) = 0;
+      const DeviceAddress& local_address, const ScanOptions& options) const = 0;
 
   // Build the HCI command packet to enable scanning for the flavor of low
   // energy scanning being implemented.
   virtual CommandPacket BuildEnablePacket(
       const ScanOptions& options,
-      pw::bluetooth::emboss::GenericEnableParam enable) = 0;
+      pw::bluetooth::emboss::GenericEnableParam enable) const = 0;
 
   void AddPendingResult(LowEnergyScanResult&& scan_result);
 
@@ -328,10 +356,8 @@ class LowEnergyScanner : public LocalAddressClient {
   std::unique_ptr<PendingScanResult> RemovePendingResult(
       const DeviceAddress& address);
 
-  const PacketFilterConfig& packet_filter_config() const {
-    return packet_filter_config_;
-  }
-
+  void set_state(State state) { state_ = state; }
+  pw::async::Dispatcher& dispatcher() const { return pw_dispatcher_; }
   Transport::WeakPtr hci() const { return hci_; }
   Delegate* delegate() const { return delegate_; }
 
@@ -359,13 +385,24 @@ class LowEnergyScanner : public LocalAddressClient {
   // received.
   pw::chrono::SystemClock::duration scan_response_timeout_;
 
+  // Cached scan results for the current scan period during discovery. The
+  // minimum (and default) scan period is 10.24 seconds when performing LE
+  // discovery. This can cause a long wait for a discovery session that joined
+  // in the middle of a scan period and duplicate filtering is enabled. We
+  // maintain this cache to immediately notify new sessions of the currently
+  // cached results for this period.
+  std::vector<LowEnergyScanResult> cached_scan_results_;
+
   // Scannable advertising events for which a Scan Response PDU has not been
   // received. This is accumulated during a discovery procedure and always
   // cleared at the end of the scan period.
   std::unordered_map<DeviceAddress, std::unique_ptr<PendingScanResult>>
       pending_results_;
 
-  PacketFilterConfig packet_filter_config_;
+  // Manages all filtering related tasks for LowEnergyScanner (e.g. Host level
+  // filtering, Controller offloaded filtering, and the transition between the
+  // two, etc).
+  AdvertisingPacketFilter packet_filter_;
 
   // Used to obtain the local peer address type to use during scanning.
   LocalAddressDelegate* local_addr_delegate_;  // weak

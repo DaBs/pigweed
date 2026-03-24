@@ -16,7 +16,6 @@ import("//build_overrides/pigweed.gni")
 
 import("$dir_pw_build/module_config.gni")
 import("$dir_pw_build/target_types.gni")
-import("$dir_pw_docgen/docs.gni")
 import("$dir_pw_unit_test/test.gni")
 
 declare_args() {
@@ -53,15 +52,11 @@ pw_source_set("arch") {
   public_deps = [ pw_preprocessor_CONFIG ]
 }
 
-pw_doc_group("docs") {
-  inputs = [ "Kconfig" ]
-  sources = [ "docs.rst" ]
-}
-
 # All pw_preprocessor test binaries.
 pw_test_group("tests") {
   tests = [
     ":arguments_test",
+    ":apply_test",
     ":boolean_test",
     ":compiler_test",
     ":concat_test",
@@ -72,6 +67,14 @@ pw_test_group("tests") {
 pw_test("arguments_test") {
   deps = [ ":pw_preprocessor" ]
   sources = [ "arguments_test.cc" ]
+}
+
+pw_test("apply_test") {
+  sources = [ "apply_test.cc" ]
+  deps = [
+    ":pw_preprocessor",
+    "$dir_pw_unit_test:constexpr",
+  ]
 }
 
 pw_test("boolean_test") {

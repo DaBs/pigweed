@@ -1,0 +1,95 @@
+# Copyright 2025 The Pigweed Authors
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you may not
+# use this file except in compliance with the License. You may obtain a copy of
+# the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+# License for the specific language governing permissions and limitations under
+# the License.
+load("@bazel_skylib//rules:common_settings.bzl", "bool_flag")
+load("@rules_rust//rust:defs.bzl", "rust_library", "rust_proc_macro")
+
+package(default_visibility = ["//visibility:public"])
+
+bool_flag(
+    name = "userspace_build",
+    build_setting_default = False,
+    tags = ["kernel"],
+)
+
+config_setting(
+    name = "userspace_build_enabled",
+    flag_values = {":userspace_build": "True"},
+)
+
+# When building a system with userspace enabled, both the kernel and the
+# applications have the `userspace_build` flag set to true.  However, the
+# logging backend needs to be different for the kernel and application builds.
+#
+# This flag distinguishes the application build from the kernel build to allow
+# selecting the correct logging backend.
+bool_flag(
+    name = "is_app_build",
+    build_setting_default = False,
+)
+
+config_setting(
+    name = "is_app_build_enabled",
+    flag_values = {":is_app_build": "True"},
+)
+
+rust_library(
+    name = "userspace",
+    srcs = [
+        "lib.rs",
+        "syscall.rs",
+        "time.rs",
+    ],
+    crate_features = ["user_space"] + select({
+        "@platforms//cpu:armv8-m": ["arch_arm_cortex_m"],
+        "@platforms//cpu:riscv32": ["arch_riscv"],
+        "//conditions:default": [],
+    }),
+    edition = "2024",
+    proc_macro_deps = [
+        ":userspace_macro",
+    ],
+    tags = ["kernel"],
+    target_compatible_with = select({
+        ":userspace_build_enabled": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        "//pw_kernel/config:kernel_config",
+        "//pw_kernel/lib/pw_cast",
+        "//pw_kernel/lib/time",
+        "//pw_kernel/syscall:syscall_defs",
+        "//pw_kernel/syscall:syscall_user",
+        "//pw_log/rust:pw_log",
+        "//pw_status/rust:pw_status",
+    ],
+)
+
+rust_proc_macro(
+    name = "userspace_macro",
+    srcs = [
+        "userspace_macro.rs",
+    ],
+    compile_data = [
+        "arm_cortex_m/entry.s",
+        "riscv/entry.s",
+    ],
+    crate_features = ["user_space"],
+    edition = "2024",
+    tags = ["kernel"],
+    deps = [
+        "@rust_crates//:proc-macro2",
+        "@rust_crates//:quote",
+        "@rust_crates//:syn",
+    ],
+)

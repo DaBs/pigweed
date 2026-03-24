@@ -18,7 +18,7 @@
 
 namespace pw::metric {
 
-PW_CONSTINIT IntrusiveList<Group> global_groups;
-PW_CONSTINIT IntrusiveList<Metric> global_metrics;
+PW_CONSTINIT GroupList global_groups;
+PW_CONSTINIT MetricList global_metrics;
 
 }  // namespace pw::metric

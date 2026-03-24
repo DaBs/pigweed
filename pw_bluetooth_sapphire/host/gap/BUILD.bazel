@@ -20,7 +20,10 @@ load("//pw_unit_test:pw_cc_test.bzl", "pw_cc_test")
 
 package(
     default_visibility = ["//visibility:public"],
-    features = ["-layering_check"],
+    features = [
+        "-layering_check",
+        "-ctad_warnings",
+    ],
 )
 
 cc_library(
@@ -32,6 +35,7 @@ cc_library(
         "public/pw_bluetooth_sapphire/internal/host/gap/gap.h",
         "public/pw_bluetooth_sapphire/internal/host/gap/pairing_delegate.h",
     ],
+    features = ["-conversion_warnings"],
     strip_include_prefix = "public",
     tags = ["noclangtidy"],
     deps = [
@@ -51,6 +55,7 @@ cc_library(
         "public/pw_bluetooth_sapphire/internal/host/gap/peer.h",
         "public/pw_bluetooth_sapphire/internal/host/gap/peer_metrics.h",
     ],
+    features = ["-conversion_warnings"],
     strip_include_prefix = "public",
     tags = ["noclangtidy"],
     deps = [
@@ -89,6 +94,7 @@ cc_library(
         "low_energy_interrogator.cc",
         "pairing_state_manager.cc",
         "peer_cache.cc",
+        "periodic_advertising_sync_manager.cc",
         "secure_simple_pairing_state.cc",
         "types.cc",
     ],
@@ -118,9 +124,11 @@ cc_library(
         "public/pw_bluetooth_sapphire/internal/host/gap/low_energy_state.h",
         "public/pw_bluetooth_sapphire/internal/host/gap/pairing_state_manager.h",
         "public/pw_bluetooth_sapphire/internal/host/gap/peer_cache.h",
+        "public/pw_bluetooth_sapphire/internal/host/gap/periodic_advertising_sync_manager.h",
         "public/pw_bluetooth_sapphire/internal/host/gap/secure_simple_pairing_state.h",
         "public/pw_bluetooth_sapphire/internal/host/gap/types.h",
     ],
+    features = ["-conversion_warnings"],
     implementation_deps = [
         "//pw_string:utf_codecs",
     ],
@@ -154,6 +162,11 @@ cc_library(
         "public/pw_bluetooth_sapphire/internal/host/gap/fake_adapter.h",
         "public/pw_bluetooth_sapphire/internal/host/gap/fake_pairing_delegate.h",
     ],
+    copts = [
+        # TODO: https://pwbug.dev/464024322 - Fix warnings.
+        "-Wno-shadow",
+    ],
+    features = ["-conversion_warnings"],
     implementation_deps = [
         "//pw_unit_test:pw_unit_test.facade",
     ],
@@ -187,14 +200,15 @@ pw_cc_test(
         "low_energy_interrogator_test.cc",
         "peer_cache_test.cc",
         "peer_test.cc",
+        "periodic_advertising_sync_manager_test.cc",
         "secure_simple_pairing_state_test.cc",
         "types_test.cc",
     ],
-    # TODO: https://pwbug.dev/393957973 - Fix this test.
-    tags = [
-        "noasan",
-        "noubsan",
+    copts = [
+        # TODO: https://pwbug.dev/464024322 - Fix warnings.
+        "-Wno-shadow",
     ],
+    features = ["-conversion_warnings"],
     test_main = "//pw_bluetooth_sapphire/host/testing:gtest_main",
     deps = [
         ":gap",
@@ -216,6 +230,7 @@ pw_cc_test(
 pw_cc_fuzz_test(
     name = "peer_cache_fuzzer",
     srcs = ["peer_cache_fuzztest.cc"],
+    features = ["-conversion_warnings"],
     deps = [
         ":gap",
         "//pw_async:fake_dispatcher",

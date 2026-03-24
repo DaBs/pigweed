@@ -22,7 +22,8 @@ import("$dir_pw_build/python.gni")
 import("$dir_pw_build/python_action.gni")
 import("$dir_pw_build/python_gn_args.gni")
 import("$dir_pw_build/target_types.gni")
-import("$dir_pw_third_party/nanopb/nanopb.gni")
+import("$pw_external_nanopb/nanopb.gni")
+import("$pw_external_protobuf/protobuf.gni")
 import("toolchain.gni")
 
 # Variables forwarded from the public pw_proto_library template to the final
@@ -57,6 +58,9 @@ declare_args() {
   # root_build_dir, to the protoc binary.
   pw_protobuf_compiler_PROTOC_BINARY = _default_protc
 }
+
+# Nanopb's nanopb_pb2.py is generated once per build at the same location.
+pw_protobuf_compiler_INTERNAL_NANOPB_PB2_DIR = "$root_gen_dir/global_nanopb_pb2"
 
 # Internal template that invokes protoc with a pw_python_action. This should not
 # be used outside of this file; use pw_proto_library instead.
@@ -140,8 +144,16 @@ template("_pw_invoke_protoc") {
         assert(
             pw_protobuf_compiler_PROTOC_BINARY != "",
             "if pw_protobuf_compiler_PROTOC_TARGET is set then pw_protobuf_compiler_PROTOC_BINARY must be set to the path to protoc, relative to the root_build_dir.")
-        _protoc_src_dir =
-            get_label_info(pw_protobuf_compiler_PROTOC_TARGET, "dir") + "/src"
+
+        _protoc_base_dir = ""
+        if (dir_pw_third_party_protobuf != "") {
+          _protoc_base_dir = dir_pw_third_party_protobuf
+        } else {
+          _protoc_base_dir =
+              get_label_info(pw_protobuf_compiler_PROTOC_TARGET, "dir")
+        }
+
+        _protoc_src_dir = _protoc_base_dir + "/src"
 
         args += [
           "--protoc",
@@ -160,6 +172,10 @@ template("_pw_invoke_protoc") {
                 rebase_path(invoker.compile_dir, root_build_dir),
                 "--out-dir",
                 rebase_path(_out_dir, root_build_dir),
+                "--nanopb-pb2-dir",
+                rebase_path(pw_protobuf_compiler_INTERNAL_NANOPB_PB2_DIR,
+                            root_build_dir,
+                            root_gen_dir),
                 "--sources",
               ] + rebase_path(invoker.sources, root_build_dir)
 
@@ -306,7 +322,7 @@ template("_pw_nanopb_rpc_proto_library") {
                     "$dir_pw_rpc:server",
                     "$dir_pw_rpc/nanopb:client_api",
                     "$dir_pw_rpc/nanopb:server_api",
-                    "$dir_pw_third_party/nanopb",
+                    "$pw_external_nanopb",
                   ] + invoker.deps
     public = invoker.outputs
     check_includes = false
@@ -337,7 +353,7 @@ template("_pw_nanopb_proto_library") {
       forward_variables_from(invoker, "*", _forwarded_vars)
       language = "nanopb"
       plugin = "$dir_pw_third_party_nanopb/generator/protoc-gen-nanopb"
-      other_deps = [ "$dir_pw_third_party/nanopb:generate_nanopb_proto.action" ]
+      other_deps = [ "$pw_external_nanopb:generate_nanopb_proto.action" ]
     }
 
     # Create a library with the generated source files.
@@ -350,7 +366,7 @@ template("_pw_nanopb_proto_library") {
       forward_variables_from(invoker, _forwarded_vars)
       public_configs = [ ":$target_name._include_path" ]
       deps = [ ":$target_name._gen($pw_protobuf_compiler_TOOLCHAIN)" ]
-      public_deps = [ "$dir_pw_third_party/nanopb" ] + invoker.deps
+      public_deps = [ "$pw_external_nanopb" ] + invoker.deps
       sources = invoker.outputs
       public = filter_include(sources, [ "*.pb.h" ])
     }
@@ -604,6 +620,8 @@ template("pw_proto_library") {
     use_legacy_oneof_interfaces = false
     if (defined(invoker.use_legacy_oneof_interfaces)) {
       use_legacy_oneof_interfaces = invoker.use_legacy_oneof_interfaces
+    } else {
+      not_needed([ "use_legacy_oneof_interfaces" ])
     }
   }
 
@@ -619,7 +637,8 @@ template("pw_proto_library") {
     }
 
     data_keys = [ "protoc_includes" ]
-    outputs = [ "${_common.base_out_dir}/includes.txt" ]
+    toolchain_name = get_label_info(current_toolchain, "name")
+    outputs = [ "${_common.base_out_dir}/${toolchain_name}/includes.txt" ]
 
     # Indicate this library's base directory for its dependents.
     metadata = {

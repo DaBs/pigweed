@@ -32,7 +32,7 @@ to the Fuchsia system.
 
 To query the current state of the `bt-host` Inspect hierarchy through `ffx` tooling, run
 
-`ffx inspect show bootstrap/driver_manager --file class/bt-host/000.inspect`
+`ffx inspect show core/bluetooth-core/bt-host-collection`
 
 ### Hierarchy
 ```
@@ -51,7 +51,11 @@ adapter:
         command_channel:
             allowed_command_packets
             next_event_handler_id
-            next_transaction_id
+            transactions:
+                transaction_1:
+                    opcode
+                    complete_event_code
+                    state
         acl_data_channel:
             bredr:
                 num_sent_packets
@@ -174,6 +178,13 @@ adapter:
                 peer_id
                 peer_address
                 ref_count
+                @time
+        last_disconnected:
+            0:
+                peer_id
+                reason
+                connected_@time
+                @time
     bredr_connection_manager:
         security_mode
         disconnect_acl_link_error_count
@@ -198,6 +209,7 @@ adapter:
         connections:
             connection_0x0:
                 peer_id
+                @time
                 pairing_state_manager:
                     pairing_state_type
                     legacy_pairing_state:
@@ -219,6 +231,18 @@ adapter:
         last_disconnected:
             0:
                 peer_id
-                duration_s
+                reason
+                connected_@time
                 @time
+    low_energy_advertiser:
+        advertising_handle_map:
+            advertising_set_0x0:
+                handle
+                address
+lease_provider:
+    token
+    leases:
+        // Child node for each Lease, for example:
+        AclDataChannel:
+name
 ```

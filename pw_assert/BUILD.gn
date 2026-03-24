@@ -16,7 +16,6 @@ import("//build_overrides/pigweed.gni")
 
 import("$dir_pw_build/facade.gni")
 import("$dir_pw_build/module_config.gni")
-import("$dir_pw_docgen/docs.gni")
 import("$dir_pw_unit_test/test.gni")
 import("backend.gni")
 
@@ -91,6 +90,7 @@ pw_facade("check") {
   ]
   public_deps = [
     ":config",
+    "$dir_pw_numeric:checked_arithmetic",
     dir_pw_preprocessor,
   ]
 
@@ -206,13 +206,22 @@ pw_test("assert_test") {
   negative_compilation_tests = true
 }
 
+# DOCSTAG: [contributing-docs-examples]
 pw_test_group("tests") {
   tests = [
     ":assert_test",
     ":assert_backend_compile_test",
     ":assert_facade_test",
+    ":examples",
   ]
 }
+
+pw_test("examples") {
+  sources = [ "examples.cc" ]
+  deps = [ ":check" ]
+}
+
+# DOCSTAG: [contributing-docs-examples]
 
 # The assert facade test doesn't require a backend since a fake one is
 # provided. However, since this doesn't depend on the backend it re-includes
@@ -249,12 +258,4 @@ pw_test("assert_backend_compile_test") {
     "assert_backend_compile_test.cc",
     "assert_backend_compile_test_c.c",
   ]
-}
-
-pw_doc_group("docs") {
-  sources = [
-    "backends.rst",
-    "docs.rst",
-  ]
-  inputs = [ "assert_test.cc" ]
 }

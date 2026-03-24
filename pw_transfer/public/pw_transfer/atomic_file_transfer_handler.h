@@ -24,6 +24,8 @@
 
 namespace pw::transfer {
 
+/// @module{pw_transfer}
+
 /// `AtomicFileTransferHandler` is intended to be used as a transfer handler for
 /// files. It ensures that the target file of the transfer is always in a
 /// correct state. In particular, the transfer is first done to a temporary file
@@ -46,13 +48,8 @@ class AtomicFileTransferHandler : public ReadWriteHandler {
   /// @pre The read transfer has not been initialized before the call to this
   /// method.
   ///
-  /// @returns @rst
-  ///
-  /// .. pw-status-codes::
-  ///
-  ///    OK: ``AtomicFileTransferHandler`` is ready for the transfer.
-  ///
-  /// @endrst
+  /// @returns
+  /// * @OK: `AtomicFileTransferHandler` is ready for the transfer.
   Status PrepareRead() override;
   /// Handler function that is called by the transfer thread after a read
   /// transfer completes.
@@ -67,25 +64,15 @@ class AtomicFileTransferHandler : public ReadWriteHandler {
   /// @pre The write transfer has not been initialized before the call to this
   /// method.
   ///
-  /// @returns @rst
-  ///
-  /// .. pw-status-codes::
-  ///
-  ///    OK: ``AtomicFileTransferHandler`` is ready for the transfer.
-  ///
-  /// @endrst
+  /// @returns
+  /// * @OK: `AtomicFileTransferHandler` is ready for the transfer.
   Status PrepareWrite() override;
   /// Indicates whether the write transfer was successful.
   ///
   /// @pre The write transfer is done.
   ///
-  /// @returns @rst
-  ///
-  /// .. pw-status-codes::
-  ///
-  ///    OK: The transfer data was successfully written.
-  ///
-  /// @endrst
+  /// @returns
+  /// * @OK: The transfer data was successfully written.
   Status FinalizeWrite(Status) override;
 
  private:

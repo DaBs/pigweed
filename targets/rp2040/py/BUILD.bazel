@@ -13,8 +13,7 @@
 # the License.
 
 load("@rules_platform//platform_data:defs.bzl", "platform_data")
-load("@rules_python//python:defs.bzl", "py_library")
-load("//pw_build:python.bzl", "pw_py_binary")
+load("//pw_build:python.bzl", "pw_py_binary", "pw_py_library")
 
 package(
     default_visibility = ["//visibility:public"],
@@ -34,7 +33,7 @@ pw_py_binary(
     ],
 )
 
-py_library(
+pw_py_library(
     name = "rp2040_utils",
     srcs = [
         "rp2040_utils/__init__.py",
@@ -61,7 +60,7 @@ py_library(
         "//pw_tokenizer/py:pw_tokenizer",
         "//pw_unit_test:unit_test_py_pb2",
         "//pw_unit_test/py:pw_unit_test",
-        "@python_packages//pyusb",
+        "@pigweed_python_packages//pyusb",
         "@rules_python//python/runfiles",
     ],
 )
@@ -111,6 +110,6 @@ pw_py_binary(
 
 platform_data(
     name = "unit_test_client",
-    platform = "@local_config_platform//:host",
+    platform = "@bazel_tools//tools:host_platform",
     target = ":_unit_test_client",
 )

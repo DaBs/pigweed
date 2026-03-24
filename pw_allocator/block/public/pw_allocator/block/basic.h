@@ -48,6 +48,8 @@ struct BasicBase {};
 
 }  // namespace internal
 
+/// @submodule{pw_allocator,block_mixins}
+
 /// Base mix-in for block implementations.
 ///
 /// This CRTP-style type can be combined with block mix-in types. Block mix-ins
@@ -106,19 +108,11 @@ class BasicBlock : public internal::BasicBase {
 
   /// @brief Creates the first block for a given memory region.
   ///
-  /// @returns @rst
-  ///
-  /// .. pw-status-codes::
-  ///
-  ///    OK: Returns a block representing the region.
-  ///
-  ///    INVALID_ARGUMENT: The region is null.
-  ///
-  ///    RESOURCE_EXHAUSTED: The region is too small for a block.
-  ///
-  ///    OUT_OF_RANGE: The region is larger than `kMaxAddressableSize`.
-  ///
-  /// @endrst
+  /// @returns @Result{a block representing the region}
+  /// * @OK: Returns a block representing the region.
+  /// * @INVALID_ARGUMENT: The region is null.
+  /// * @RESOURCE_EXHAUSTED: The region is too small for a block.
+  /// * @OUT_OF_RANGE: The region is larger than `kMaxAddressableSize`.
   static constexpr Result<Derived*> Init(ByteSpan region);
 
   /// @returns  A pointer to a `Block`, given a pointer to the start of the
@@ -189,6 +183,8 @@ struct is_block : std::is_base_of<internal::BasicBase, T> {};
 /// Helper variable template for `is_block<T>::value`.
 template <typename T>
 constexpr bool is_block_v = is_block<T>::value;
+
+/// @}
 
 namespace internal {
 

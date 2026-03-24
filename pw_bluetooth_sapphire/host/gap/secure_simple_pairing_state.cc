@@ -179,10 +179,10 @@ void SecureSimplePairingState::InitiateNextPairingRequest() {
 
   PairingRequest& request = request_queue_.front();
 
-  current_pairing_ =
-      Pairing::MakeInitiator(request.security_requirements,
-                             outgoing_connection_,
-                             peer_->MutBrEdr().RegisterPairing());
+  current_pairing_ = Pairing::MakeInitiator(request.security_requirements,
+                                            outgoing_connection_,
+                                            peer_->MutBrEdr().RegisterPairing(),
+                                            dispatcher_);
 
   bt_log(DEBUG,
          "gap-bredr",
@@ -245,8 +245,11 @@ void SecureSimplePairingState::OnIoCapabilityResponse(IoCapability peer_iocap) {
   if (state() == State::kIdle ||
       state() == State::kInitiatorWaitLEPairingComplete) {
     PW_CHECK(!is_pairing());
-    current_pairing_ = Pairing::MakeResponder(
-        peer_iocap, outgoing_connection_, peer_->MutBrEdr().RegisterPairing());
+    current_pairing_ =
+        Pairing::MakeResponder(peer_iocap,
+                               outgoing_connection_,
+                               peer_->MutBrEdr().RegisterPairing(),
+                               dispatcher_);
 
     // Defer gathering local IO Capability until OnIoCapabilityRequest, where
     // the pairing can be rejected if there's no pairing delegate.
@@ -470,8 +473,8 @@ std::optional<hci_spec::LinkKey> SecureSimplePairingState::OnLinkKeyRequest() {
   // the peer initiates the authentication procedure).
   if (!is_pairing()) {
     if (link_key.has_value()) {
-      current_pairing_ =
-          Pairing::MakeResponderForBonded(peer_->MutBrEdr().RegisterPairing());
+      current_pairing_ = Pairing::MakeResponderForBonded(
+          peer_->MutBrEdr().RegisterPairing(), dispatcher_);
       state_ = State::kWaitEncryption;
       return link_key->key();
     }
@@ -670,6 +673,69 @@ void SecureSimplePairingState::OnAuthenticationComplete(
   EnableEncryption();
 }
 
+// Bluetooth core specification Version 6.0, Volume 2, Part C, Section 2.5.1:
+// An LMP Transaction Collision indicates that both the Central and the
+// Peripheral initiated the same LMP transaction at the same time. We only
+// receive this error when we are the Peripheral. The Central's operation
+// takes precedence. Ignore this event and wait for the completion event after
+// the Central LM completes the procedure.
+//
+// In other cases, the Central and Peripheral can both initiate
+// incongruent transactions at the same time. In such a situation, the
+// Controller will respond with Different Transaction Collision and the
+// Central's procedure will take precedence. We should then retry our failed
+// transaction at a later time.
+SecureSimplePairingState::ActionOnError
+SecureSimplePairingState::GetActionOnError(
+    const bt::Error<pw::bluetooth::emboss::StatusCode>& error) {
+  if (!error.is_protocol_error()) {
+    return ActionOnError::kFail;
+  }
+
+  bool is_central = outgoing_connection_;
+  if (error.protocol_error() ==
+      pw::bluetooth::emboss::StatusCode::LMP_ERROR_TRANSACTION_COLLISION) {
+    if (is_central) {
+      bt_log(WARN,
+             "gap-bredr",
+             "LMP transaction collision while attempting to enable encryption. "
+             "We are the central and should never have gotten this "
+             "notification from the Controller.");
+      inspect_metrics_.central_lmp_transaction_collision.Add();
+    } else {
+      bt_log(INFO,
+             "gap-bredr",
+             "LMP transaction collision while attempting to enable encryption. "
+             "Waiting for local LM to resolve the collision.");
+      inspect_metrics_.peripheral_lmp_transaction_collision.Add();
+    }
+
+    return ActionOnError::kIgnore;
+  }
+
+  if (error.protocol_error() ==
+      pw::bluetooth::emboss::StatusCode::DIFFERENT_TRANSACTION_COLLISION) {
+    if (is_central) {
+      bt_log(INFO,
+             "gap-bredr",
+             "Different transaction collision while attempting to enable "
+             "encryption as the central. Ignoring and letting the LM complete "
+             "the Central's operation.");
+      inspect_metrics_.central_different_transaction_collision.Add();
+      return ActionOnError::kIgnore;
+    } else {
+      bt_log(WARN,
+             "gap-bredr",
+             "Different transaction collision while attempting to enable "
+             "encryption. Will retry the original operation shortly.");
+      inspect_metrics_.peripheral_different_transaction_collision.Add();
+      return ActionOnError::kRetry;
+    }
+  }
+
+  return ActionOnError::kFail;
+}
+
 void SecureSimplePairingState::OnEncryptionChange(hci::Result<bool> result) {
   // Update inspect properties
   pw::bluetooth::emboss::EncryptionStatus encryption_status =
@@ -703,10 +769,29 @@ void SecureSimplePairingState::OnEncryptionChange(hci::Result<bool> result) {
     result = fit::error(Error(HostError::kFailed));
   }
 
-  if (!result.is_ok()) {
-    state_ = State::kFailed;
-    SignalStatus(result.take_error(), __func__);
-    return;
+  if (result.is_error()) {
+    current_pairing_->retry_enable_encryption_task.set_function(
+        [this](pw::async::Context /*ctx*/, pw::Status status) {
+          if (status.ok() && state_ == State::kWaitEncryption) {
+            bt_log(INFO, "hci-le", "Retrying enabling encryption");
+            EnableEncryption();
+          }
+        });
+
+    const auto& error = result.error_value();
+    ActionOnError action = GetActionOnError(error);
+    switch (action) {
+      case ActionOnError::kRetry:
+        current_pairing_->retry_enable_encryption_task.PostAfter(
+            kDelayRetryEnableEncryption);
+        return;
+      case ActionOnError::kIgnore:
+        return;
+      case ActionOnError::kFail:
+        state_ = State::kFailed;
+        SignalStatus(result.take_error(), __func__);
+        return;
+    }
   }
 
   if (!current_pairing_->received_link_key_security_properties) {
@@ -741,10 +826,11 @@ std::unique_ptr<SecureSimplePairingState::Pairing>
 SecureSimplePairingState::Pairing::MakeInitiator(
     BrEdrSecurityRequirements security_requirements,
     bool outgoing_connection,
-    Peer::PairingToken&& token) {
-  // Private ctor is inaccessible to std::make_unique.
+    Peer::PairingToken&& token,
+    pw::async::Dispatcher& dispatcher) {
+  // Private constructor is inaccessible to std::make_unique.
   std::unique_ptr<Pairing> pairing(
-      new Pairing(outgoing_connection, std::move(token)));
+      new Pairing(outgoing_connection, std::move(token), dispatcher));
   pairing->initiator = true;
   pairing->preferred_security = security_requirements;
   return pairing;
@@ -754,10 +840,11 @@ std::unique_ptr<SecureSimplePairingState::Pairing>
 SecureSimplePairingState::Pairing::MakeResponder(
     pw::bluetooth::emboss::IoCapability peer_iocap,
     bool outgoing_connection,
-    Peer::PairingToken&& token) {
-  // Private ctor is inaccessible to std::make_unique.
+    Peer::PairingToken&& token,
+    pw::async::Dispatcher& dispatcher) {
+  // Private constructor is inaccessible to std::make_unique.
   std::unique_ptr<Pairing> pairing(
-      new Pairing(outgoing_connection, std::move(token)));
+      new Pairing(outgoing_connection, std::move(token), dispatcher));
   pairing->initiator = false;
   pairing->peer_iocap = peer_iocap;
   // Don't try to upgrade security as responder.
@@ -768,9 +855,9 @@ SecureSimplePairingState::Pairing::MakeResponder(
 
 std::unique_ptr<SecureSimplePairingState::Pairing>
 SecureSimplePairingState::Pairing::MakeResponderForBonded(
-    Peer::PairingToken&& token) {
-  std::unique_ptr<Pairing> pairing(
-      new Pairing(/* link initiated */ false, std::move(token)));
+    Peer::PairingToken&& token, pw::async::Dispatcher& dispatcher) {
+  std::unique_ptr<Pairing> pairing(new Pairing(
+      /* link initiated */ false, std::move(token), dispatcher));
   pairing->initiator = false;
   // Don't try to upgrade security as responder.
   pairing->preferred_security = {.authentication = false,
@@ -894,7 +981,7 @@ std::vector<fit::closure> SecureSimplePairingState::CompletePairingRequests(
   if (status.is_error()) {
     // On pairing failure, signal all requests.
     for (auto& request : request_queue_) {
-      callbacks_to_signal.push_back(
+      callbacks_to_signal.emplace_back(
           [handle = handle(),
            status,
            cb = std::move(request.status_callback)]() { cb(handle, status); });
@@ -926,7 +1013,7 @@ std::vector<fit::closure> SecureSimplePairingState::CompletePairingRequests(
                                 ? status
                                 : ToResult(HostError::kInsufficientSecurity);
 
-      callbacks_to_signal.push_back(
+      callbacks_to_signal.emplace_back(
           [handle = handle(),
            request_status,
            cb = std::move(request.status_callback)]() {
@@ -947,7 +1034,7 @@ std::vector<fit::closure> SecureSimplePairingState::CompletePairingRequests(
         continue;
       }
 
-      callbacks_to_signal.push_back(
+      callbacks_to_signal.emplace_back(
           [handle = handle(), status, cb = std::move(it->status_callback)]() {
             cb(handle, status);
           });
@@ -1036,6 +1123,15 @@ void SecureSimplePairingState::AttachInspect(inspect::Node& parent,
   inspect_properties_.encryption_status = inspect_node_.CreateString(
       kInspectEncryptionStatusPropertyName,
       EncryptionStatusToString(link_->encryption_status()));
+
+  inspect_metrics_.central_lmp_transaction_collision.AttachInspect(
+      inspect_node_, "central_lmp_transaction_collision");
+  inspect_metrics_.peripheral_lmp_transaction_collision.AttachInspect(
+      inspect_node_, "peripheral_lmp_transaction_collision");
+  inspect_metrics_.central_different_transaction_collision.AttachInspect(
+      inspect_node_, "central_different_transaction_collision");
+  inspect_metrics_.peripheral_different_transaction_collision.AttachInspect(
+      inspect_node_, "peripheral_different_transaction_collision");
 
   security_properties().AttachInspect(inspect_node_,
                                       kInspectSecurityPropertiesPropertyName);

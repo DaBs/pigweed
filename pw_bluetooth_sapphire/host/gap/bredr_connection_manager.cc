@@ -32,6 +32,7 @@
 #include "pw_bluetooth_sapphire/internal/host/hci-spec/util.h"
 #include "pw_bluetooth_sapphire/internal/host/hci/bredr_connection.h"
 #include "pw_bluetooth_sapphire/internal/host/hci/sequential_command_runner.h"
+#include "pw_bluetooth_sapphire/internal/host/l2cap/autosniff.h"
 #include "pw_bluetooth_sapphire/internal/host/l2cap/l2cap_defs.h"
 #include "pw_bluetooth_sapphire/internal/host/l2cap/types.h"
 #include "pw_bluetooth_sapphire/internal/host/transport/command_channel.h"
@@ -41,6 +42,21 @@ namespace bt::gap {
 
 using ConnectionState = Peer::ConnectionState;
 
+const char* DisconnectReasonToString(DisconnectReason reason) {
+  switch (reason) {
+    case DisconnectReason::kApiRequest:
+      return "api request";
+    case DisconnectReason::kInterrogationFailed:
+      return "interrogation failed";
+    case DisconnectReason::kPairingFailed:
+      return "pairing failed";
+    case DisconnectReason::kAclLinkError:
+      return "acl link error";
+    case DisconnectReason::kPeerDisconnection:
+      return "peer disconnection";
+  }
+}
+
 namespace {
 
 const char* const kInspectRequestsNodeName = "connection_requests";
@@ -49,10 +65,11 @@ const char* const kInspectSecurityModeName = "security_mode";
 const char* const kInspectConnectionsNodeName = "connections";
 const char* const kInspectConnectionNodeNamePrefix = "connection_";
 const char* const kInspectLastDisconnectedListName = "last_disconnected";
-const char* const kInspectLastDisconnectedItemDurationPropertyName =
-    "duration_s";
+// @time suffixes have special treatment in Fuchsia Snapshot Viewer.
+const char* const kInspectLastDisconnectedItemConnectedTimePropertyName =
+    "connected_@time";
 const char* const kInspectLastDisconnectedItemPeerPropertyName = "peer_id";
-const char* const kInspectTimestampPropertyName = "@time";
+const char* const kInspectLastDisconnectedItemReasonPropertyName = "reason";
 const char* const kInspectOutgoingNodeName = "outgoing";
 const char* const kInspectIncomingNodeName = "incoming";
 const char* const kInspectConnectionAttemptsNodeName = "connection_attempts";
@@ -123,15 +140,17 @@ void SetPageScanEnabled(bool enabled,
         scan_type & static_cast<uint8_t>(hci_spec::ScanEnableBit::kInquiry));
     write_enable_view.scan_enable().page().Write(
         scan_type & static_cast<uint8_t>(hci_spec::ScanEnableBit::kPage));
-    hci->command_channel()->SendCommand(
-        std::move(write_enable),
-        [callback = std::move(finish_cb)](auto,
-                                          const hci::EventPacket& response) {
-          callback(response.ToResult());
-        });
+    hci->command_channel()
+        ->SendCommand(std::move(write_enable),
+                      [callback = std::move(finish_cb)](
+                          auto, const hci::EventPacket& response) {
+                        callback(response.ToResult());
+                      })
+        .IgnoreError();
   };
-  hci->command_channel()->SendCommand(std::move(read_enable),
-                                      std::move(finish_enable_cb));
+  hci->command_channel()
+      ->SendCommand(std::move(read_enable), std::move(finish_enable_cb))
+      .IgnoreError();
 }
 
 }  // namespace
@@ -336,7 +355,11 @@ void BrEdrConnectionManager::Pair(PeerId peer_id,
   }
 
   auto& [handle, connection] = *conn_pair;
-  auto pairing_callback = [pair_callback = std::move(callback)](
+  std::optional<std::unique_ptr<l2cap::AutosniffSuppressInterface>>
+      autosniff_suppression =
+          l2cap_->SuppressAutosniff(handle, "during pairing request");
+  auto pairing_callback = [pair_callback = std::move(callback),
+                           suppression = std::move(autosniff_suppression)](
                               auto, hci::Result<> status) {
     pair_callback(status);
   };
@@ -629,11 +652,13 @@ void BrEdrConnectionManager::WritePageTimeout(
   auto params = write_page_timeout_cmd.view_t();
   params.page_timeout().Write(raw_page_timeout);
 
-  hci_->command_channel()->SendCommand(
-      std::move(write_page_timeout_cmd),
-      [callback = std::move(cb)](auto, const hci::EventPacket& event) {
-        callback(event.ToResult());
-      });
+  hci_->command_channel()
+      ->SendCommand(
+          std::move(write_page_timeout_cmd),
+          [callback = std::move(cb)](auto, const hci::EventPacket& event) {
+            callback(event.ToResult());
+          })
+      .IgnoreError();
 }
 
 void BrEdrConnectionManager::WritePageScanSettings(uint16_t interval,
@@ -703,11 +728,14 @@ void BrEdrConnectionManager::WritePinType(
   auto params = write_pin_type_cmd.view_t();
   params.pin_type().Write(pin_type);
 
-  hci_->command_channel()->SendCommand(
-      std::move(write_pin_type_cmd), [](auto, const hci::EventPacket& event) {
-        [[maybe_unused]] bool _ = bt_is_error(
-            event.ToResult(), WARN, "gap-bredr", "Write PIN Type failed");
-      });
+  hci_->command_channel()
+      ->SendCommand(
+          std::move(write_pin_type_cmd),
+          [](auto, const hci::EventPacket& event) {
+            [[maybe_unused]] bool _ = bt_is_error(
+                event.ToResult(), WARN, "gap-bredr", "Write PIN Type failed");
+          })
+      .IgnoreError();
 }
 
 std::optional<BrEdrConnectionRequest*>
@@ -1293,7 +1321,6 @@ void BrEdrConnectionManager::OnPeerDisconnect(
   CleanUpConnection(
       handle, std::move(conn), DisconnectReason::kPeerDisconnection);
 }
-
 void BrEdrConnectionManager::CleanUpConnection(
     hci_spec::ConnectionHandle handle,
     BrEdrConnection conn,
@@ -1440,8 +1467,10 @@ BrEdrConnectionManager::OnLinkKeyRequest(const hci::EventPacket& event) {
     // |status_cb| are not created yet. After the connection is complete, they
     // are initialized in |PairingStateManager|'s constructor.
     std::unique_ptr<LegacyPairingState> legacy_pairing_state =
-        std::make_unique<LegacyPairingState>(
-            peer->GetWeakPtr(), pairing_delegate_, outgoing_connection);
+        std::make_unique<LegacyPairingState>(peer->GetWeakPtr(),
+                                             pairing_delegate_,
+                                             outgoing_connection,
+                                             &dispatcher_);
 
     connection_req.value()->set_legacy_pairing_state(
         std::move(legacy_pairing_state));
@@ -1816,8 +1845,10 @@ BrEdrConnectionManager::OnPinCodeRequest(const hci::EventPacket& event) {
       // |status_cb| are not created yet. After the connection is complete, they
       // are initialized in |PairingStateManager|'s constructor.
       std::unique_ptr<LegacyPairingState> legacy_pairing_state =
-          std::make_unique<LegacyPairingState>(
-              peer->GetWeakPtr(), pairing_delegate_, outgoing_connection);
+          std::make_unique<LegacyPairingState>(peer->GetWeakPtr(),
+                                               pairing_delegate_,
+                                               outgoing_connection,
+                                               &dispatcher_);
 
       connection_req.value()->set_legacy_pairing_state(
           std::move(legacy_pairing_state));
@@ -1998,11 +2029,15 @@ void BrEdrConnectionManager::SendCreateConnectionCancelCommand(
       hci_spec::kCreateConnectionCancel);
   auto params = cancel.view_t();
   params.bd_addr().CopyFrom(addr.value().view());
-  hci_->command_channel()->SendCommand(
-      std::move(cancel), [](auto, const hci::EventPacket& event) {
-        HCI_IS_ERROR(
-            event, WARN, "hci-bredr", "failed to cancel connection request");
-      });
+  hci_->command_channel()
+      ->SendCommand(std::move(cancel),
+                    [](auto, const hci::EventPacket& event) {
+                      HCI_IS_ERROR(event,
+                                   WARN,
+                                   "hci-bredr",
+                                   "failed to cancel connection request");
+                    })
+      .IgnoreError();
 }
 
 void BrEdrConnectionManager::SendAuthenticationRequested(
@@ -2021,9 +2056,11 @@ void BrEdrConnectionManager::SendAuthenticationRequested(
       callback(event.ToResult());
     };
   }
-  hci_->command_channel()->SendCommand(std::move(auth_request),
-                                       std::move(command_cb),
-                                       hci_spec::kCommandStatusEventCode);
+  hci_->command_channel()
+      ->SendCommand(std::move(auth_request),
+                    std::move(command_cb),
+                    hci_spec::kCommandStatusEventCode)
+      .IgnoreError();
 }
 
 void BrEdrConnectionManager::SendIoCapabilityRequestReply(
@@ -2131,8 +2168,9 @@ void BrEdrConnectionManager::SendCommandWithStatusCallback(
       callback(event.ToResult());
     };
   }
-  hci_->command_channel()->SendCommand(std::move(command_packet),
-                                       std::move(command_cb));
+  hci_->command_channel()
+      ->SendCommand(std::move(command_packet), std::move(command_cb))
+      .IgnoreError();
 }
 
 void BrEdrConnectionManager::SendAcceptConnectionRequest(
@@ -2155,9 +2193,11 @@ void BrEdrConnectionManager::SendAcceptConnectionRequest(
     };
   }
 
-  hci_->command_channel()->SendCommand(std::move(accept),
-                                       std::move(command_cb),
-                                       hci_spec::kCommandStatusEventCode);
+  hci_->command_channel()
+      ->SendCommand(std::move(accept),
+                    std::move(command_cb),
+                    hci_spec::kCommandStatusEventCode)
+      .IgnoreError();
 }
 
 void BrEdrConnectionManager::SendRejectConnectionRequest(
@@ -2179,9 +2219,11 @@ void BrEdrConnectionManager::SendRejectConnectionRequest(
     };
   }
 
-  hci_->command_channel()->SendCommand(std::move(reject),
-                                       std::move(command_cb),
-                                       hci_spec::kCommandStatusEventCode);
+  hci_->command_channel()
+      ->SendCommand(std::move(reject),
+                    std::move(command_cb),
+                    hci_spec::kCommandStatusEventCode)
+      .IgnoreError();
 }
 
 void BrEdrConnectionManager::SendRejectSynchronousRequest(
@@ -2203,9 +2245,11 @@ void BrEdrConnectionManager::SendRejectSynchronousRequest(
     };
   }
 
-  hci_->command_channel()->SendCommand(std::move(reject),
-                                       std::move(command_cb),
-                                       hci_spec::kCommandStatusEventCode);
+  hci_->command_channel()
+      ->SendCommand(std::move(reject),
+                    std::move(command_cb),
+                    hci_spec::kCommandStatusEventCode)
+      .IgnoreError();
 }
 
 void BrEdrConnectionManager::SendPinCodeRequestReply(DeviceAddressBytes bd_addr,
@@ -2248,13 +2292,13 @@ void BrEdrConnectionManager::RecordDisconnectInspect(
   auto& inspect_item = inspect_properties_.last_disconnected_list.CreateItem();
   inspect_item.node.RecordString(kInspectLastDisconnectedItemPeerPropertyName,
                                  conn.peer_id().ToString());
-  uint64_t conn_duration_s =
-      std::chrono::duration_cast<std::chrono::seconds>(conn.duration()).count();
-  inspect_item.node.RecordUint(kInspectLastDisconnectedItemDurationPropertyName,
-                               conn_duration_s);
-
-  int64_t time_ns = dispatcher_.now().time_since_epoch().count();
-  inspect_item.node.RecordInt(kInspectTimestampPropertyName, time_ns);
+  inspect_item.node.RecordString(kInspectLastDisconnectedItemReasonPropertyName,
+                                 DisconnectReasonToString(reason));
+  int64_t connected_time_ns = conn.create_time().time_since_epoch().count();
+  inspect_item.node.RecordInt(
+      kInspectLastDisconnectedItemConnectedTimePropertyName, connected_time_ns);
+  inspect_item.node.RecordInt("@time",
+                              dispatcher_.now().time_since_epoch().count());
 
   switch (reason) {
     case DisconnectReason::kApiRequest:

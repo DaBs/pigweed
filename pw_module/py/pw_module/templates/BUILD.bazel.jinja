@@ -16,18 +16,17 @@ the License.
 {% import 'helpers/bazel.jinja' as bazel %}
 {{ build.get_license }}
 
+load("@rules_python//sphinxdocs:sphinx_docs_library.bzl", "sphinx_docs_library")
+load("//pw_build:compatibility.bzl", "incompatible_with_mcu")
 {% set bazel_imports = [] %}
-{% do bazel_imports.append('pw_cc_test') if build.cc_tests %}
+{% do bazel_imports.append(('//pw_unit_test:pw_cc_test.bzl', 'pw_cc_test')) if build.cc_tests %}
 {% if bazel_imports|length > 0 %}
-load(
-    "//pw_build:pigweed.bzl",
-    {% for i in bazel_imports|sort %}
-    "{{ i }}",
-    {% endfor %}
-)
+{% for i, j in bazel_imports|sort %}
+load("{{ i }}", "{{ j }}")
+{% endfor %}
 {% endif %}
 
-package(default_visibility = ["//visibility:public"])
+package(default_visibility = ["//visibility:private"])
 
 licenses(["notice"])
 
@@ -37,6 +36,7 @@ cc_library(
     srcs = {{ bazel.file_list(build, target.sources) }}
     hdrs = {{ bazel.file_list(build, target.headers) }}
     strip_include_prefix = "public",
+    visibility = ["//visibility:public"],
 )
 {% endfor %}
 
@@ -45,11 +45,15 @@ pw_cc_test(
     name = "{{ target.name }}",
     srcs = {{ bazel.file_list(build, target.sources) }}
     deps = {{ bazel.deps_list(target.deps) }}
+    visibility = ["//visibility:public"],
 )
 {% endfor %}
 
-# Bazel does not yet support building docs.
-filegroup(
+sphinx_docs_library(
     name = "docs",
-    srcs = {{ bazel.file_list(build, build.docs_sources) }}
+    srcs = [
+        "docs.rst",
+    ],
+    target_compatible_with = incompatible_with_mcu(),
+    visibility = ["//visibility:public"],
 )

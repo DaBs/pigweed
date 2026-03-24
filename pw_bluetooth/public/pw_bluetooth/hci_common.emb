@@ -206,6 +206,12 @@ enum OpCode:
   SNIFF_MODE                                                   = 0x0803
     -- Sniff Mode Command
 
+  EXIT_SNIFF_MODE                                              = 0x0804
+    -- Exit Sniff Mode Command
+
+  SNIFF_SUBRATING                                              = 0x0811
+    -- Sniff Subrating Command
+
   ### Controller & Baseband Commands - Core Spec v5.0 Vol 2, Part E, Section 7.3 (OGF 0x03)
 
   SET_EVENT_MASK                                               = 0x0C01
@@ -410,6 +416,11 @@ enum OpCode:
   READ_ENCRYPTION_KEY_SIZE                                     = 0x1408
     -- Read Encryption Key Size (v1.1) (BR/EDR)
 
+  ### Testing Commands - Core Spec v6.1, Vol 4, Part E, Section 7.6 (OGF 0x06)
+
+  WRITE_SIMPLE_PAIRING_DEBUG_MODE                              = 0x1804
+    -- Write Simple Pairing Debug Mode (v2.1 + EDR)
+
   ### LE Controller Commands - Core Spec v5.0 Vol 2, Part E, Section 7.8 (OGF 0x08)
 
   LE_SET_EVENT_MASK                                            = 0x2001
@@ -565,6 +576,24 @@ enum OpCode:
   LE_EXTENDED_CREATE_CONNECTION_V1                             = 0x2043
     -- LE Extended Create Connection Command [v1] (v5.0) (LE)
 
+  LE_PERIODIC_ADVERTISING_CREATE_SYNC                          = 0x2044
+    -- LE Periodic Advertising Create Sync Command (v5.0) (LE)
+
+  LE_PERIODIC_ADVERTISING_CREATE_SYNC_CANCEL                   = 0x2045
+    -- LE Periodic Advertising Create Sync Cancel Command (v5.0) (LE)
+
+  LE_PERIODIC_ADVERTISING_TERMINATE_SYNC                       = 0x2046
+    -- LE Periodic Advertising Terminate Sync Command (v5.0) (LE)
+
+  LE_ADD_DEVICE_TO_PERIODIC_ADVERTISER_LIST                    = 0x2047
+    -- LE Add Device To Periodic Advertiser List Command (v5.0) (LE)
+
+  LE_REMOVE_DEVICE_FROM_PERIODIC_ADVERTISER_LIST               = 0x2048
+    -- LE Remove Device From Periodic Advertiser List Command (v5.0) (LE)
+
+  LE_CLEAR_PERIODIC_ADVERTISER_LIST                            = 0x2049
+    -- LE Clear Periodic Advertiser List Command (v5.0) (LE)
+
   LE_READ_TRANSMIT_POWER                                       = 0x204B
     -- LE Read Transmit Power Command (v5.0) (LE)
 
@@ -664,6 +693,9 @@ enum OpCode:
   LE_SET_EXTENDED_ADVERTISING_PARAMETERS_V2                    = 0x207F
     -- LE Set Extended Advertising Parameters Command (v5.4) (LE)
 
+  LE_SET_PERIODIC_SYNC_SUBEVENT                                = 0x2084
+    -- LE Set Periodic Sync Subevent Command (v5.4) (LE)
+
   LE_EXTENDED_CREATE_CONNECTION_V2                             = 0x2085
     -- LE Extended Create Connection Command [v2] (v5.4) (LE)
 
@@ -704,6 +736,12 @@ enum OpCode:
 
   ANDROID_DYNAMIC_AUDIO_BUFFER                                 = 0xFD5F
     -- Dynamic Audio Buffer Command
+
+  ANDROID_WRITE_SNIFF_OFFLOAD_ENABLE                           = 0xFF10
+    -- Write Sniff Offload Enable Command
+
+  ANDROID_WRITE_SNIFF_OFFLOAD_PARAMETERS                       = 0xFF11
+    -- Write Sniff Offload Parameters Command
 
 
 enum EventCode:
@@ -768,30 +806,35 @@ enum LeSubEventCode:
   -- HCI LE Meta event SubEvent codes
   -- Core Spec v6.0 Vol 4, Part E, Section 7.7.65
   [maximum_bits: 8]
-  CONNECTION_COMPLETE                   = 0x01
-  ADVERTISING_REPORT                    = 0x02
-  CONNECTION_UPDATE_COMPLETE            = 0x03
-  READ_REMOTE_FEATURES_COMPLETE         = 0x04
-  LONG_TERM_KEY_REQUEST                 = 0x05
-  REMOTE_CONNECTION_PARAMETER_REQUEST   = 0x06
-  DATA_LENGTH_CHANGE                    = 0x07
-  READ_LOCAL_P256_PUBLIC_KEY_COMPLETE   = 0x08
-  GENERATE_DH_KEY_COMPLETE              = 0x09
-  ENHANCED_CONNECTION_COMPLETE_V1       = 0x0A
-  DIRECTED_ADVERTISING_REPORT           = 0x0B
-  PHY_UPDATE_COMPLETE                   = 0x0C
-  EXTENDED_ADVERTISING_REPORT           = 0x0D
-  PERIODIC_ADVERTISING_SYNC_ESTABLISHED = 0x0E
-  PERIODIC_ADVERTISING_REPORT           = 0x0F
-  PERIODIC_ADVERTISING_SYNC_LOST        = 0x10
-  SCAN_TIMEOUT                          = 0x11
-  ADVERTISING_SET_TERMINATED            = 0x12
-  SCAN_REQUEST_RECEIVED                 = 0x13
-  CHANNEL_SELECTION_ALGORITHM           = 0x14
-  CIS_ESTABLISHED                       = 0x19
-  REQUEST_PEER_SCA_COMPLETE             = 0x1F
-  CIS_REQUEST                           = 0x1A
-  ENHANCED_CONNECTION_COMPLETE_V2       = 0x29
+  CONNECTION_COMPLETE                            = 0x01
+  ADVERTISING_REPORT                             = 0x02
+  CONNECTION_UPDATE_COMPLETE                     = 0x03
+  READ_REMOTE_FEATURES_COMPLETE                  = 0x04
+  LONG_TERM_KEY_REQUEST                          = 0x05
+  REMOTE_CONNECTION_PARAMETER_REQUEST            = 0x06
+  DATA_LENGTH_CHANGE                             = 0x07
+  READ_LOCAL_P256_PUBLIC_KEY_COMPLETE            = 0x08
+  GENERATE_DH_KEY_COMPLETE                       = 0x09
+  ENHANCED_CONNECTION_COMPLETE_V1                = 0x0A
+  DIRECTED_ADVERTISING_REPORT                    = 0x0B
+  PHY_UPDATE_COMPLETE                            = 0x0C
+  EXTENDED_ADVERTISING_REPORT                    = 0x0D
+  PERIODIC_ADVERTISING_SYNC_ESTABLISHED          = 0x0E
+  PERIODIC_ADVERTISING_REPORT                    = 0x0F
+  PERIODIC_ADVERTISING_SYNC_LOST                 = 0x10
+  SCAN_TIMEOUT                                   = 0x11
+  ADVERTISING_SET_TERMINATED                     = 0x12
+  SCAN_REQUEST_RECEIVED                          = 0x13
+  CHANNEL_SELECTION_ALGORITHM                    = 0x14
+  PERIODIC_ADVERTISING_SYNC_TRANSFER_RECEIVED    = 0x18
+  CIS_ESTABLISHED                                = 0x19
+  REQUEST_PEER_SCA_COMPLETE                      = 0x1F
+  CIS_REQUEST                                    = 0x1A
+  BIG_INFO_ADVERTISING_REPORT                    = 0x22
+  PERIODIC_ADVERTISING_SYNC_ESTABLISHED_V2       = 0x24
+  PERIODIC_ADVERTISING_REPORT_V2                 = 0x25
+  PERIODIC_ADVERTISING_SYNC_TRANSFER_RECEIVED_V2 = 0x26
+  ENHANCED_CONNECTION_COMPLETE_V2                = 0x29
 
 
 enum MajorDeviceClass:
@@ -1155,6 +1198,13 @@ enum LEPrimaryAdvertisingPHY:
   LE_1M       = 0x01
   LE_CODED    = 0x03
   LE_CODED_S2 = 0x04
+
+
+enum LEPhy:
+  [maximum_bits: 8]
+  LE_1M    = 0x01
+  LE_2M    = 0x02
+  LE_CODED = 0x03
 
 
 enum LESecondaryAdvertisingPHY:

@@ -16,7 +16,6 @@
 
 load("@rules_android//android:rules.bzl", "android_library")
 load("@rules_java//java:defs.bzl", "java_library")
-load("@rules_jvm_external//:defs.bzl", "artifact")
 
 RPC_CLIENT_SOURCES = [
     "AbstractCall.java",
@@ -25,6 +24,7 @@ RPC_CLIENT_SOURCES = [
     "ChannelOutputException.java",
     "Client.java",
     "Endpoint.java",
+    "CallIdMode.java",
     "FutureCall.java",
     "Ids.java",
     "InvalidRpcChannelException.java",
@@ -54,8 +54,9 @@ java_library(
         "//pw_rpc:packet_proto_java",
         "//third_party/google_auto:value",
         "@com_google_protobuf//java/core",
-        artifact("com.google.code.findbugs:jsr305"),
-        artifact("com.google.guava:guava"),
+        "@pigweed_maven_deps//:com_google_code_findbugs_jsr305",
+        "@pigweed_maven_deps//:com_google_errorprone_error_prone_annotations",
+        "@pigweed_maven_deps//:com_google_guava_guava",
     ],
 )
 
@@ -68,14 +69,16 @@ java_library(
         "//pw_rpc:packet_proto_java_lite",
         "//third_party/google_auto:value",
         "@com_google_protobuf//java/lite",
-        artifact("com.google.code.findbugs:jsr305"),
-        artifact("com.google.guava:guava"),
+        "@pigweed_maven_deps//:com_google_code_findbugs_jsr305",
+        "@pigweed_maven_deps//:com_google_errorprone_error_prone_annotations",
+        "@pigweed_maven_deps//:com_google_guava_guava",
     ],
 )
 
 android_library(
     name = "client_android",
     srcs = RPC_CLIENT_SOURCES,
+    custom_package = "dev.pigweed.pw_rpc",
     tags = ["manual"],  # TODO: b/227771184 - support Android in the Bazel build
     visibility = ["//visibility:public"],
     deps = [
@@ -83,7 +86,8 @@ android_library(
         "//pw_rpc:packet_proto_java_lite",
         "//third_party/google_auto:value",
         "@com_google_protobuf//java/lite",
-        artifact("com.google.code.findbugs:jsr305"),
-        artifact("com.google.guava:guava"),
+        "@pigweed_maven_deps//:com_google_code_findbugs_jsr305",
+        "@pigweed_maven_deps//:com_google_errorprone_error_prone_annotations",
+        "@pigweed_maven_deps//:com_google_guava_guava",
     ],
 )

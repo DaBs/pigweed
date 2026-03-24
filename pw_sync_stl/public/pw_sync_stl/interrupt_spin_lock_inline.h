@@ -13,25 +13,27 @@
 // the License.
 #pragma once
 
+#include <thread>
+
+#include "pw_assert/assert.h"
 #include "pw_sync/interrupt_spin_lock.h"
-#include "pw_sync/yield_core.h"
 
 namespace pw::sync {
 
-constexpr InterruptSpinLock::InterruptSpinLock() : native_type_() {}
+constexpr InterruptSpinLock::InterruptSpinLock() : native_type_(false) {}
 
 inline void InterruptSpinLock::lock() {
   while (!try_lock()) {
-    PW_SYNC_YIELD_CORE_FOR_SMT();
+    std::this_thread::yield();
   }
 }
 
 inline bool InterruptSpinLock::try_lock() {
-  return !native_type_.test_and_set(std::memory_order_acquire);
+  return !native_type_.exchange(true, std::memory_order_acquire);
 }
 
 inline void InterruptSpinLock::unlock() {
-  native_type_.clear(std::memory_order_release);
+  PW_ASSERT(native_type_.exchange(false, std::memory_order_release));
 }
 
 inline InterruptSpinLock::native_handle_type

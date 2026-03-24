@@ -43,12 +43,24 @@ constexpr inline Result<EmbossT> MakeEmbossView(Params&&... params) {
 // Unlike the Emboss `Make*View` creation methods, this function accepts a
 // reference so it can be used with rvalues. This is ok to do with pw::span
 // since it doesn't own its underlying data.
-template <typename EmbossT,
-          typename ContainerT,
-          typename = std::enable_if_t<
-              std::is_convertible_v<ContainerT, pw::span<const uint8_t>>>>
+template <
+    typename EmbossT,
+    typename ContainerT,
+    std::enable_if_t<std::is_convertible_v<ContainerT, pw::span<const uint8_t>>,
+                     bool> = true>
 constexpr inline Result<EmbossT> MakeEmbossView(ContainerT&& buffer) {
   return MakeEmbossView<EmbossT>(buffer.data(), buffer.size());
+}
+template <typename EmbossT,
+          typename ContainerT,
+          std::enable_if_t<
+              !std::is_convertible_v<ContainerT, pw::span<const uint8_t>> &&
+                  std::is_convertible_v<ContainerT, pw::span<const std::byte>>,
+              bool> = true>
+constexpr inline Result<EmbossT> MakeEmbossView(ContainerT&& buffer) {
+  auto reinterpret_span = pw::span<const uint8_t>(
+      reinterpret_cast<const uint8_t*>(buffer.data()), buffer.size());
+  return MakeEmbossView<EmbossT>(reinterpret_span);
 }
 
 // Create an Emboss Writer and check that and check that the
@@ -79,10 +91,21 @@ constexpr inline Result<EmbossT> MakeEmbossWriter(Params&&... params) {
 // since it doesn't own its underlying data.
 template <typename EmbossT,
           typename ContainerT,
-          typename = std::enable_if_t<
-              std::is_convertible_v<ContainerT, pw::span<uint8_t>>>>
+          std::enable_if_t<std::is_convertible_v<ContainerT, pw::span<uint8_t>>,
+                           bool> = true>
 constexpr inline Result<EmbossT> MakeEmbossWriter(ContainerT&& buffer) {
   return MakeEmbossWriter<EmbossT>(buffer.data(), buffer.size());
+}
+template <
+    typename EmbossT,
+    typename ContainerT,
+    std::enable_if_t<!std::is_convertible_v<ContainerT, pw::span<uint8_t>> &&
+                         std::is_convertible_v<ContainerT, pw::span<std::byte>>,
+                     bool> = true>
+constexpr inline Result<EmbossT> MakeEmbossWriter(ContainerT&& buffer) {
+  auto reinterpret_span = pw::span<uint8_t>(
+      reinterpret_cast<uint8_t*>(buffer.data()), buffer.size());
+  return MakeEmbossWriter<EmbossT>(reinterpret_span);
 }
 
 /// Copy from a container to an Emboss object's backing storage.

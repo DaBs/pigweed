@@ -63,7 +63,6 @@ installation. In order to use it, you only need to define a suitable toolchain.
 
       .. code-block::
 
-         # Include FuzzTest build configurations.
          import %workspace%/path/to/pigweed/pw_fuzzer/libfuzzer.bazelrc
 
 ------------------------------------
@@ -74,7 +73,7 @@ following the guidelines given by libFuzzer:
 
 .. code-block:: cpp
 
-   extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
+   extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
      DoSomethingInterestingWithMyAPI(data, size);
      return 0;  // Non-zero return values are reserved for future use.
    }

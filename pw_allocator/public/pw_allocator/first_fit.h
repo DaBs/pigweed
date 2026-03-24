@@ -21,6 +21,8 @@
 
 namespace pw::allocator {
 
+/// @submodule{pw_allocator,concrete_block}
+
 /// Alias for a default block type that is compatible with `FirstFitAllocator`.
 template <typename OffsetType>
 using FirstFitBlock = DetailedBlock<OffsetType, SequencedItem>;
@@ -65,6 +67,12 @@ class FirstFitAllocator : public BlockAllocator<BlockType> {
   void set_threshold(size_t threshold) { bucket_.set_threshold(threshold); }
 
  private:
+  /// @copydoc BlockAllocator::GetMaxAllocatable
+  size_t DoGetMaxAllocatable() override {
+    const BlockType* largest = bucket_.FindLargest();
+    return largest == nullptr ? 0 : largest->InnerSize();
+  }
+
   /// @copydoc BlockAllocator::ChooseBlock
   BlockResult<BlockType> ChooseBlock(Layout layout) override {
     BlockType* block = bucket_.RemoveCompatible(layout);
@@ -90,5 +98,7 @@ class FirstFitAllocator : public BlockAllocator<BlockType> {
 
   SequencedBucket<BlockType> bucket_;
 };
+
+/// @}
 
 }  // namespace pw::allocator

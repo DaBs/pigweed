@@ -14,6 +14,8 @@
 
 # BUILD.bazel file for cmsis_core.
 
+load("@rules_cc//cc:cc_library.bzl", "cc_library")
+
 # buildifier: disable=module-docstring
 cc_library(
     name = "cmsis_core",
@@ -37,5 +39,5 @@ cc_library(
 
 label_flag(
     name = "cc_defines",
-    build_setting_default = "@pigweed//pw_build:empty_cc_library",
+    build_setting_default = "@rules_cc//:empty_lib",
 )

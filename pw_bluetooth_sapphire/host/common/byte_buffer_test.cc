@@ -17,6 +17,9 @@
 #include <cstddef>
 #include <type_traits>
 
+#include "pw_allocator/allocator.h"
+#include "pw_allocator/libc_allocator.h"
+#include "pw_allocator/unique_ptr.h"
 #include "pw_bluetooth_sapphire/internal/host/common/macros.h"
 #include "pw_bluetooth_sapphire/internal/host/testing/gtest_helpers.h"
 #include "pw_bluetooth_sapphire/internal/host/testing/test_helpers.h"
@@ -145,7 +148,8 @@ TEST(ByteBufferTest, DynamicByteBufferConstructFromBytes) {
   constexpr size_t kBufferSize = 3;
   std::array<uint8_t, kBufferSize> kExpected{{0, 1, 2}};
 
-  auto bytes = std::make_unique<uint8_t[]>(kBufferSize);
+  pw::UniquePtr<std::byte[]> bytes =
+      pw::allocator::GetLibCAllocator().MakeUnique<std::byte[]>(kBufferSize);
   std::memcpy(bytes.get(), kExpected.data(), kBufferSize);
 
   DynamicByteBuffer buffer(kBufferSize, std::move(bytes));
@@ -162,6 +166,12 @@ TEST(ByteBufferTest, DynamicByteBufferConstructFromString) {
 
   EXPECT_EQ(std::string("ABC"), str);
   EXPECT_TRUE(ContainersEqual(kExpected, buffer));
+}
+
+TEST(ByteBufferTest, DynamicByteBufferConstructFromEmptyString) {
+  std::string str = std::string("");
+  DynamicByteBuffer buffer(str);
+  EXPECT_TRUE(buffer.empty());
 }
 
 TEST(ByteBufferTest, DynamicByteBufferShrink) {
@@ -192,6 +202,27 @@ TEST(ByteBufferTest, DynamicByteBufferExpand) {
   ASSERT_TRUE(buffer.expand(data.size() * 2));
   ASSERT_EQ(buffer.size(), data.size() * 2);
   EXPECT_EQ(buffer.view(0, data.size()).ToString(), data);
+
+  // Verify the newly expanded portion is filled with zeros.
+  for (size_t i = data.size(); i < buffer.size(); ++i) {
+    EXPECT_EQ(0x00, buffer[i]) << " at index " << i;
+  }
+}
+
+TEST(ByteBufferTest, DynamicByteBufferExpandUninitialized) {
+  DynamicByteBuffer buffer;
+  ASSERT_EQ(0u, buffer.size());
+  ASSERT_EQ(nullptr, buffer.data());
+
+  size_t new_size = 8;
+  ASSERT_TRUE(buffer.expand(new_size));
+  ASSERT_EQ(new_size, buffer.size());
+  ASSERT_NE(nullptr, buffer.data());
+
+  // Verify the newly expanded portion is filled with zeros.
+  for (size_t i = 0; i < buffer.size(); ++i) {
+    EXPECT_EQ(0x00, buffer[i]) << " at index " << i;
+  }
 }
 
 TEST(ByteBufferTest, ByteBufferToStringAsHex) {

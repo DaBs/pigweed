@@ -13,69 +13,13 @@
 // the License.
 #pragma once
 
-// block-submission: disable
-/// @file pw_unit_test/constexpr.h
-///
-/// The @c_macro{PW_CONSTEXPR_TEST} macro defines a test that is executed both
-/// at compile time in a `static_assert` and as a regular GoogleTest-style
-/// `TEST()`. This offers the advantages of compile-time testing in a
-/// structured, familiar API, without sacrificing anything from GoogleTest-style
-/// tests. The framework uses the standard GoogleTest macros at run time, and is
-/// compatible with GoogleTest or Pigweed's `pw_unit_test:light` framework.
-///
-/// To create a `constexpr` test:
-/// - Include `"pw_unit_test/constexpr.h"` alongside the test framework
-///   (`"pw_unit_test/framework.h"` or `"gtest/gtest.h"`).
-/// - Use the macro @c_macro{PW_CONSTEXPR_TEST} instead of `TEST`. Note that the
-///   function body passed as the third argument to the macro.
-/// - Use the familiar GoogleTest macros, but with a `PW_TEST_` prefix. For
-///   example:
-///   - `EXPECT_TRUE` → @c_macro{PW_TEST_EXPECT_TRUE}
-///   - `EXPECT_EQ` → @c_macro{PW_TEST_EXPECT_EQ}
-///   - `ASSERT_STREQ` → @c_macro{PW_TEST_ASSERT_STREQ}
-///   - etc.
-///
-/// The result is a familiar-looking unit test that executes both at compile
-/// time and run time.
-///
-/// @rst
-/// .. literalinclude:: constexpr_test.cc
-///    :language: cpp
-///    :start-after: [pw_unit_test-constexpr]
-///    :end-before: [pw_unit_test-constexpr]
-///
-/// @endrst
-///
-/// **Why should I run tests at compile time?**
-///
-/// - Cross compile and execute tests without having to flash them to a device.
-/// - Ensure `constexpr` functions can actually be evaluated at compile time.
-///   For example, function templates may be marked as `constexpr`, even if they
-///   do not support constant evaluation when instantiated.
-/// - Catch undefined behavior, out-of-bounds access, and other issues during
-///   compilation on any platform, without needing to run sanitizers.
-///
-/// **If compile-time testing is so great, why execute the tests are run time at
-/// all?**
-///
-/// - Code may run differently at compile time and execution, particularly when
-///   `std::is_constant_evaluated` or `if consteval` are used.
-/// - Error messages are much better at runtime. @c_macro{PW_CONSTEXPR_TEST}
-///   makes it simple to temporarily disable compile-time tests and see the rich
-///   GoogleTest-like output (see @c_macro{SKIP_CONSTEXPR_TESTS_DONT_SUBMIT}).
-/// - Tools like code coverage only work for code that is executed normally.
-///
-/// @c_macro{PW_CONSTEXPR_TEST} uses `stdcompat`'s
-/// `cpp20::is_constant_evaluated()`. If the compiler does not support
-/// `is_constant_evaluated`, only the regular GoogleTest version will run. Note
-/// that compiler support is independent of the C++ standard in use.
-// block-submission: enable
-
 #include <limits>
 
 #include "lib/stdcompat/type_traits.h"
 #include "pw_preprocessor/boolean.h"
 #include "pw_preprocessor/concat.h"
+
+/// @submodule{pw_unit_test,constexpr}
 
 /// Defines a test that is executed both at compile time in a `static_assert`
 /// and as a regular GoogleTest-style `TEST()`.
@@ -100,7 +44,7 @@
   _PW_IF_CONSTEXPR_TEST(constexpr)                                       \
   void PwConstexprTest_##test_suite##_##test_name() __VA_ARGS__          \
                                                                          \
-  TEST(test_suite, test_name) {                                          \
+      TEST(test_suite, test_name) {                                      \
     PwConstexprTest_##test_suite##_##test_name();                        \
   }                                                                      \
                                                                          \
@@ -108,6 +52,35 @@
     _PW_IF_CONSTEXPR_TEST(PwConstexprTest_##test_suite##_##test_name();) \
     return true;                                                         \
   }())
+
+/// Like `PW_CONSTEXPR_TEST`, but only executes at compile time when using
+/// Clang.
+///
+/// In theory, different compilers should be able to constant-evaluate the same
+/// expressions. In practice, however, discrepancies and defects may result in
+/// some expressions only being constexpr for a particular compiler.
+#ifdef __clang__
+#define PW_CONSTEXPR_TEST_IF_CLANG PW_CONSTEXPR_TEST
+#else
+#define PW_CONSTEXPR_TEST_IF_CLANG(test_suite, test_case, ...) \
+  TEST(test_suite, test_case)                                  \
+  __VA_ARGS__                                                  \
+  static_assert(true)
+#endif  // __clang__
+
+/// Like `PW_CONSTEXPR_TEST`, but only executes at compile time when using GCC.
+///
+/// In theory, different compilers should be able to constant-evaluate the same
+/// expressions. In practice, however, discrepancies and defects may result in
+/// some expressions only being constexpr for a particular compiler.
+#if !defined(__clang__) && defined(__GNUC__)
+#define PW_CONSTEXPR_TEST_IF_GCC PW_CONSTEXPR_TEST
+#else
+#define PW_CONSTEXPR_TEST_IF_GCC(test_suite, test_case, ...) \
+  TEST(test_suite, test_case)                                \
+  __VA_ARGS__                                                \
+  static_assert(true)
+#endif  // !defined(__clang__) && defined(__GNUC__)
 
 // GoogleTest-style test macros for PW_CONSTEXPR_TEST.
 
@@ -144,6 +117,8 @@
 
 #define PW_TEST_ASSERT_STREQ(lhs, rhs) _PW_CASSERT(STREQ, lhs, rhs)
 #define PW_TEST_ASSERT_STRNE(lhs, rhs) _PW_CASSERT(STRNE, lhs, rhs)
+
+/// @}
 
 // Implementation details
 

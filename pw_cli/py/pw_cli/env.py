@@ -84,6 +84,8 @@ def pigweed_environment_parser() -> envparse.EnvironmentParser:
         'PW_DISABLE_CLI_ANALYTICS', type=envparse.strict_bool, default=False
     )
 
+    parser.add_var('PW_IDE_VERBOSE')
+
     return parser
 
 
@@ -104,7 +106,7 @@ def pigweed_environment() -> envparse.EnvNamespace:
 
 _BAZEL_PROJECT_ROOT_ALLOW_LIST = [
     AllowedCaller(
-        filename='pw_build/py/pw_build/pigweed_upstream_build.py',
+        filename='pw_build/py/pigweed_upstream_build/__main__.py',
         name='__main__',
         function='<module>',
     ),
@@ -118,6 +120,11 @@ _BAZEL_PROJECT_ROOT_ALLOW_LIST = [
         filename='pw_build/py/pw_build/project_builder_presubmit_runner.py',
         name='pw_build.project_builder_presubmit_runner',
         function='main',
+    ),
+    AllowedCaller(
+        filename='pw_change/py/pw_change/review.py',
+        name='__main__',
+        function='review',
     ),
     AllowedCaller(
         filename='pw_watch/py/pw_watch/watch.py',

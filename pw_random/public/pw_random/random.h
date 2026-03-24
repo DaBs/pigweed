@@ -25,6 +25,8 @@
 
 namespace pw::random {
 
+/// @module{pw_random}
+
 /// A random generator uses injected entropy to generate random values. Many of
 /// the guarantees for this interface are provided at the level of the
 /// implementations. In general:

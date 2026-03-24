@@ -24,7 +24,7 @@ existing tools like ``clang-format``, and it’s simple to add support for new
 languages. (Note: Bazel formatting requires ``buildifier`` to be present on your
 system. If it's not Bazel formatting passes without checking.)
 
-.. image:: https://storage.googleapis.com/pigweed-media/pw_presubmit/pw_presubmit_demo.gif
+.. image:: https://www.gstatic.com/pigweed/pw_presubmit/pw_presubmit_demo.gif
    :alt: ``pw format`` demo
    :align: left
 
@@ -50,6 +50,20 @@ project. These checks include:
 * Ensure all source files are in the build
 
 .. todo-check: enable
+
+
+.. pw_cli-nav-start
+
+.. grid:: 1
+
+   .. grid-item-card:: :octicon:`gear` ``pigweed.json`` config options
+      :link: module-pw_presubmit-pwigweed_config
+      :link-type: ref
+      :class-item: sales-pitch-cta-primary
+
+      ``pigweed.json`` configuration options.
+
+.. pw_cli-nav-end
 
 -------------
 Compatibility
@@ -194,37 +208,8 @@ Example changes demonstrating how to add formatters:
 
 These will suggest fixes using ``pw format --fix``.
 
-Options for code formatting can be specified in the ``pigweed.json`` file
-(see also :ref:`SEED-0101 <seed-0101>`). These apply to both ``pw presubmit``
-steps that check code formatting and ``pw format`` commands that either check
-or fix code formatting.
-
-* ``python_formatter``: Choice of Python formatter. Options are ``black``
-  (default, used by Pigweed itself) and ``yapf``.
-* ``black_path``: If ``python_formatter`` is ``black``, use this as the
-  executable instead of ``black``.
-* ``black_config_file``: Set the config file for the black formatter.
-* ``exclude``: List of path regular expressions to ignore. Will be evaluated
-  against paths relative to the checkout root using ``re.search``.
-
-Example section from a ``pigweed.json`` file:
-
-.. code-block:: json
-
-   {
-     "pw": {
-       "pw_presubmit": {
-         "format": {
-           "python_formatter": "black",
-           "black_config_file": "$pw_env{PW_PROJECT_ROOT}/config/.black.toml"
-           "black_path": "black",
-           "exclude": [
-             "\\bthird_party/foo/src"
-           ]
-         }
-       }
-     }
-   }
+Options for code formatting can be specified in
+:ref:`module-pw_presubmit-pwigweed_config`.
 
 Sorted Blocks
 ^^^^^^^^^^^^^
@@ -383,6 +368,13 @@ for entire blocks by using "inclusive-language: disable" before the block and
 
 .. In case things get moved around in the previous paragraphs the enable line
 .. is repeated here: inclusive-language: enable.
+
+pw::module::internal Namespace Usage
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Pigweed modules sometimes have namespaces like ``pw::module::internal`` that
+contain implementation details. This code is not stable and should not be relied
+on outside of the module using the code. Pigweed has a check to prevent
+references to such code from being checked into projects using Pigweed.
 
 OWNERS
 ^^^^^^
@@ -664,3 +656,4 @@ a formatter or remove/disable a PigWeed supplied one.
    :hidden:
 
    format
+   pigweed_config

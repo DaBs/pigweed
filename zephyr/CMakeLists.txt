@@ -45,7 +45,11 @@ pw_zephyrize_libraries_ifdef(CONFIG_PIGWEED_STATUS                  pw_status)
 pw_zephyrize_libraries_ifdef(CONFIG_PIGWEED_STREAM                  pw_stream)
 pw_zephyrize_libraries_ifdef(CONFIG_PIGWEED_STRING                  pw_string)
 pw_zephyrize_libraries_ifdef(CONFIG_PIGWEED_SYS_IO                  pw_sys_io)
+pw_zephyrize_libraries_ifdef(CONFIG_PIGWEED_THREAD                  pw_thread.id)
+pw_zephyrize_libraries_ifdef(CONFIG_PIGWEED_THREAD                  pw_thread.thread)
+pw_zephyrize_libraries_ifdef(CONFIG_PIGWEED_THREAD_ITERATION        pw_thread.thread_iteration)
 pw_zephyrize_libraries_ifdef(CONFIG_PIGWEED_THREAD_SLEEP            pw_thread.sleep)
+pw_zephyrize_libraries_ifdef(CONFIG_PIGWEED_THREAD_YIELD            pw_thread.yield)
 pw_zephyrize_libraries_ifdef(CONFIG_PIGWEED_TOKENIZER               pw_tokenizer)
 pw_zephyrize_libraries_ifdef(CONFIG_PIGWEED_TOKENIZER_BASE64        pw_tokenizer.base64)
 pw_zephyrize_libraries_ifdef(CONFIG_PIGWEED_DETOKENIZER             pw_tokenizer.decoder)
@@ -53,8 +57,3 @@ pw_zephyrize_libraries_ifdef(CONFIG_PIGWEED_VARINT                  pw_varint)
 
 # Set Pigweed configs from Kconfig
 pw_set_config_from_zephyr(CONFIG_PIGWEED_MULTISINK_LOCK_INTERRUPT_SAFE PW_MULTISINK_CONFIG_LOCK_INTERRUPT_SAFE)
-
-# Add test libraries
-if(CONFIG_TEST)
-target_link_libraries_ifdef(CONFIG_PIGWEED_BASE64 app PRIVATE pw_base64.base64_test.lib)
-endif(CONFIG_TEST)

@@ -16,7 +16,6 @@ menu "pw_hdlc"
 
 config PIGWEED_HDLC_RPC
     bool "Link pw_hdlc.pw_rpc library"
-    select PIGWEED_ASSERT
     select PIGWEED_BYTES
     select PIGWEED_CHECKSUM
     select PIGWEED_RESULT

@@ -229,7 +229,13 @@ class Impl final : public GATT {
         listener(peer_id, mtu);
       }
     };
-    iter->second.Initialize(std::move(services_to_discover), std::move(mtu_cb));
+
+    auto on_error = [this](const bt::att::Error&) {
+      inspect_properties_.gatt_discover_profile_errors_.Add();
+    };
+    iter->second.Initialize(std::move(services_to_discover),
+                            std::move(mtu_cb),
+                            std::move(on_error));
   }
 
   RemoteServiceWatcherId RegisterRemoteServiceWatcherForPeer(
@@ -280,6 +286,13 @@ class Impl final : public GATT {
         static_cast<att::Handle>(service_id));
   }
 
+  void AttachInspect(inspect::Node& parent, std::string name) override {
+    inspect_node_ = parent.CreateChild(name);
+
+    inspect_properties_.gatt_discover_profile_errors_.AttachInspect(
+        inspect_node_, "profile_discovery_failure_count");
+  }
+
  private:
   void OnServicesChanged(PeerId peer_id,
                          const std::vector<att::Handle>& removed,
@@ -316,6 +329,12 @@ class Impl final : public GATT {
   PeerMtuListenerId next_mtu_listener_id_ = 0u;
   std::unordered_map<PeerMtuListenerId, PeerMtuListener> peer_mtu_listeners_;
 
+  inspect::Node inspect_node_;
+
+  struct InspectProperties {
+    UintMetricCounter gatt_discover_profile_errors_;
+  };
+  InspectProperties inspect_properties_;
   BT_DISALLOW_COPY_AND_ASSIGN_ALLOW_MOVE(Impl);
 };
 }  // namespace

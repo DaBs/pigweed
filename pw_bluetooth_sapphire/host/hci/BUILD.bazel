@@ -17,7 +17,10 @@ load("//pw_unit_test:pw_cc_test.bzl", "pw_cc_test")
 
 package(
     default_visibility = ["//visibility:public"],
-    features = ["-layering_check"],
+    features = [
+        "-layering_check",
+        "-ctad_warnings",
+    ],
 )
 
 cc_library(
@@ -25,6 +28,7 @@ cc_library(
     srcs = [
         "acl_connection.cc",
         "advertising_handle_map.cc",
+        "advertising_packet_filter.cc",
         "android_extended_low_energy_advertiser.cc",
         "bredr_connection.cc",
         "bredr_connection_request.cc",
@@ -38,12 +42,14 @@ cc_library(
         "low_energy_connection.cc",
         "low_energy_connector.cc",
         "low_energy_scanner.cc",
+        "periodic_advertising_synchronizer.cc",
         "sco_connection.cc",
         "sequential_command_runner.cc",
     ],
     hdrs = [
         "public/pw_bluetooth_sapphire/internal/host/hci/acl_connection.h",
         "public/pw_bluetooth_sapphire/internal/host/hci/advertising_handle_map.h",
+        "public/pw_bluetooth_sapphire/internal/host/hci/advertising_packet_filter.h",
         "public/pw_bluetooth_sapphire/internal/host/hci/advertising_report_parser.h",
         "public/pw_bluetooth_sapphire/internal/host/hci/android_extended_low_energy_advertiser.h",
         "public/pw_bluetooth_sapphire/internal/host/hci/bredr_connection.h",
@@ -59,9 +65,11 @@ cc_library(
         "public/pw_bluetooth_sapphire/internal/host/hci/low_energy_connection.h",
         "public/pw_bluetooth_sapphire/internal/host/hci/low_energy_connector.h",
         "public/pw_bluetooth_sapphire/internal/host/hci/low_energy_scanner.h",
+        "public/pw_bluetooth_sapphire/internal/host/hci/periodic_advertising_synchronizer.h",
         "public/pw_bluetooth_sapphire/internal/host/hci/sco_connection.h",
         "public/pw_bluetooth_sapphire/internal/host/hci/sequential_command_runner.h",
     ],
+    features = ["-conversion_warnings"],
     implementation_deps = [
         "//pw_async:heap_dispatcher",
         "//pw_bluetooth:emboss_hci",
@@ -91,6 +99,7 @@ cc_library(
         "public/pw_bluetooth_sapphire/internal/host/hci/fake_low_energy_connection.h",
         "public/pw_bluetooth_sapphire/internal/host/hci/fake_sco_connection.h",
     ],
+    features = ["-conversion_warnings"],
     strip_include_prefix = "public",
     tags = ["noclangtidy"],
     deps = [
@@ -104,6 +113,7 @@ pw_cc_test(
     name = "hci_test",
     srcs = [
         "advertising_handle_map_test.cc",
+        "advertising_packet_filter_test.cc",
         "connection_test.cc",
         "discovery_filter_test.cc",
         "extended_low_energy_advertiser_test.cc",
@@ -114,10 +124,14 @@ pw_cc_test(
         "low_energy_connector_test.cc",
         "low_energy_multiple_advertising_test.cc",
         "low_energy_scanner_test.cc",
+        "periodic_advertising_synchronizer_test.cc",
         "sequential_command_runner_test.cc",
     ],
-    # TODO: https://pwbug.dev/393957973 - Fix this test.
-    tags = ["noubsan"],
+    copts = [
+        # TODO: https://pwbug.dev/464024322 - Fix warnings.
+        "-Wno-shadow",
+    ],
+    features = ["-conversion_warnings"],
     test_main = "//pw_bluetooth_sapphire/host/testing:gtest_main",
     deps = [
         ":hci",

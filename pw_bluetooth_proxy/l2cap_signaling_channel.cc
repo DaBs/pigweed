@@ -17,83 +17,127 @@
 #include <mutex>
 #include <optional>
 
+#include "pw_assert/check.h"
 #include "pw_bluetooth/emboss_util.h"
-#include "pw_bluetooth/hci_data.emb.h"
 #include "pw_bluetooth/l2cap_frames.emb.h"
-#include "pw_bluetooth_proxy/h4_packet.h"
+#include "pw_bluetooth_proxy/direction.h"
 #include "pw_bluetooth_proxy/internal/l2cap_channel_manager.h"
-#include "pw_bluetooth_proxy/internal/l2cap_coc_internal.h"
 #include "pw_bluetooth_proxy/l2cap_channel_common.h"
+#include "pw_bytes/span.h"
 #include "pw_log/log.h"
-#include "pw_multibuf/allocator.h"
+#include "pw_multibuf/multibuf.h"
 #include "pw_span/cast.h"
 #include "pw_status/status.h"
-#include "pw_status/try.h"
 
 namespace pw::bluetooth::proxy {
 
+namespace {
+uint16_t ChannelIdForTransport(AclTransportType transport) {
+  if (transport == AclTransportType::kBrEdr) {
+    return cpp23::to_underlying(emboss::L2capFixedCid::ACL_U_SIGNALING);
+  }
+  return cpp23::to_underlying(emboss::L2capFixedCid::LE_U_SIGNALING);
+}
+}  // namespace
+
 L2capSignalingChannel::L2capSignalingChannel(
-    L2capChannelManager& l2cap_channel_manager,
-    uint16_t connection_handle,
-    AclTransportType transport,
-    uint16_t fixed_cid)
-    : BasicL2capChannel(l2cap_channel_manager,
-                        /*rx_multibuf_allocator=*/nullptr,
-                        /*connection_handle=*/connection_handle,
-                        /*transport*/ transport,
-                        /*local_cid=*/fixed_cid,
-                        /*remote_cid=*/fixed_cid,
-                        /*payload_from_controller_fn=*/nullptr,
-                        /*payload_from_host_fn=*/nullptr,
-                        /*event_fn=*/nullptr),
-      l2cap_channel_manager_(l2cap_channel_manager) {}
+    L2capChannelManager& l2cap_channel_manager)
+    : l2cap_channel_manager_(l2cap_channel_manager) {}
 
-L2capSignalingChannel& L2capSignalingChannel::operator=(
-    L2capSignalingChannel&& other) {
-  std::lock_guard lock(mutex_);
-  std::lock_guard other_lock(other.mutex_);
-  pending_connections_ = std::move(other.pending_connections_);
+Status L2capSignalingChannel::Init(uint16_t connection_handle,
+                                   AclTransportType transport) {
+  Allocator& allocator = l2cap_channel_manager_.impl().allocator();
 
-  BasicL2capChannel::operator=(std::move(other));
-  return *this;
+  UniquePtr<L2capChannel> channel = allocator.MakeUnique<L2capChannel>(
+      l2cap_channel_manager_,
+      /*rx_multibuf_allocator=*/nullptr,
+      connection_handle,
+      transport,
+      /*local_cid=*/ChannelIdForTransport(transport),
+      /*remote_cid=*/ChannelIdForTransport(transport),
+      /*event_fn=*/nullptr);
+  if (channel == nullptr) {
+    return Status::ResourceExhausted();
+  }
+  PW_TRY(channel->InitBasic(
+      pw::bind_member<&L2capSignalingChannel::HandlePayloadFromController>(
+          this),
+      pw::bind_member<&L2capSignalingChannel::HandlePayloadFromHost>(this)));
+  // Registers channel with L2capChannelManager.
+  PW_TRY(channel->Start());
+  // The channel has been registered with L2capChannelManager, which now
+  // owns it.
+  channel_ = channel.Release();
+  return OkStatus();
 }
 
-bool L2capSignalingChannel::DoHandlePduFromController(
-    pw::span<uint8_t> cframe) {
-  Result<emboss::CFrameView> cframe_view =
-      MakeEmbossView<emboss::CFrameView>(cframe);
-  if (!cframe_view.ok()) {
-    PW_LOG_ERROR(
-        "Buffer is too small for C-frame. So will forward to host without "
-        "processing.");
+bool L2capSignalingChannel::OnCFramePayload(
+    Direction direction, pw::span<const uint8_t> cframe_payload) {
+  std::optional<bool> any_commands_consumed;
+
+  do {
+    auto cmd = emboss::MakeL2capSignalingCommandView(cframe_payload.data(),
+                                                     cframe_payload.size());
+    if (!cmd.Ok()) {
+      PW_LOG_WARN(
+          "Remaining buffer is too small for L2CAP command. So will forward "
+          "without processing.");
+
+      // TODO: https://pwbug.dev/379172336 - Handle partially consumed
+      // signaling command packets.
+      if (any_commands_consumed.value_or(false)) {
+        PW_LOG_ERROR("Forwarding partially consumed C-frame");
+      }
+      return false;
+    }
+
+    bool current_command_consumed = HandleL2capSignalingCommand(direction, cmd);
+
+    // TODO: https://pwbug.dev/379172336 - Handle partially consumed signaling
+    // command packets.
+    if (any_commands_consumed.has_value() &&
+        *any_commands_consumed != current_command_consumed) {
+      PW_LOG_ERROR(
+          "Wasn't able to consume all commands, but don't yet support "
+          "passing on some of them");
+    }
+
+    any_commands_consumed = current_command_consumed;
+
+    cframe_payload = cframe_payload.subspan(cmd.SizeInBytes());
+
+    // LE C-frames contain one signaling packet, while BR/EDR C-frames can
+    // contain multiple.
+  } while (channel_->transport() == AclTransportType::kBrEdr &&
+           !cframe_payload.empty());
+
+  if (!cframe_payload.empty()) {
+    PW_LOG_WARN("Received C-frame with extra bytes, forwarding to host");
+
+    // TODO: https://pwbug.dev/379172336 - Handle partially consumed signaling
+    // command packets.
+    if (any_commands_consumed.value_or(false)) {
+      PW_LOG_ERROR("Forwarding partially consumed C-frame");
+    }
     return false;
   }
 
+  PW_CHECK(any_commands_consumed.has_value());
+  return any_commands_consumed.value();
+}
+
+bool L2capSignalingChannel::HandlePayloadFromController(
+    pw::span<uint8_t> payload) {
   // TODO: https://pwbug.dev/360929142 - "If a device receives a C-frame that
   // exceeds its L2CAP_SIG_MTU_SIZE then it shall send an
   // L2CAP_COMMAND_REJECT_RSP packet containing the supported
   // L2CAP_SIG_MTU_SIZE." We should consider taking the signaling MTU in the
   // ProxyHost constructor.
-  return OnCFramePayload(
-      Direction::kFromController,
-      pw::span(cframe_view->payload().BackingStorage().data(),
-               cframe_view->payload().BackingStorage().SizeInBytes()));
+  return OnCFramePayload(Direction::kFromController, payload);
 }
 
-bool L2capSignalingChannel::HandlePduFromHost(pw::span<uint8_t> cframe) {
-  Result<emboss::CFrameView> cframe_view =
-      MakeEmbossView<emboss::CFrameView>(cframe);
-  if (!cframe_view.ok()) {
-    PW_LOG_ERROR(
-        "Buffer is too small for C-frame. So will forward to controller "
-        "without processing.");
-    return false;
-  }
-
-  return OnCFramePayload(
-      Direction::kFromHost,
-      pw::span(cframe_view->payload().BackingStorage().data(),
-               cframe_view->payload().BackingStorage().SizeInBytes()));
+bool L2capSignalingChannel::HandlePayloadFromHost(pw::span<uint8_t> payload) {
+  return OnCFramePayload(Direction::kFromHost, payload);
 }
 
 bool L2capSignalingChannel::HandleL2capSignalingCommand(
@@ -119,6 +163,28 @@ bool L2capSignalingChannel::HandleL2capSignalingCommand(
         return false;
       }
       HandleConnectionRsp(direction, *connection_rsp_cmd);
+      return false;
+    }
+    case emboss::L2capSignalingPacketCode::CONFIGURATION_REQ: {
+      Result<emboss::L2capConfigureReqView> configure_req_cmd =
+          emboss::MakeL2capConfigureReqView(cmd.SizeInBytes(),
+                                            cmd.BackingStorage().data(),
+                                            cmd.SizeInBytes());
+      if (!configure_req_cmd.ok()) {
+        return false;
+      }
+      HandleConfigurationReq(direction, *configure_req_cmd);
+      return false;
+    }
+    case emboss::L2capSignalingPacketCode::CONFIGURATION_RSP: {
+      Result<emboss::L2capConfigureRspView> configure_rsp_cmd =
+          emboss::MakeL2capConfigureRspView(cmd.SizeInBytes(),
+                                            cmd.BackingStorage().data(),
+                                            cmd.SizeInBytes());
+      if (!configure_rsp_cmd.ok()) {
+        return false;
+      }
+      HandleConfigurationRsp(direction, *configure_rsp_cmd);
       return false;
     }
     case emboss::L2capSignalingPacketCode::DISCONNECTION_REQ: {
@@ -196,14 +262,20 @@ void L2capSignalingChannel::HandleConnectionRsp(
 
   switch (cmd.result().Read()) {
     case emboss::L2capConnectionRspResultCode::SUCCESSFUL: {
+      uint16_t local = direction == Direction::kFromHost
+                           ? cmd.destination_cid().Read()
+                           : cmd.source_cid().Read();
+      uint16_t remote = direction == Direction::kFromHost
+                            ? cmd.source_cid().Read()
+                            : cmd.destination_cid().Read();
       // We now have complete connection info
       l2cap_channel_manager_.HandleConnectionComplete(
           L2capChannelConnectionInfo{
               .direction = request_direction,
               .psm = pending_it->psm,
-              .connection_handle = connection_handle(),
-              .remote_cid = cmd.source_cid().Read(),
-              .local_cid = cmd.destination_cid().Read(),
+              .connection_handle = channel_->connection_handle(),
+              .remote_cid = remote,
+              .local_cid = local,
           });
       pending_connections_.erase(pending_it);
 
@@ -226,6 +298,113 @@ void L2capSignalingChannel::HandleConnectionRsp(
   }
 }
 
+// TODO(b/404878244): Implement Continuation flag logic
+void L2capSignalingChannel::HandleConfigurationReq(
+    Direction direction, emboss::L2capConfigureReqView cmd) {
+  std::lock_guard lock(mutex_);
+
+  std::optional<MtuOption> mtu = std::nullopt;
+
+  int64_t bytes_consumed = 0;
+  int64_t options_size = cmd.options_size().Read();
+  pw::ConstByteSpan options_payload = pw::as_bytes(
+      pw::span(cmd.options().BackingStorage().data(), options_size));
+  while (bytes_consumed < options_size) {
+    pw::ConstByteSpan remaining_bytes =
+        options_payload.subspan(bytes_consumed, options_size - bytes_consumed);
+    Result<emboss::L2capConfigurationOptionHeaderView> option_header =
+        MakeEmbossView<emboss::L2capConfigurationOptionHeaderView>(
+            remaining_bytes.data(),
+            emboss::L2capConfigurationOptionHeader::IntrinsicSizeInBytes());
+    if (!option_header.ok()) {
+      return;
+    }
+    bytes_consumed +=
+        emboss::L2capConfigurationOptionHeader::IntrinsicSizeInBytes() +
+        option_header->option_length().Read();
+
+    switch (option_header->option_type().Read()) {
+      case emboss::L2capConfigurationOptionType::MTU: {
+        Result<emboss::L2capMtuConfigurationOptionView> l2cap_option_view =
+            MakeEmbossView<emboss::L2capMtuConfigurationOptionView>(
+                remaining_bytes.data(),
+                emboss::L2capMtuConfigurationOption::IntrinsicSizeInBytes());
+        constexpr size_t mtu_length =
+            emboss::L2capMtuConfigurationOption::IntrinsicSizeInBytes() -
+            emboss::L2capConfigurationOptionHeader::IntrinsicSizeInBytes();
+        if (!l2cap_option_view->Ok() ||
+            l2cap_option_view->header().option_length().Read() != mtu_length) {
+          PW_LOG_WARN(
+              "HandleConfigurationReq: connection_handle=%d "
+              "destination_cid=%#x identifier=%d L2capMtuConfigurationOption "
+              "is "
+              "malformed, dropping the configuration options.",
+              channel_->connection_handle(),
+              cmd.destination_cid().Read(),
+              cmd.command_header().identifier().Read());
+          return;
+        }
+        mtu.emplace(MtuOption{.mtu = l2cap_option_view->mtu().Read()});
+        break;
+      }
+    }
+  }
+  uint16_t cid = cmd.destination_cid().Read();
+
+  pending_configurations_.emplace_back(PendingConfiguration{
+      .identifier = cmd.command_header().identifier().Read(),
+      .info = L2capChannelConfigurationInfo{
+          .direction = direction,
+          .connection_handle = channel_->connection_handle(),
+          .remote_cid = direction == Direction::kFromHost
+                            ? cid
+                            : static_cast<uint16_t>(0),
+          .local_cid = direction == Direction::kFromController
+                           ? cid
+                           : static_cast<uint16_t>(0),
+          .mtu = mtu,
+      }});
+}
+
+void L2capSignalingChannel::HandleConfigurationRsp(
+    Direction direction, emboss::L2capConfigureRspView cmd) {
+  std::lock_guard lock(mutex_);
+  uint32_t identifier = cmd.command_header().identifier().Read();
+  auto match = [identifier](const PendingConfiguration& pending) -> bool {
+    return identifier == pending.identifier;
+  };
+  PendingConfiguration* pending_it = std::find_if(
+      pending_configurations_.begin(), pending_configurations_.end(), match);
+  if (pending_it == pending_configurations_.end()) {
+    PW_LOG_WARN("No match found for l2cap configuration");
+    return;
+  }
+  if (direction == Direction::kFromHost) {
+    pending_it->info.remote_cid = cmd.source_cid().Read();
+  } else {
+    pending_it->info.local_cid = cmd.source_cid().Read();
+  }
+
+  // TODO(b/405201804): Check MTU value in the response
+  switch (cmd.result().Read()) {
+    case emboss::L2capConfigurationResult::SUCCESS: {
+      l2cap_channel_manager_.HandleConfigurationChanged(pending_it->info);
+      pending_configurations_.erase(pending_it);
+      break;
+    }
+    case emboss::L2capConfigurationResult::PENDING: {
+      break;
+    }
+    case emboss::L2capConfigurationResult::FAILURE_UNACCEPTABLE_PARAMETERS:
+    case emboss::L2capConfigurationResult::FAILURE_REJECTED:
+    case emboss::L2capConfigurationResult::FAILURE_UNKNOWN_OPTIONS:
+    case emboss::L2capConfigurationResult::FAILURE_FLOW_SPEC_REJECT:
+    default: {
+      pending_configurations_.erase(pending_it);
+    }
+  }
+}
+
 void L2capSignalingChannel::HandleDisconnectionReq(
     Direction, emboss::L2capDisconnectionReqView) {
   // TODO: https://pwbug.dev/379558046 - On reception of this event we should
@@ -233,12 +412,19 @@ void L2capSignalingChannel::HandleDisconnectionReq(
 }
 
 void L2capSignalingChannel::HandleDisconnectionRsp(
-    Direction, emboss::L2capDisconnectionRspView cmd) {
+    Direction direction, emboss::L2capDisconnectionRspView cmd) {
+  uint16_t local = direction == Direction::kFromHost
+                       ? cmd.destination_cid().Read()
+                       : cmd.source_cid().Read();
+  uint16_t remote = direction == Direction::kFromHost
+                        ? cmd.source_cid().Read()
+                        : cmd.destination_cid().Read();
+
   l2cap_channel_manager_.HandleDisconnectionCompleteLocked(
       L2capStatusTracker::DisconnectParams{
-          .connection_handle = connection_handle(),
-          .remote_cid = cmd.source_cid().Read(),
-          .local_cid = cmd.destination_cid().Read()});
+          .connection_handle = channel_->connection_handle(),
+          .remote_cid = remote,
+          .local_cid = local});
 }
 
 bool L2capSignalingChannel::HandleFlowControlCreditInd(
@@ -260,15 +446,10 @@ bool L2capSignalingChannel::HandleFlowControlCreditInd(
   // channels lock is already held so we should use the *Locked variant to
   // lookup.
   L2capChannel* found_channel =
-      l2cap_channel_manager_.FindChannelByRemoteCidLocked(connection_handle(),
-                                                          cmd.cid().Read());
+      l2cap_channel_manager_.FindChannelByRemoteCidLocked(
+          channel_->connection_handle(), cmd.cid().Read());
   if (found_channel) {
-    // If this L2CAP_FLOW_CONTROL_CREDIT_IND is addressed to a channel managed
-    // by the proxy, it must be an L2CAP connection-oriented channel.
-    // TODO: https://pwbug.dev/360929142 - Validate type in case remote peer
-    // sends indication addressed to wrong CID.
-    L2capCocInternal* coc_ptr = static_cast<L2capCocInternal*>(found_channel);
-    coc_ptr->AddTxCredits(cmd.credits().Read());
+    std::ignore = found_channel->AddTxCredits(cmd.credits().Read());
     return true;
   }
   return false;
@@ -283,22 +464,23 @@ Status L2capSignalingChannel::SendFlowControlCreditInd(
     return Status::InvalidArgument();
   }
 
-  std::optional<pw::multibuf::MultiBuf> command =
-      multibuf_allocator.AllocateContiguous(
-          emboss::L2capFlowControlCreditInd::IntrinsicSizeInBytes());
+  size_t command_size =
+      emboss::L2capFlowControlCreditInd::IntrinsicSizeInBytes();
+  std::optional<multibuf::MultiBuf> command =
+      multibuf_allocator.AllocateContiguous(command_size);
   if (!command.has_value()) {
     PW_LOG_ERROR(
         "btproxy: SendFlowControlCreditInd unable to allocate command buffer "
-        "from provided multibuf_allocator. cid: %#x, credits: %#x",
+        "from provided allocator. cid: %#x, credits: %#x",
         cid,
         credits);
     return Status::Unavailable();
   }
-  std::optional<ByteSpan> command_span = command->ContiguousSpan();
+  span<uint8_t> command_span =
+      span_cast<uint8_t>(command->ContiguousSpan().value());
 
   Result<emboss::L2capFlowControlCreditIndWriter> command_view =
-      MakeEmbossWriter<emboss::L2capFlowControlCreditIndWriter>(
-          pw::span_cast<uint8_t>(command_span.value()));
+      MakeEmbossWriter<emboss::L2capFlowControlCreditIndWriter>(command_span);
   PW_CHECK(command_view->IsComplete());
 
   command_view->command_header().code().Write(
@@ -312,12 +494,13 @@ Status L2capSignalingChannel::SendFlowControlCreditInd(
   command_view->credits().Write(credits);
   PW_CHECK(command_view->Ok());
 
-  StatusWithMultiBuf s = WriteDuringRx(*std::move(command));
+  StatusWithMultiBuf s = channel_->WriteDuringRx(std::move(*command));
 
   return s.status;
 }
 
 uint8_t L2capSignalingChannel::GetNextIdentifierAndIncrement() {
+  std::lock_guard lock(mutex_);
   if (next_identifier_ == UINT8_MAX) {
     next_identifier_ = 1;
     return UINT8_MAX;

@@ -1,4 +1,4 @@
-# Copyright 2020 The Pigweed Authors
+# Copyright 2025 The Pigweed Authors
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you may not
 # use this file except in compliance with the License. You may obtain a copy of
@@ -13,9 +13,11 @@
 # the License.
 
 load("@com_google_protobuf//bazel:proto_library.bzl", "proto_library")
+load("@com_google_protobuf//bazel:py_proto_library.bzl", "py_proto_library")
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
-load("@rules_python//python:proto.bzl", "py_proto_library")
 load("@rules_python//sphinxdocs:sphinx_docs_library.bzl", "sphinx_docs_library")
+load("//pw_bloat:pw_size_diff.bzl", "pw_size_diff")
+load("//pw_bloat:pw_size_table.bzl", "pw_size_table")
 load("//pw_build:compatibility.bzl", "incompatible_with_mcu")
 load(
     "//pw_protobuf_compiler:pw_proto_library.bzl",
@@ -39,6 +41,7 @@ cc_library(
     srcs = ["metric.cc"],
     hdrs = [
         "public/pw_metric/global.h",
+        "public/pw_metric/list.h",
         "public/pw_metric/metric.h",
     ],
     implementation_deps = ["//pw_assert:check"],
@@ -46,7 +49,8 @@ cc_library(
     deps = [
         "//pw_containers:intrusive_list",
         "//pw_log",
-        "//pw_preprocessor",
+        "//pw_memory:no_destructor",
+        "//pw_numeric:checked_arithmetic",
         "//pw_span",
         "//pw_tokenizer",
         "//pw_tokenizer:base64",
@@ -68,7 +72,9 @@ cc_library(
 # Common MetricWalker/MetricWriter used by RPC service.
 cc_library(
     name = "metric_walker",
-    hdrs = ["pw_metric_private/metric_walker.h"],
+    srcs = ["metric_walker.cc"],
+    hdrs = ["public/pw_metric/metric_walker.h"],
+    strip_include_prefix = "public",
     tags = ["noclangtidy"],
     visibility = ["//visibility:private"],
     deps = [
@@ -76,6 +82,8 @@ cc_library(
         "//pw_assert:check",
         "//pw_containers:intrusive_list",
         "//pw_containers:vector",
+        "//pw_function",
+        "//pw_result",
         "//pw_status",
         "//pw_tokenizer",
     ],
@@ -84,7 +92,10 @@ cc_library(
 cc_library(
     name = "metric_service_nanopb",
     srcs = ["metric_service_nanopb.cc"],
-    hdrs = ["public/pw_metric/metric_service_nanopb.h"],
+    hdrs = [
+        "public/pw_metric/metric_service_nanopb.h",
+        "public/pw_metric/nanopb_metric_writer.h",
+    ],
     implementation_deps = [
         "//pw_assert:check",
         "//pw_containers:vector",
@@ -94,13 +105,18 @@ cc_library(
         ":metric",
         ":metric_proto_nanopb_rpc",
         ":metric_walker",
+        "//pw_containers:intrusive_list",
+        "//pw_status",
     ],
 )
 
 cc_library(
     name = "metric_service_pwpb",
     srcs = ["metric_service_pwpb.cc"],
-    hdrs = ["public/pw_metric/metric_service_pwpb.h"],
+    hdrs = [
+        "public/pw_metric/metric_service_pwpb.h",
+        "public/pw_metric/pwpb_metric_writer.h",
+    ],
     implementation_deps = [
         "//pw_assert:check",
         "//pw_containers:vector",
@@ -118,6 +134,7 @@ cc_library(
         "//pw_bytes",
         "//pw_containers:intrusive_list",
         "//pw_preprocessor",
+        "//pw_protobuf",
         "//pw_rpc/raw:server_api",
         "//pw_span",
         "//pw_status",
@@ -200,6 +217,8 @@ pw_cc_test(
     ],
     deps = [
         ":metric_service_nanopb",
+        ":metric_walker",
+        "//pw_rpc:test_helpers",
         "//pw_rpc/nanopb:test_method_context",
     ],
 )
@@ -211,8 +230,41 @@ pw_cc_test(
     ],
     deps = [
         ":metric_service_pwpb",
+        ":metric_walker",
+        "//pw_rpc:test_helpers",
         "//pw_rpc/pwpb:test_method_context",
         "//pw_rpc/raw:test_method_context",
+        "//pw_stream",
+    ],
+)
+
+pw_size_diff(
+    name = "one_metric_size_diff",
+    base = "//pw_metric/size_report:base",
+    label = "1 metric and 1 group, no dump or export",
+    target = "//pw_metric/size_report:one_metric",
+)
+
+pw_size_diff(
+    name = "dump_size_diff",
+    base = "//pw_metric/size_report:base",
+    label = "(+) dump group and metrics to log",
+    target = "//pw_metric/size_report:dump",
+)
+
+pw_size_diff(
+    name = "more_metrics_size_diff",
+    base = "//pw_metric/size_report:dump",
+    label = "(+) 1 group (+) 4 metrics",
+    target = "//pw_metric/size_report:more_metrics",
+)
+
+pw_size_table(
+    name = "metric_size_report",
+    reports = [
+        ":one_metric_size_diff",
+        ":dump_size_diff",
+        ":more_metrics_size_diff",
     ],
 )
 
@@ -220,6 +272,7 @@ sphinx_docs_library(
     name = "docs",
     srcs = [
         "docs.rst",
+        ":metric_size_report",
     ],
     prefix = "pw_metric/",
     target_compatible_with = incompatible_with_mcu(),

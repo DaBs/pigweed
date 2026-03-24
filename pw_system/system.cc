@@ -21,8 +21,8 @@
 #include "pw_allocator/best_fit.h"
 #include "pw_allocator/synchronized_allocator.h"
 #include "pw_assert/check.h"
-#include "pw_async2/allocate_task.h"
-#include "pw_async2/pend_func_task.h"
+#include "pw_async2/basic_dispatcher.h"
+#include "pw_async2/func_task.h"
 #include "pw_log/log.h"
 #include "pw_rpc/echo_service_pwpb.h"
 #include "pw_sync/interrupt_spin_lock.h"
@@ -45,9 +45,7 @@
 namespace pw {
 
 void SystemStart(channel::ByteReaderWriter& io_channel) {
-  System().Init(io_channel);
-
-  system::StartScheduler();
+  system::StartAndClobberTheStack(io_channel);
 }
 
 namespace system {
@@ -71,13 +69,8 @@ internal::PacketIO& InitializePacketIoGlobal(
 // be moved to `pw::system::AsyncCore`.
 template <typename Func>
 [[nodiscard]] bool PostTaskFunction(Func&& func) {
-  async2::Task* task = async2::AllocateTask<async2::PendFuncTask<Func>>(
-      System().allocator(), std::forward<Func>(func));
-  if (task == nullptr) {
-    return false;
-  }
-  System().dispatcher().Post(*task);
-  return true;
+  return System().dispatcher().Post(System().allocator(),
+                                    std::forward<Func>(func)) != nullptr;
 }
 
 template <typename Func>
@@ -85,15 +78,18 @@ void PostTaskFunctionOrCrash(Func&& func) {
   PW_CHECK(PostTaskFunction(std::forward<Func>(func)));
 }
 
-}  // namespace
-
-async2::Dispatcher& AsyncCore::dispatcher() {
-  static async2::Dispatcher dispatcher;
+async2::RunnableDispatcher& runnable_dispatcher() {
+  static async2::BasicDispatcher dispatcher;
   return dispatcher;
 }
 
+}  // namespace
+
+async2::Dispatcher& AsyncCore::dispatcher() { return runnable_dispatcher(); }
+
 Allocator& AsyncCore::allocator() {
-  alignas(uintptr_t) static std::byte buffer[8192];
+  alignas(
+      uintptr_t) static std::byte buffer[PW_SYSTEM_ALLOCATOR_HEAP_SIZE_BYTES];
   static BestFitAllocator<> block_allocator(buffer);
   static SynchronizedAllocator<::pw::sync::InterruptSpinLock> sync_allocator(
       block_allocator);
@@ -129,12 +125,17 @@ void AsyncCore::Init(channel::ByteReaderWriter& io_channel) {
 
   // Initialize the packet_io subsystem
   internal::PacketIO& packet_io = InitializePacketIoGlobal(io_channel);
-  packet_io.Start(System().dispatcher(), RpcThreadOptions());
 
-  thread::DetachedThread(DispatcherThreadOptions(),
-                         [] { System().dispatcher().RunToCompletion(); });
+  PW_CONSTINIT static ThreadContextFor<kRpcThread> rpc_thread;
+  packet_io.Start(System().dispatcher(), GetThreadOptions(rpc_thread));
 
-  thread::DetachedThread(WorkQueueThreadOptions(), GetWorkQueue());
+  PW_CONSTINIT static ThreadContextFor<kDispatcherThread> dispatcher_thread;
+  Thread(dispatcher_thread, [] {
+    runnable_dispatcher().RunForever();
+  }).detach();
+
+  PW_CONSTINIT static ThreadContextFor<kWorkQueueThread> work_queue_thread;
+  Thread(work_queue_thread, GetWorkQueue()).detach();
 }
 
 async2::Poll<> AsyncCore::InitTask(async2::Context&) {
@@ -148,7 +149,9 @@ async2::Poll<> AsyncCore::InitTask(async2::Context&) {
   }
 
   System().rpc_server().RegisterService(GetLogService());
-  thread::DetachedThread(system::LogThreadOptions(), GetLogThread());
+
+  PW_CONSTINIT static ThreadContextFor<kLogThread> log_thread;
+  Thread(log_thread, GetLogThread()).detach();
 
   static rpc::EchoService echo_service;
   System().rpc_server().RegisterService(echo_service);
@@ -162,13 +165,20 @@ async2::Poll<> AsyncCore::InitTask(async2::Context&) {
   if (PW_SYSTEM_ENABLE_TRANSFER_SERVICE != 0) {
     RegisterTransferService(System().rpc_server());
     RegisterFileService(System().rpc_server());
-    thread::DetachedThread(system::TransferThreadOptions(),
-                           GetTransferThread());
+
+    PW_CONSTINIT static ThreadContextFor<kTransferThread> transfer_thread;
+    Thread(transfer_thread, GetTransferThread()).detach();
     InitTransferService();
   }
 
   PW_LOG_INFO("pw_system initialization complete");
   return async2::Ready();
+}
+
+void StartAndClobberTheStack(channel::ByteReaderWriter& io_channel) {
+  System().Init(io_channel);
+
+  StartSchedulerAndClobberTheStack();
 }
 
 }  // namespace system

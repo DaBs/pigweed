@@ -15,6 +15,7 @@
 #pragma once
 #include <lib/fit/function.h>
 
+#include "pw_bluetooth_sapphire/internal/host/common/metrics.h"
 #include "pw_bluetooth_sapphire/internal/host/common/uuid.h"
 #include "pw_bluetooth_sapphire/internal/host/gatt/gatt_defs.h"
 #include "pw_bluetooth_sapphire/internal/host/gatt/local_service_manager.h"
@@ -205,6 +206,9 @@ class GATT : public WeakSelf<GATT> {
   // nullptr will be returned otherwise.
   virtual RemoteService::WeakPtr FindService(PeerId peer_id,
                                              IdType service_id) = 0;
+
+  // Attaches the GATT inspect properties to the parent node.
+  virtual void AttachInspect(inspect::Node& parent, std::string name) = 0;
 
  private:
   BT_DISALLOW_COPY_AND_ASSIGN_ALLOW_MOVE(GATT);

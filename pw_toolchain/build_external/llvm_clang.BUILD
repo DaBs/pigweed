@@ -12,17 +12,18 @@
 # License for the specific language governing permissions and limitations under
 # the License.
 
+load("@bazel_skylib//lib:selects.bzl", "selects")
 load("@bazel_skylib//rules:native_binary.bzl", "native_binary")
+load("@bazel_skylib//rules/directory:directory.bzl", "directory")
+load("@bazel_skylib//rules/directory:subdirectory.bzl", "subdirectory")
+load("@pigweed//pw_build:glob_dirs.bzl", "match_dir")
+load("@pigweed//pw_build:pw_py_importable_runfile.bzl", "pw_py_importable_runfile")
+load("@pigweed//pw_build/constraints/arm:lists.bzl", "ALL_CORTEX_M_CPUS")
+load("@pigweed//pw_build/constraints/riscv:lists.bzl", "ALL_RISCV_CPUS")
 load("@rules_cc//cc/toolchains:args.bzl", "cc_args")
 load("@rules_cc//cc/toolchains:args_list.bzl", "cc_args_list")
 load("@rules_cc//cc/toolchains:tool.bzl", "cc_tool")
 load("@rules_cc//cc/toolchains:tool_map.bzl", "cc_tool_map")
-load("@bazel_skylib//rules/directory:directory.bzl", "directory")
-load("@bazel_skylib//rules/directory:subdirectory.bzl", "subdirectory")
-load("@pigweed//pw_build/constraints/arm:lists.bzl", "ALL_CORTEX_M_CPUS")
-load("@pigweed//pw_build:glob_dirs.bzl", "match_dir")
-load("@pigweed//pw_build:pw_py_importable_runfile.bzl", "pw_py_importable_runfile")
-load("@bazel_skylib//lib:selects.bzl", "selects")
 
 package(default_visibility = ["//visibility:public"])
 
@@ -54,19 +55,24 @@ alias(
 )
 
 COMMON_TOOLS = {
+    "@pigweed//pw_toolchain/action:cov": ":llvm-cov",
+    "@pigweed//pw_toolchain/action:gcov": ":llvm-gcov",
+    "@pigweed//pw_toolchain/action:nm": ":llvm-nm",
+    "@pigweed//pw_toolchain/action:objdump_disassemble": ":llvm-objdump",
+    "@pigweed//pw_toolchain/action:readelf": ":llvm-readelf",
+    "@pigweed//pw_toolchain/action:size": ":llvm-size",
     "@rules_cc//cc/toolchains/actions:assembly_actions": ":asm",
     "@rules_cc//cc/toolchains/actions:c_compile_actions": ":clang",
     "@rules_cc//cc/toolchains/actions:cpp_compile_actions": ":clang++",
     "@rules_cc//cc/toolchains/actions:link_actions": ":lld",
     "@rules_cc//cc/toolchains/actions:objcopy_embed_data": ":llvm-objcopy",
-    "@pigweed//pw_toolchain/action:objdump_disassemble": ":llvm-objdump",
     "@rules_cc//cc/toolchains/actions:strip": ":llvm-strip",
 }
 
 cc_tool_map(
     name = "default_tools",
     tools = COMMON_TOOLS | {
-        "@rules_cc//cc/toolchains/actions:ar_actions": ":llvm-ar"
+        "@rules_cc//cc/toolchains/actions:ar_actions": ":llvm-ar",
     },
     visibility = ["//visibility:private"],
 )
@@ -74,7 +80,7 @@ cc_tool_map(
 cc_tool_map(
     name = "macos_tools",
     tools = COMMON_TOOLS | {
-        "@rules_cc//cc/toolchains/actions:ar_actions": ":llvm-libtool-darwin"
+        "@rules_cc//cc/toolchains/actions:ar_actions": ":llvm-libtool-darwin",
     },
     visibility = ["//visibility:private"],
 )
@@ -95,11 +101,9 @@ cc_tool(
     data = glob([
         "bin/llvm",
         "include/**",
-        "lib/clang/**/include/**",
+        "lib/clang/*/include/**",
+        "lib/clang/*/share/**",
     ]),
-    allowlist_include_directories = [
-        ":lib-clang-include",
-    ],
 )
 
 cc_tool(
@@ -111,15 +115,9 @@ cc_tool(
     data = glob([
         "bin/llvm",
         "include/**",
-        "lib/clang/**/include/**",
+        "lib/clang/*/include/**",
+        "lib/clang/*/share/**",
     ]),
-    allowlist_include_directories = [
-        # This linux-specific entry can be moved to a cc_args rule if there's
-        # ever a desire for more strict management of this include path.
-        ":include-x86_64-unknown-linux-gnu-c++-v1",
-        ":include-c++-v1",
-        ":lib-clang-include",
-    ],
 )
 
 cc_tool(
@@ -128,14 +126,18 @@ cc_tool(
         "@platforms//os:windows": "//:bin/clang++.exe",
         "//conditions:default": "//:bin/clang++",
     }),
-    data = glob([
-        "bin/llvm",
-        "bin/lld*",
-        "bin/ld*",
-        "lib/**/*.a",
-        "lib/**/*.so*",
-        "lib/**/*.o",
-    ]),
+    data = glob(
+        [
+            "bin/llvm",
+            "bin/lld*",
+            "bin/ld*",
+            "lib/**/*.a",
+            "lib/**/*.dylib",
+            "lib/**/*.so*",
+            "lib/**/*.o",
+        ],
+        allow_empty = True,
+    ),
 )
 
 cc_tool(
@@ -192,6 +194,44 @@ cc_tool(
     data = glob(["bin/llvm"]),
 )
 
+cc_tool(
+    name = "llvm-readelf",
+    src = select({
+        "@platforms//os:windows": "//:bin/llvm-readelf.exe",
+        "//conditions:default": "//:bin/llvm-readelf",
+    }),
+    data = glob(["bin/llvm"]),
+)
+
+# These tools are mapped to actions that can be used via standard accessors
+# defined in pw_toolchain/action.
+cc_tool(
+    name = "llvm-nm",
+    src = select({
+        "@platforms//os:windows": "//:bin/llvm-nm.exe",
+        "//conditions:default": "//:bin/llvm-nm",
+    }),
+    data = glob(["bin/llvm"]),
+)
+
+cc_tool(
+    name = "llvm-size",
+    src = select({
+        "@platforms//os:windows": "//:bin/llvm-size.exe",
+        "//conditions:default": "//:bin/llvm-size",
+    }),
+    data = glob(["bin/llvm"]),
+)
+
+cc_tool(
+    name = "llvm-gcov",
+    src = select({
+        "@platforms//os:windows": "//:bin/llvm-cov.exe",
+        "//conditions:default": "//:bin/llvm-cov",
+    }),
+    data = glob(["bin/llvm"]),
+)
+
 # TODO(amontanez): Add sysroot for macos to the `data` field selection once
 # Pigweed migrates to use rules_cc toolchains.
 native_binary(
@@ -200,16 +240,17 @@ native_binary(
         "@platforms//os:windows": "//:bin/clang-tidy.exe",
         "//conditions:default": "//:bin/clang-tidy",
     }),
-    data = glob([
-        "include/**",
-        "lib/clang/**/include/**",
-    ]) + select({
-        "@platforms//os:linux": ["@linux_sysroot//:sysroot"],
-        "//conditions:default": [],
-    }),
     out = select({
         "@platforms//os:windows": "clang-tidy.exe",
         "//conditions:default": "clang-tidy",
+    }),
+    data = glob([
+        "include/**",
+        "lib/clang/*/include/**",
+        "lib/clang/*/share/**",
+    ]) + select({
+        "@platforms//os:linux": ["@linux_sysroot//:sysroot"],
+        "//conditions:default": [],
     }),
     visibility = ["//visibility:public"],
 )
@@ -246,7 +287,19 @@ subdirectory(
 subdirectory(
     name = "lib-clang-include",
     parent = ":toolchain_root",
-    path = match_dir(["lib/clang/*/include"], allow_empty=False),
+    path = match_dir(
+        ["lib/clang/*/include"],
+        allow_empty = False,
+    ),
+)
+
+subdirectory(
+    name = "lib-clang-share",
+    parent = ":toolchain_root",
+    path = match_dir(
+        ["lib/clang/*/share"],
+        allow_empty = False,
+    ),
 )
 
 subdirectory(
@@ -269,6 +322,10 @@ filegroup(
         ALL_CORTEX_M_CPUS: [
             ":llvm-libc_arm-none-eabi_compile_files",
             ":llvm-libc_arm-none-eabi_link_files",
+        ],
+        ALL_RISCV_CPUS: [
+            ":llvm-libc_riscv-unknown-elf_compile_files",
+            ":llvm-libc_riscv-unknown-elf_link_files",
         ],
         "//conditions:default": [],
     }),
@@ -304,6 +361,23 @@ filegroup(
     visibility = ["//visibility:public"],
 )
 
+filegroup(
+    name = "llvm-libc_riscv-unknown-elf_compile_files",
+    srcs = glob([
+        "include/riscv*-unknown-unknown-elf/**",
+    ]),
+    visibility = ["//visibility:public"],
+)
+
+filegroup(
+    name = "llvm-libc_riscv-unknown-elf_link_files",
+    srcs = glob([
+        "lib/riscv*-unknown-unknown-elf/**",
+        "lib/clang/*/lib/riscv*-unknown-unknown-elf/**",
+    ]),
+    visibility = ["//visibility:public"],
+)
+
 cc_args(
     name = "llvm-libc_link_args",
     actions = ["@rules_cc//cc/toolchains/actions:link_actions"],
@@ -315,9 +389,24 @@ cc_args(
             "-Wl,-lc++",
             "-Wl,-lm",
         ],
+        ALL_RISCV_CPUS: [
+            "-nostdlib++",
+            "-nostartfiles",
+            "-unwindlib=none",
+            "-Wl,-lc++",
+            "-Wl,-lm",
+        ],
         "//conditions:default": [],
     }),
-    data = [":llvm-libc_arm-none-eabi_link_files"],
+    data = selects.with_or({
+        ALL_CORTEX_M_CPUS: [
+            ":llvm-libc_arm-none-eabi_link_files",
+        ],
+        ALL_RISCV_CPUS: [
+            ":llvm-libc_riscv-unknown-elf_link_files",
+        ],
+        "//conditions:default": [],
+    }),
     visibility = ["//visibility:private"],
 )
 
@@ -326,9 +415,18 @@ cc_args(
     actions = ["@rules_cc//cc/toolchains/actions:compile_actions"],
     args = selects.with_or({
         ALL_CORTEX_M_CPUS: [],
+        ALL_RISCV_CPUS: [],
         "//conditions:default": [],
     }),
-    data = [":llvm-libc_arm-none-eabi_compile_files"],
+    data = selects.with_or({
+        ALL_CORTEX_M_CPUS: [
+            ":llvm-libc_arm-none-eabi_compile_files",
+        ],
+        ALL_RISCV_CPUS: [
+            ":llvm-libc_riscv-unknown-elf_compile_files",
+        ],
+        "//conditions:default": [],
+    }),
     visibility = ["//visibility:private"],
 )
 
@@ -337,5 +435,5 @@ cc_args_list(
     args = [
         ":llvm-libc_compile_args",
         ":llvm-libc_link_args",
-    ]
+    ],
 )

@@ -208,6 +208,7 @@ LowEnergyPeripheralServer::AdvertisementInstanceDeprecated::Register(
   PW_DCHECK(!instance_);
 
   instance_ = std::move(instance);
+  pending_ = false;
 
   handle_closed_wait_.set_object(handle_.channel().get());
   handle_closed_wait_.set_trigger(ZX_CHANNEL_PEER_CLOSED);
@@ -234,9 +235,11 @@ LowEnergyPeripheralServer::AdvertisementInstanceDeprecated::Register(
 LowEnergyPeripheralServer::LowEnergyPeripheralServer(
     bt::gap::Adapter::WeakPtr adapter,
     bt::gatt::GATT::WeakPtr gatt,
+    pw::bluetooth_sapphire::LeaseProvider& wake_lease_provider,
     fidl::InterfaceRequest<Peripheral> request,
     bool privileged)
     : AdapterServerBase(std::move(adapter), this, std::move(request)),
+      wake_lease_provider_(wake_lease_provider),
       gatt_(std::move(gatt)),
       privileged_(privileged),
       weak_self_(this) {}
@@ -252,18 +255,6 @@ void LowEnergyPeripheralServer::Advertise(
     AdvertiseCallback callback) {
   // Advertise and StartAdvertising may not be used simultaneously.
   if (advertisement_deprecated_.has_value()) {
-    callback(fpromise::error(fble::PeripheralError::FAILED));
-    return;
-  }
-
-  // TODO: https://fxbug.dev/42156474 - As a temporary hack until multiple
-  // advertisements is supported, don't allow more than one advertisement. The
-  // current behavior of hci::LegacyLowEnergyAdvertiser is to replace the
-  // current advertisement, which is not the intended behavior of `Advertise`.
-  // NOTE: This is insufficient  when there are multiple Peripheral clients
-  // advertising, but that is the status quo with `StartAdvertising` anyway (the
-  // last advertiser wins).
-  if (!advertisements_.empty()) {
     callback(fpromise::error(fble::PeripheralError::FAILED));
     return;
   }
@@ -312,13 +303,30 @@ void LowEnergyPeripheralServer::StartAdvertising(
     return;
   }
 
+  if (queued_start_advertising_) {
+    result.set_err(fble::PeripheralError::ABORTED);
+    std::get<StartAdvertisingCallback> (*queued_start_advertising_)(
+        std::move(result));
+    queued_start_advertising_.emplace(
+        std::move(parameters), std::move(token), std::move(callback));
+    return;
+  }
+
   if (advertisement_deprecated_) {
     bt_log(DEBUG, LOG_TAG, "reconfigure existing advertising instance");
+    // If the old advertisement is still pending, queue the new advertisement.
+    if (advertisement_deprecated_->pending()) {
+      queued_start_advertising_.emplace(
+          std::move(parameters), std::move(token), std::move(callback));
+      return;
+    }
+    // Otherwise, immediately replace the old advertisement.
     advertisement_deprecated_.reset();
   }
 
   // Create an entry to mark that the request is in progress.
   advertisement_deprecated_.emplace(std::move(token));
+  advertisement_deprecated_->set_pending(true);
 
   auto self = weak_self_.GetWeakPtr();
   auto status_cb = [self, callback = std::move(callback), func = __FUNCTION__](
@@ -333,6 +341,26 @@ void LowEnergyPeripheralServer::StartAdvertising(
              bt::gap::kInvalidAdvertisementId);
 
     fble::Peripheral_StartAdvertising_Result result;
+
+    // If an advertisement was queued, cancel this advertisement and start a new
+    // advertisement.
+    if (self->queued_start_advertising_) {
+      {
+        // Stop the advertisement.
+        auto _ = std::move(instance);
+      }
+      self->advertisement_deprecated_.reset();
+      result.set_err(fble::PeripheralError::ABORTED);
+      callback(std::move(result));
+      auto start_advertising =
+          std::move(self->queued_start_advertising_.value());
+      self->queued_start_advertising_.reset();
+      self->StartAdvertising(std::move(std::get<0>(start_advertising)),
+                             std::move(std::get<1>(start_advertising)),
+                             std::move(std::get<2>(start_advertising)));
+      return;
+    }
+
     if (status.is_error()) {
       bt_log(WARN,
              LOG_TAG,
@@ -447,6 +475,7 @@ LowEnergyPeripheralServer::CreateConnectionServer(
   auto conn_server = std::make_unique<LowEnergyConnectionServer>(
       adapter(),
       gatt_,
+      wake_lease_provider_,
       std::move(connection),
       std::move(local),
       [this, conn_server_id] {
@@ -586,12 +615,17 @@ void LowEnergyPeripheralServer::StartAdvertisingInternal(
 LowEnergyPrivilegedPeripheralServer::LowEnergyPrivilegedPeripheralServer(
     const bt::gap::Adapter::WeakPtr& adapter,
     bt::gatt::GATT::WeakPtr gatt,
+    pw::bluetooth_sapphire::LeaseProvider& wake_lease_provider,
     fidl::InterfaceRequest<fuchsia::bluetooth::le::PrivilegedPeripheral>
         request)
     : AdapterServerBase(adapter, this, std::move(request)), weak_self_(this) {
   fidl::InterfaceHandle<fuchsia::bluetooth::le::Peripheral> handle;
-  le_peripheral_server_ = std::make_unique<LowEnergyPeripheralServer>(
-      adapter, std::move(gatt), handle.NewRequest(), /*privileged=*/true);
+  le_peripheral_server_ =
+      std::make_unique<LowEnergyPeripheralServer>(adapter,
+                                                  std::move(gatt),
+                                                  wake_lease_provider,
+                                                  handle.NewRequest(),
+                                                  /*privileged=*/true);
 }
 
 void LowEnergyPrivilegedPeripheralServer::Advertise(

@@ -15,12 +15,15 @@
 
 #include <cstdint>
 
+/// Binary size reports library
 namespace pw::bloat {
 
 // Function providing fundamental C/C++ functions to prevent them from appearing
 // in size reports. Must be called in binaries which are compared to the bloat
 // base in order to get accurate reports.
 void BloatThisBinary();
+
+/// @module{pw_bloat}
 
 /// A value that can cause all conditions passed to `PW_BLOAT_COND` and
 /// expressions passed to `PW_BLOAT_EXPR` to be executed. Assign a volatile

@@ -13,6 +13,8 @@
 # the License.
 """Class for describing file filter patterns."""
 
+from __future__ import annotations
+
 import os
 from pathlib import Path
 import re
@@ -41,16 +43,32 @@ class FileFilter:
                       strings
             exclude: If any of the passed regular expresion match return False.
                      This overrides and other matches.
-            name: Regexs to match with file names(pathlib.Path.name). True if
+            name: Regexes to match with file names(pathlib.Path.name). True if
                   the resulting regex matches the entire file name.
             suffix: True if final suffix (as determined by pathlib.Path) is
                     matched by any of the passed str.
         """
-        self.exclude = tuple(re.compile(i) for i in exclude)
+        self._exclude = tuple(re.compile(i) for i in exclude)
 
-        self.endswith = tuple(endswith)
-        self.name = tuple(re.compile(i) for i in name)
-        self.suffix = tuple(suffix)
+        self._endswith = tuple(endswith)
+        self._name = tuple(re.compile(i) for i in name)
+        self._suffix = tuple(suffix)
+
+    @property
+    def exclude(self) -> Sequence[Pattern[str]]:
+        return self._exclude
+
+    @property
+    def endswith(self) -> Sequence[str]:
+        return self._endswith
+
+    @property
+    def name(self) -> Sequence[Pattern[str]]:
+        return self._name
+
+    @property
+    def suffix(self) -> Sequence[str]:
+        return self._suffix
 
     def matches(self, path: str | Path) -> bool:
         """Returns true if the path matches any filter but not an exclude.
@@ -63,8 +81,8 @@ class FileFilter:
         'endswith'.
         """
 
-        posix_path = path.as_posix() if isinstance(path, Path) else path
-        if any(bool(exp.search(posix_path)) for exp in self.exclude):
+        posix_path = Path(path).as_posix()
+        if any(exp.search(posix_path) for exp in self.exclude):
             return False
 
         # If there are no positive filters set, accept all paths.
@@ -80,6 +98,34 @@ class FileFilter:
 
     def filter(self, paths: Sequence[str | Path]) -> Sequence[Path]:
         return [Path(x) for x in paths if self.matches(x)]
+
+    def concat(
+        self,
+        file_filter: FileFilter | None = None,
+        *,
+        exclude: Iterable[Pattern | str] = (),
+        endswith: Iterable[str] = (),
+        name: Iterable[Pattern | str] = (),
+        suffix: Iterable[str] = (),
+    ) -> FileFilter:
+        """Returns a new filter with the combined properties of its args."""
+        combined_exclude = [re.compile(i) for i in exclude]
+        combined_endswith = list(endswith)
+        combined_name = [re.compile(i) for i in name]
+        combined_suffix = list(suffix)
+
+        for ff in [self] if file_filter is None else [self, file_filter]:
+            combined_exclude.extend(ff.exclude)
+            combined_endswith.extend(ff.endswith)
+            combined_name.extend(ff.name)
+            combined_suffix.extend(ff.suffix)
+
+        return FileFilter(
+            exclude=combined_exclude,
+            endswith=combined_endswith,
+            name=combined_name,
+            suffix=combined_suffix,
+        )
 
 
 def exclude_paths(

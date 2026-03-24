@@ -21,6 +21,7 @@ option java_outer_classname = "Snapshot";
 import "pw_chrono_protos/chrono.proto";
 import "pw_cpu_exception_cortex_m_protos/cpu_state.proto";
 import "pw_log/proto/log.proto";
+import "pw_metric_proto/metric_service.proto";
 import "pw_thread_protos/thread.proto";
 import "pw_snapshot_metadata_proto/snapshot_metadata.proto";
 
@@ -39,7 +40,7 @@ import "pw_snapshot_metadata_proto/snapshot_metadata.proto";
 //
 //     // Pigweed's snapshot doesn't support my custom RTOS, so write that to
 //     // a field number reserved for downstream projects.
-//     MyCustomRtosInfo = 22;
+//     MyCustomRtosInfo = 1032;
 //   }
 //
 // Writing both proto messages to the same proto encoder is valid because the
@@ -49,11 +50,13 @@ import "pw_snapshot_metadata_proto/snapshot_metadata.proto";
 message Snapshot {
   repeated pw.log.LogEntry logs = 1;
 
+  repeated pw.metric.proto.Metric metrics = 2;
+
   // RESERVED FOR PIGWEED. These field numbers are reserved strictly for things
   // that are very generally useful and high in count. Downstream projects may
   // NOT write to these fields.
   // Encodes to a single byte of tag overhead.
-  reserved 2 to 7;
+  reserved 3 to 7;
 
   // RESERVED FOR USERS. These field numbers should be used for writing
   // project-specific proto messages that repeat in high quantity to reduce

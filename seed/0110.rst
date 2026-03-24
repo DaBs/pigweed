@@ -61,8 +61,8 @@ Allocator
     public:
      class Layout {
       public:
-       constexpr Layout(
-           size_t size, std::align_val_t alignment = alignof(std::max_align_t))
+       constexpr Layout(size_t size,
+                        std::align_val_t alignment = alignof(std::max_align_t))
            : size_(size), alignment_(alignment) {}
 
        // Creates a Layout for the given type.
@@ -88,13 +88,9 @@ Allocator
      template <typename T, typename... Args>
      std::optional<UniquePtr<T>> MakeUnique(Args&&... args);
 
-     void* Allocate(Layout layout) {
-       return DoAllocate(layout);
-     }
+     void* Allocate(Layout layout) { return DoAllocate(layout); }
 
-     void Deallocate(void* ptr, Layout layout) {
-       return DoDeallocate(layout);
-     }
+     void Deallocate(void* ptr, Layout layout) { return DoDeallocate(layout); }
 
      bool Resize(void* ptr, Layout old_layout, size_t new_size) {
        if (ptr == nullptr) {
@@ -214,7 +210,7 @@ working with allocators in a system.
 
 UniquePtr
 ---------
-``pw::allocator::UniquePtr`` is a "smart pointer" analogous to
+``pw::UniquePtr`` is a "smart pointer" analogous to
 ``std::unique_ptr``, designed to work with Pigweed allocators. It owns and
 manages an allocated object, automatically deallocating its memory when it goes
 out of scope.
@@ -252,7 +248,6 @@ which wraps another allocator implementation with basic usage reporting through
 
      // Implements the Allocator interface by forwarding through to the
      // sub-allocator provided to Initialize.
-
    };
 
 Integration with C++ polymorphic memory resources
@@ -350,8 +345,8 @@ the file and line number of the allocation.
 .. code-block:: c++
 
    void GenerateAndProcessData(TaggedAllocator& allocator) {
-     void* data = allocator->AllocatedTagged(
-         Layout::Sized(kDataSize), PW_ALLOCATOR_TAG("my data buffer"));
+     void* data = allocator->AllocatedTagged(Layout::Sized(kDataSize),
+                                             PW_ALLOCATOR_TAG("my data buffer"));
      if (data == nullptr) {
        return;
      }

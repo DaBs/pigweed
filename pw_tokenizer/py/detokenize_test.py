@@ -558,11 +558,14 @@ class AutoUpdatingDetokenizerTest(unittest.TestCase):
         mock_getmtime.side_effect = move_back_time_if_file_exists
 
         with tempfile.TemporaryDirectory() as dbdir:
-            with tempfile.NamedTemporaryFile(
-                'wb', delete=False, suffix='.pw_tokenizer.csv', dir=dbdir
-            ) as matching_suffix_file, tempfile.NamedTemporaryFile(
-                'wb', delete=False, suffix='.not.right', dir=dbdir
-            ) as mismatched_suffix_file:
+            with (
+                tempfile.NamedTemporaryFile(
+                    'wb', delete=False, suffix='.pw_tokenizer.csv', dir=dbdir
+                ) as matching_suffix_file,
+                tempfile.NamedTemporaryFile(
+                    'wb', delete=False, suffix='.not.right', dir=dbdir
+                ) as mismatched_suffix_file,
+            ):
                 try:
                     matching_suffix_file.close()
                     mismatched_suffix_file.close()
@@ -670,6 +673,89 @@ class AutoUpdatingDetokenizerTest(unittest.TestCase):
                 min_poll_period_s=0,
                 pool=InlinePoolExecutor(),
             )
+
+    def test_extra_databases(self, mock_getmtime) -> None:
+        """Tests that extra_databases are merged and survive reloads."""
+        db = database.load_token_database(
+            io.BytesIO(ELF_WITH_TOKENIZER_SECTIONS)
+        )
+        extra_token = 0x1234
+        extra_db = tokens.Database(
+            [tokens.TokenizedStringEntry(extra_token, 'extra token')]
+        )
+
+        the_time = [100]
+        mock_getmtime.side_effect = lambda _: the_time[0]
+
+        with tempfile.NamedTemporaryFile('wb', delete=False) as file:
+            try:
+                tokens.write_binary(db, file.file)  # type: ignore[arg-type]
+                file.close()
+
+                pool = InlinePoolExecutor()
+                detok = detokenize.AutoUpdatingDetokenizer(
+                    file.name,
+                    min_poll_period_s=0,
+                    pool=pool,
+                    extra_databases=[extra_db],
+                )
+
+                # Both the file tokens and the extra token should be present.
+                self.assertTrue(detok.detokenize(JELLO_WORLD_TOKEN).ok())
+                self.assertTrue(
+                    detok.detokenize(struct.pack('<I', extra_token)).ok()
+                )
+                self.assertEqual(
+                    str(detok.detokenize(struct.pack('<I', extra_token))),
+                    'extra token',
+                )
+
+                # Update the file and trigger a reload.
+                the_time[0] += 1
+                with open(file.name, 'wb') as fd:
+                    # Write an empty database to the file.
+                    tokens.write_binary(tokens.Database(), fd)
+
+                # The file token should be gone, but the extra token should
+                # remain.
+                self.assertFalse(detok.detokenize(JELLO_WORLD_TOKEN).ok())
+                self.assertTrue(
+                    detok.detokenize(struct.pack('<I', extra_token)).ok()
+                )
+                self.assertEqual(
+                    str(detok.detokenize(struct.pack('<I', extra_token))),
+                    'extra token',
+                )
+
+            finally:
+                os.unlink(file.name)
+
+    def test_extra_databases_multiple_and_iterable(self, mock_getmtime) -> None:
+        """Tests that multiple extra_databases and iterables are supported."""
+        db1 = tokens.Database([tokens.TokenizedStringEntry(0x1, 'token 1')])
+        db2 = tokens.Database([tokens.TokenizedStringEntry(0x2, 'token 2')])
+
+        mock_getmtime.return_value = 100
+
+        # Test with a generator of multiple databases
+        def db_gen():
+            yield db1
+            yield db2
+
+        detok = detokenize.AutoUpdatingDetokenizer(
+            extra_databases=db_gen(),
+            min_poll_period_s=0,
+            pool=InlinePoolExecutor(),
+        )
+
+        self.assertTrue(detok.detokenize(struct.pack('<I', 0x1)).ok())
+        self.assertEqual(
+            str(detok.detokenize(struct.pack('<I', 0x1))), 'token 1'
+        )
+        self.assertTrue(detok.detokenize(struct.pack('<I', 0x2)).ok())
+        self.assertEqual(
+            str(detok.detokenize(struct.pack('<I', 0x2))), 'token 2'
+        )
 
 
 def _next_char(message: bytes) -> bytes:
@@ -847,8 +933,8 @@ class DetokenizeNested(unittest.TestCase):
         )
 
 
-class DetokenizeBase64(unittest.TestCase):
-    """Tests detokenizing Base64 messages."""
+class DetokenizeNestedMessages(unittest.TestCase):
+    """Tests detokenizing nested messages."""
 
     JELLO = b'$' + base64.b64encode(JELLO_WORLD_TOKEN)
 
@@ -899,33 +985,33 @@ class DetokenizeBase64(unittest.TestCase):
         )
         self.detok = detokenize.Detokenizer(db)
 
-    def test_detokenize_base64_live(self) -> None:
+    def test_detokenize_text_live(self) -> None:
         for data, expected in self.TEST_CASES:
             output = io.BytesIO()
-            self.detok.detokenize_base64_live(io.BytesIO(data), output)
+            self.detok.detokenize_text_live(io.BytesIO(data), output)
 
             self.assertEqual(expected, output.getvalue(), f'Input: {data!r}')
 
-    def test_detokenize_base64_to_file(self) -> None:
+    def test_detokenize_text_to_file(self) -> None:
         for data, expected in self.TEST_CASES:
             output = io.BytesIO()
-            self.detok.detokenize_base64_to_file(data, output)
+            self.detok.detokenize_text_to_file(data, output)
 
             self.assertEqual(expected, output.getvalue())
 
-    def test_detokenize_base64(self) -> None:
+    def test_detokenize_text(self) -> None:
         for data, expected in self.TEST_CASES:
-            self.assertEqual(expected, self.detok.detokenize_base64(data))
+            self.assertEqual(expected, self.detok.detokenize_text(data))
 
-    def test_detokenize_base64_str(self) -> None:
+    def test_detokenize_text_str(self) -> None:
         for data, expected in self.TEST_CASES:
             self.assertEqual(
-                expected.decode(), self.detok.detokenize_base64(data.decode())
+                expected.decode(), self.detok.detokenize_text(data.decode())
             )
 
 
 class DetokenizeInfiniteRecursion(unittest.TestCase):
-    """Tests that infinite Base64 token recursion resolves."""
+    """Tests that infinite nested token recursion resolves."""
 
     def setUp(self) -> None:
         super().setUp()
@@ -970,7 +1056,7 @@ class DetokenizeInfiniteRecursion(unittest.TestCase):
         )
 
 
-class DetokenizeBase64InfiniteRecursion(unittest.TestCase):
+class DetokenizeNestedfiniteRecursion(unittest.TestCase):
     """Tests that infinite Bas64 token recursion resolves."""
 
     def setUp(self) -> None:
@@ -989,7 +1075,7 @@ class DetokenizeBase64InfiniteRecursion(unittest.TestCase):
     def test_detokenize_self_recursion(self) -> None:
         for depth in range(5):
             self.assertEqual(
-                self.detok.detokenize_base64(
+                self.detok.detokenize_text(
                     b'This one is deep: $AAAAAA==', recursion=depth
                 ),
                 b'This one is deep: $AAAAAA==',
@@ -997,19 +1083,19 @@ class DetokenizeBase64InfiniteRecursion(unittest.TestCase):
 
     def test_detokenize_self_recursion_default(self) -> None:
         self.assertEqual(
-            self.detok.detokenize_base64(b'This one is deep: $64#AAAAAA=='),
+            self.detok.detokenize_text(b'This one is deep: $64#AAAAAA=='),
             b'This one is deep: $AAAAAA==',
         )
 
     def test_detokenize_cyclic_recursion_even(self) -> None:
         self.assertEqual(
-            self.detok.detokenize_base64(b'I said "$AQAAAA=="', recursion=2),
+            self.detok.detokenize_text(b'I said "$AQAAAA=="', recursion=2),
             b'I said "$AgAAAA=="',
         )
 
     def test_detokenize_cyclic_recursion_odd(self) -> None:
         self.assertEqual(
-            self.detok.detokenize_base64(b'I said "$AQAAAA=="', recursion=3),
+            self.detok.detokenize_text(b'I said "$AQAAAA=="', recursion=3),
             b'I said "$AwAAAA=="',
         )
 
@@ -1087,7 +1173,7 @@ class DetokenizeNestedDomains(unittest.TestCase):
         result = detok.detokenize(b'\x02\0\0\0\x14')
         self.assertFalse(result == 'This is all in domain1')
 
-    def test_nested_base64_arg_multiple_domains(self) -> None:
+    def test_nested_messages_arg_multiple_domains(self) -> None:
         detok = detokenize.Detokenizer(
             tokens.Database(
                 [
@@ -1102,7 +1188,13 @@ class DetokenizeNestedDomains(unittest.TestCase):
         )
         self.assertEqual(
             str(detok.detokenize(b'\x02\0\0\0\x09$AQAAAA==')),  # token for 1
+            'This is a $AQAAAA==',
+            'Nested decoding fails no domain was specified, but token is in D1',
+        )
+        self.assertEqual(
+            str(detok.detokenize(b'\x02\0\0\0\x0D${D1}AQAAAA==')),
             'This is a nested base64 argument',
+            'Succeeds when domain is specified',
         )
 
     def test_nested_hashed_arg_with_domain_whitespace(self) -> None:
@@ -1123,7 +1215,7 @@ class DetokenizeNestedDomains(unittest.TestCase):
             'This is domain2 and this is domain1',
         )
 
-    def test_double_nested_base64_arg_multiple_domains(self) -> None:
+    def test_double_nested_messages_arg_multiple_domains(self) -> None:
         detok = detokenize.Detokenizer(
             tokens.Database(
                 [

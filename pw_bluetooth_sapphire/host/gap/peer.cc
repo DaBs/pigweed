@@ -105,11 +105,21 @@ void Peer::LowEnergyData::AttachInspect(inspect::Node& parent,
 void Peer::LowEnergyData::SetAdvertisingData(
     int8_t rssi,
     const ByteBuffer& data,
-    pw::chrono::SystemClock::time_point timestamp) {
+    pw::chrono::SystemClock::time_point timestamp,
+    std::optional<uint8_t> advertising_sid,
+    std::optional<uint16_t> periodic_advertising_interval) {
   // Prolong this peer's expiration in case it is temporary.
   peer_->UpdateExpiry();
 
   peer_->SetRssiInternal(rssi);
+
+  if (advertising_sid.has_value()) {
+    set_advertising_sid(*advertising_sid);
+  }
+
+  if (periodic_advertising_interval.has_value()) {
+    set_periodic_advertising_interval(*periodic_advertising_interval);
+  }
 
   AdvertisingData::ParseResult res = AdvertisingData::FromBytes(data);
   if (!res.is_ok()) {
@@ -266,7 +276,6 @@ void Peer::LowEnergyData::SetBondData(const sm::PairingData& bond_data) {
   // Update to the new identity address if the current address is random.
   if (peer_->address().type() == DeviceAddress::Type::kLERandom &&
       bond_data.identity_address) {
-    peer_->set_identity_known(true);
     peer_->set_address(*bond_data.identity_address);
   }
 
@@ -276,9 +285,6 @@ void Peer::LowEnergyData::SetBondData(const sm::PairingData& bond_data) {
 
 void Peer::LowEnergyData::ClearBondData() {
   PW_CHECK(bond_data_->has_value());
-  if (bond_data_->value().irk) {
-    peer_->set_identity_known(false);
-  }
   bond_data_.Set(std::nullopt);
 }
 
@@ -352,7 +358,7 @@ void Peer::BrEdrData::SetInquiryData(
       DeviceClass(view.class_of_device().BackingStorage().ReadUInt()),
       view.clock_offset().BackingStorage().ReadUInt(),
       view.page_scan_repetition_mode().Read(),
-      view.rssi().Read());
+      view.rssi().UncheckedRead());
 }
 
 void Peer::BrEdrData::SetInquiryData(
@@ -365,7 +371,7 @@ void Peer::BrEdrData::SetInquiryData(
       DeviceClass(view.class_of_device().BackingStorage().ReadUInt()),
       view.clock_offset().BackingStorage().ReadUInt(),
       view.page_scan_repetition_mode().Read(),
-      view.rssi().Read(),
+      view.rssi().UncheckedRead(),
       response_view);
 }
 
@@ -589,6 +595,14 @@ void Peer::BrEdrData::AddService(UUID uuid) {
   }
 }
 
+void Peer::BrEdrData::SetDeviceClass(DeviceClass device_class) {
+  if (device_class_ && *device_class_ == device_class) {
+    return;
+  }
+  device_class_ = device_class;
+  peer_->UpdatePeerAndNotifyListeners(NotifyListenersChange::kBondNotUpdated);
+}
+
 Peer::Peer(NotifyListenersCallback notify_listeners_callback,
            PeerCallback update_expiry_callback,
            PeerCallback dual_mode_callback,
@@ -608,7 +622,6 @@ Peer::Peer(NotifyListenersCallback notify_listeners_callback,
                       : TechnologyType::kLowEnergy,
                   [](TechnologyType t) { return TechnologyTypeToString(t); }),
       address_(address, MakeToStringInspectConvertFunction()),
-      identity_known_(false),
       name_(std::nullopt,
             [](const std::optional<PeerName>& v) {
               return v ? v->name +
@@ -637,11 +650,6 @@ Peer::Peer(NotifyListenersCallback notify_listeners_callback,
   PW_DCHECK(update_expiry_callback_);
   PW_DCHECK(dual_mode_callback_);
   PW_DCHECK(identifier.IsValid());
-
-  if (address.type() == DeviceAddress::Type::kBREDR ||
-      address.type() == DeviceAddress::Type::kLEPublic) {
-    identity_known_ = true;
-  }
 
   // Initialize transport-specific state.
   if (*technology_ == TechnologyType::kClassic) {
@@ -719,7 +727,8 @@ bool Peer::RegisterName(const std::string& name, Peer::NameSource source) {
 // Private methods below:
 
 bool Peer::SetRssiInternal(int8_t rssi) {
-  if (rssi != hci_spec::kRSSIInvalid && rssi_ != rssi) {
+  if (rssi != hci_spec::kRSSIInvalid && rssi >= hci_spec::kMinRssi &&
+      rssi <= hci_spec::kMaxRssi && rssi_ != rssi) {
     rssi_ = rssi;
     return true;
   }

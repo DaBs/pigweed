@@ -14,21 +14,47 @@
 
 include($ENV{PW_ROOT}/pw_build/pigweed.cmake)
 
-pw_add_library(pw_multibuf.chunk STATIC
+# LINT.IfChange
+pw_add_library(pw_multibuf INTERFACE
+  HEADERS
+    public/pw_multibuf/multibuf.h
+    public/pw_multibuf/observer.h
+  PUBLIC_INCLUDES
+    public
+  PUBLIC_DEPS
+    pw_multibuf.chunk
+    pw_multibuf.config
+    pw_multibuf.v1.multibuf
+    pw_multibuf.v1_adapter.multibuf
+    pw_multibuf.v2.multibuf
+)
+# LINT.ThenChange(BUILD.bazel, BUILD.gn)
+
+### Module configuration
+
+pw_add_module_config(pw_multibuf_CONFIG)
+
+pw_add_library(pw_multibuf.config INTERFACE
+  HEADERS
+    public/pw_multibuf/config.h
+  PUBLIC_INCLUDES
+    public
+  PUBLIC_DEPS
+    ${pw_multibuf_CONFIG}
+)
+
+### V1 Libraries
+
+# LINT.IfChange
+pw_add_library(pw_multibuf.chunk INTERFACE
   HEADERS
     public/pw_multibuf/chunk.h
   PUBLIC_INCLUDES
     public
   PUBLIC_DEPS
-    pw_assert
-    pw_bytes
-    pw_preprocessor
-    pw_span
-    pw_sync.mutex
-  PRIVATE_DEPS
-    pw_assert.check
-  SOURCES
-    chunk.cc
+    pw_multibuf.config
+    pw_multibuf.v1.chunk
+    pw_multibuf.v1_adapter.chunk
 )
 
 pw_add_library(pw_multibuf.header_chunk_region_tracker INTERFACE
@@ -37,9 +63,9 @@ pw_add_library(pw_multibuf.header_chunk_region_tracker INTERFACE
   PUBLIC_INCLUDES
     public
   PUBLIC_DEPS
-    pw_allocator.allocator
-    pw_bytes
     pw_multibuf.chunk
+    pw_multibuf.config
+    pw_multibuf.v1.header_chunk_region_tracker
 )
 
 pw_add_library(pw_multibuf.single_chunk_region_tracker INTERFACE
@@ -48,187 +74,58 @@ pw_add_library(pw_multibuf.single_chunk_region_tracker INTERFACE
   PUBLIC_INCLUDES
     public
   PUBLIC_DEPS
-    pw_assert
-    pw_bytes
     pw_multibuf.chunk
+    pw_multibuf.config
+    pw_multibuf.v1.single_chunk_region_tracker
+    pw_multibuf.v1_adapter.single_chunk_region_tracker
 )
 
-pw_add_test(pw_multibuf.chunk_test
-  SOURCES
-    chunk_test.cc
-  PRIVATE_DEPS
-    pw_allocator.testing
-    pw_multibuf.chunk
-    pw_multibuf.header_chunk_region_tracker
-  GROUPS
-    modules
-    pw_multibuf
-)
-
-pw_add_test(pw_multibuf.header_chunk_region_tracker_test
-  SOURCES
-    header_chunk_region_tracker_test.cc
-  PRIVATE_DEPS
-    pw_allocator.testing
-    pw_multibuf.chunk
-    pw_multibuf.header_chunk_region_tracker
-    pw_status
-  GROUPS
-    modules
-    pw_multibuf
-)
-
-pw_add_test(pw_multibuf.single_chunk_region_tracker_test
-  SOURCES
-    single_chunk_region_tracker_test.cc
-  PRIVATE_DEPS
-    pw_multibuf.chunk
-    pw_multibuf.single_chunk_region_tracker
-  GROUPS
-    modules
-    pw_multibuf
-)
-
-pw_add_library(pw_multibuf STATIC
-  HEADERS
-    public/pw_multibuf/multibuf.h
-  PUBLIC_INCLUDES
-    public
-  PUBLIC_DEPS
-    pw_multibuf.chunk
-    pw_preprocessor
-  SOURCES
-    multibuf.cc
-)
-
-pw_add_test(pw_multibuf.multibuf_test
-  SOURCES
-    multibuf_test.cc
-  PRIVATE_DEPS
-    pw_bytes
-    pw_multibuf
-    pw_multibuf._internal_test_utils
-  GROUPS
-    modules
-    pw_multibuf
-)
-
-pw_add_library(pw_multibuf.allocator STATIC
+pw_add_library(pw_multibuf.allocator INTERFACE
   HEADERS
     public/pw_multibuf/allocator.h
   PUBLIC_INCLUDES
     public
   PUBLIC_DEPS
-    pw_containers.intrusive_forward_list
     pw_multibuf
-    pw_result
-    pw_sync.interrupt_spin_lock
-  SOURCES
-    allocator.cc
+    pw_multibuf.config
+    pw_multibuf.v1.allocator
+    pw_multibuf.v1_adapter.allocator
 )
 
-pw_add_library(pw_multibuf.allocator_async STATIC
+pw_add_library(pw_multibuf.allocator_async INTERFACE
   HEADERS
     public/pw_multibuf/allocator_async.h
   PUBLIC_INCLUDES
     public
   PUBLIC_DEPS
-    pw_async2.dispatcher
-    pw_async2.poll
     pw_multibuf.allocator
-  SOURCES
-    allocator_async.cc
+    pw_multibuf.config
+    pw_multibuf.v1.allocator_async
 )
 
-# TODO: https://pwbug.dev/384583239 - Split async into its own test.
-pw_add_test(pw_multibuf.allocator_test
-  SOURCES
-    allocator_test.cc
-  PRIVATE_DEPS
-    pw_async2.dispatcher
-    pw_async2.poll
-    pw_multibuf.allocator
-    pw_multibuf.allocator_async
-  GROUPS
-    modules
-    pw_multibuf
-)
-
-pw_add_library(pw_multibuf.simple_allocator STATIC
-  HEADERS
-    public/pw_multibuf/simple_allocator.h
-  PUBLIC_INCLUDES
-    public
-  PUBLIC_DEPS
-    pw_allocator.allocator
-    pw_containers.intrusive_list
-    pw_multibuf
-    pw_multibuf.allocator
-  SOURCES
-    simple_allocator.cc
-)
-
-pw_add_test(pw_multibuf.simple_allocator_test
-  SOURCES
-    simple_allocator_test.cc
-  PRIVATE_DEPS
-    pw_multibuf.simple_allocator
-    pw_allocator.testing
-    pw_allocator.null_allocator
-  GROUPS
-    modules
-    pw_multibuf
-)
-
-pw_add_library(pw_multibuf.stream STATIC
-  HEADERS
-    public/pw_multibuf/stream.h
-  PUBLIC_INCLUDES
-    public
-  PUBLIC_DEPS
-    pw_multibuf
-    pw_stream
-  SOURCES
-    stream.cc
-)
-
-pw_add_test(pw_multibuf.stream_test
-  SOURCES
-    stream_test.cc
-  PRIVATE_DEPS
-    pw_allocator.testing
-    pw_bytes
-    pw_multibuf.stream
-    pw_multibuf._internal_test_utils
-  GROUPS
-    modules
-    pw_multibuf
-)
-
-pw_add_library(pw_multibuf.from_span STATIC
+pw_add_library(pw_multibuf.from_span INTERFACE
   HEADERS
     public/pw_multibuf/from_span.h
   PUBLIC_INCLUDES
     public
   PUBLIC_DEPS
-    pw_allocator.allocator
     pw_multibuf
-    pw_function
-  SOURCES
-    from_span.cc
+    pw_multibuf.config
+    pw_multibuf.v1.from_span
+    pw_multibuf.v1_adapter.from_span
 )
 
-pw_add_test(pw_multibuf.from_span_test
-  SOURCES
-    from_span_test.cc
-  PRIVATE_DEPS
-    pw_allocator.testing
-    pw_multibuf.from_span
-  SOURCES
-    from_span_test.cc
-  GROUPS
-    modules
+pw_add_library(pw_multibuf.simple_allocator INTERFACE
+  HEADERS
+    public/pw_multibuf/simple_allocator.h
+  PUBLIC_INCLUDES
+    public
+  PUBLIC_DEPS
     pw_multibuf
+    pw_multibuf.allocator
+    pw_multibuf.config
+    pw_multibuf.v1.simple_allocator
+    pw_multibuf.v1_adapter.simple_allocator
 )
 
 pw_add_library(pw_multibuf.testing INTERFACE
@@ -237,20 +134,32 @@ pw_add_library(pw_multibuf.testing INTERFACE
   PUBLIC_INCLUDES
     public
   PUBLIC_DEPS
-    pw_assert
     pw_allocator.synchronized_allocator
     pw_allocator.testing
+    pw_assert.assert
+    pw_multibuf.config
     pw_multibuf.simple_allocator
     pw_sync.mutex
 )
 
-pw_add_library(pw_multibuf._internal_test_utils INTERFACE
+pw_add_library(pw_multibuf._chunk_testing INTERFACE
   HEADERS
-    pw_multibuf_private/test_utils.h
+    private/pw_multibuf_private/chunk_test_base.h
+  PUBLIC_INCLUDES
+    private
   PUBLIC_DEPS
-    pw_assert
-    pw_allocator.testing
-    pw_bytes
-    pw_multibuf.chunk
-    pw_multibuf.header_chunk_region_tracker
+    pw_unit_test
 )
+
+pw_add_library(pw_multibuf._test_utils INTERFACE
+  HEADERS
+    private/pw_multibuf_private/test_utils.h
+  PUBLIC_INCLUDES
+    private
+)
+
+# LINT.ThenChange(BUILD.bazel, BUILD.gn)
+
+add_subdirectory(v1)
+add_subdirectory(v1_adapter)
+add_subdirectory(v2)

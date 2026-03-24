@@ -26,6 +26,7 @@
 #include <utility>
 
 #include "pw_assert/assert.h"
+#include "pw_containers/storage.h"
 #include "pw_preprocessor/compiler.h"
 #include "pw_toolchain/constexpr_tag.h"
 
@@ -204,8 +205,7 @@ struct VectorStorage<T, kMaxSize, true>
   // Zero-length C arrays are non-standard, but std::array<T, 0> is valid.
   // The alignas specifier is required ensure that a zero-length array is
   // aligned the same as an array with elements.
-  alignas(T) std::array<std::aligned_storage_t<sizeof(T), alignof(T)>,
-                        kMaxSize> array_;
+  alignas(T) std::array<pw::containers::StorageFor<T>, kMaxSize> array_;
 };
 
 // Specialization of ``VectorStorage`` for non-trivially-destructible ``T``.
@@ -256,8 +256,7 @@ struct VectorStorage<T, kMaxSize, false>
   // Zero-length C arrays are non-standard, but std::array<T, 0> is valid.
   // The alignas specifier is required ensure that a zero-length array is
   // aligned the same as an array with elements.
-  alignas(T) std::array<std::aligned_storage_t<sizeof(T), alignof(T)>,
-                        kMaxSize> array_;
+  alignas(T) std::array<pw::containers::StorageFor<T>, kMaxSize> array_;
 };
 
 // Defines the generic-sized Vector<T> specialization, which serves as the base

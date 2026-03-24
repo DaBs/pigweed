@@ -55,7 +55,7 @@ const remapProtos = {
 // running.
 const newProtoPaths = [];
 protos.forEach((protoPath) => {
-  const protoFullPath = path.join(process.cwd(), protoPath);
+  const protoFullPath = path.join(process.cwd(), '..', protoPath);
   const protoData = fs.readFileSync(protoFullPath, 'utf-8');
   // Remap file path
   if (remapProtos[protoPath]) {

@@ -17,7 +17,7 @@
 #include <memory>
 
 #include "pw_async2/dispatcher.h"
-#include "pw_async2/once_sender.h"
+#include "pw_async2/value_future.h"
 #include "pw_bluetooth/internal/raii_ptr.h"
 #include "pw_bluetooth/low_energy/advertising_data.h"
 #include "pw_bluetooth/low_energy/connection2.h"
@@ -27,6 +27,8 @@
 #include "pw_result/expected.h"
 
 namespace pw::bluetooth::low_energy {
+
+/// @module{pw_bluetooth}
 
 /// `AdvertisedPeripheral` instances are valid for the duration of advertising.
 class AdvertisedPeripheral2 {
@@ -60,17 +62,11 @@ class AdvertisedPeripheral2 {
   /// Returns Ready when advertising has stopped due to a call to
   /// `StopAdvertising()` or due to error. Awakens `cx` on stopping.
   ///
-  /// @return @rst
-  ///
-  /// .. pw-status-codes::
-  ///
-  ///    OK: Advertising was stopped successfully after a call to
-  ///    ``StopAdvertising()``.
-  ///
-  ///    CANCELLED: An internal error occurred and the advertisement was
-  ///    cancelled.
-  ///
-  /// @endrst
+  /// @returns
+  /// * @OK: Advertising was stopped successfully after a call to
+  ///   `StopAdvertising()`.
+  /// * @CANCELLED: An internal error occurred and the advertisement was
+  ///   cancelled.
   virtual async2::Poll<pw::Status> PendStop(async2::Context& cx) = 0;
 
  private:
@@ -222,7 +218,7 @@ class Peripheral2 {
   /// @return Asynchronously returns a result once advertising has started or
   /// failed. On success, returns an `AdvertisedPeripheral2` that models the
   /// lifetime of the advertisement. Destroying it will stop advertising.
-  virtual async2::OnceReceiver<AdvertiseResult> Advertise(
+  virtual async2::OptionalValueFuture<AdvertiseResult> Advertise(
       const AdvertisingParameters& parameters) = 0;
 };
 

@@ -28,6 +28,7 @@ import base64
 from collections import defaultdict
 from dataclasses import dataclass
 from enum import Enum
+import itertools
 from pathlib import Path
 import pickle
 import re
@@ -108,6 +109,14 @@ class TestCase:
         return pickle.loads(base64.b64decode(serialized))
 
 
+class MalformedTestError(Exception):
+    """The tests are syntactically correct, but the test file is invalid."""
+
+    def __init__(self, message: str) -> None:
+        self.message = message
+        super().__init__(self, self.message)
+
+
 class ParseError(Exception):
     """Failed to parse a PW_NC_TEST."""
 
@@ -118,9 +127,11 @@ class ParseError(Exception):
         lines: Sequence[str],
         error_lines: Sequence[int],
     ) -> None:
-        for i in error_lines:
-            message += f'\n{file.name}:{i + 1}: {lines[i]}'
-        super().__init__(message)
+        lines = '\n'.join(
+            f'{file.name}:{i + 1}: {lines[i].rstrip()}' for i in error_lines
+        )
+        self.message = f'{message}\n\n{lines}'
+        super().__init__(self.message)
 
 
 class _ExpectationParser:
@@ -202,7 +213,7 @@ class _ExpectationParser:
             raise ValueError('Invalid regular expression: ' + error.msg)
 
 
-class _NegativeCompilationTestSource:
+class _NoCompileTestSource:
     def __init__(self, file: Path) -> None:
         self._file = file
         self._lines = self._file.read_text().splitlines(keepends=True)
@@ -296,10 +307,47 @@ class _NegativeCompilationTestSource:
         self._check_for_stray_expectations()
 
 
-def enumerate_tests(suite: str, paths: Iterable[Path]) -> Iterator[TestCase]:
-    """Parses PW_NC_TEST statements from a file."""
-    for path in paths:
-        yield from _NegativeCompilationTestSource(path).parse(suite)
+def enumerate_tests(name: str, sources: Iterable[Path]) -> Sequence[TestCase]:
+    """Parses PW_NC_TEST statements from a file.
+
+    Returns:
+        A sequence of TestCases found in the file.
+
+    Raises:
+        ParseError: if parsing fails.
+        MalformedTestError: if there are no tests or duplicate tests.
+    """
+    tests = list(
+        itertools.chain.from_iterable(
+            _NoCompileTestSource(path).parse(name) for path in sources
+        )
+    )
+
+    if not tests:
+        raise MalformedTestError(
+            f'The test "{name}" has no negative compilation test cases!\n'
+            'Add PW_NC_TEST() cases or remove this negative compilation test.'
+        )
+
+    tests_by_case: dict[str, list[TestCase]] = defaultdict(list)
+    for test in tests:
+        tests_by_case[test.case].append(test)
+
+    duplicates = [
+        dup_tests for dup_tests in tests_by_case.values() if len(dup_tests) > 1
+    ]
+    if duplicates:
+        message = ['There are duplicate negative compilation test cases!']
+        message.append('The following test cases appear more than once:')
+        for dup_tests in duplicates:
+            message.append(
+                f'\n    {dup_tests[0].case} ({len(dup_tests)} occurrences):'
+            )
+            for test in dup_tests:
+                message.append(f'        {test.source.name}:{test.line}')
+        raise MalformedTestError('\n'.join(message))
+
+    return tests
 
 
 class SourceFile(NamedTuple):
@@ -333,7 +381,7 @@ pw_python_action("{test.name()}.negative_compilation_test") {{
 def generate_gn_build(
     base: str,
     sources: Iterable[SourceFile],
-    tests: list[TestCase],
+    tests: Iterable[TestCase],
     all_tests: str,
 ) -> Iterator[str]:
     """Generates the BUILD.gn file with compilation failure test targets."""
@@ -366,30 +414,9 @@ def _main(
         return print(s, file=sys.stderr)
 
     try:
-        tests = list(enumerate_tests(name, (s.file_path for s in sources)))
-    except ParseError as error:
+        tests = enumerate_tests(name, (s.file_path for s in sources))
+    except (MalformedTestError, ParseError) as error:
         print_stderr(f'ERROR: {error}')
-        return 1
-
-    if not tests:
-        print_stderr(f'The test "{name}" has no negative compilation tests!')
-        print_stderr(
-            'Add PW_NC_TEST() cases or remove this negative ' 'compilation test'
-        )
-        return 1
-
-    tests_by_case = defaultdict(list)
-    for test in tests:
-        tests_by_case[test.case].append(test)
-
-    duplicates = [tests for tests in tests_by_case.values() if len(tests) > 1]
-    if duplicates:
-        print_stderr('There are duplicate negative compilation test cases!')
-        print_stderr('The following test cases appear more than once:')
-        for tests in duplicates:
-            print_stderr(f'\n    {tests[0].case} ({len(tests)} occurrences):')
-            for test in tests:
-                print_stderr(f'        {test.source.name}:{test.line}')
         return 1
 
     output.mkdir(parents=True, exist_ok=True)

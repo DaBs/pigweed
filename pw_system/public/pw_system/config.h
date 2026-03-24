@@ -81,6 +81,15 @@
 #define PW_SYSTEM_EXTRA_LOGGING_CHANNEL_ID PW_SYSTEM_LOGGING_CHANNEL_ID
 #endif  // PW_SYSTEM_EXTRA_LOGGING_CHANNEL_ID
 
+// PW_SYSTEM_EXTRA_LOGGING_MAX_BUNDLE_PER_TRICKLE
+// Defines the maximum number of log entries allowed in a single trickle.
+// This is necessary because the extra logging channel may have size
+// constraints.
+#ifndef PW_SYSTEM_EXTRA_LOGGING_MAX_BUNDLE_PER_TRICKLE
+#define PW_SYSTEM_EXTRA_LOGGING_MAX_BUNDLE_PER_TRICKLE \
+  std::numeric_limits<size_t>::max()
+#endif  // PW_SYSTEM_EXTRA_LOGGING_MAX_BUNDLE_PER_TRICKLE
+
 // PW_SYSTEM_ENABLE_TRACE_SERVICE specifies if the trace RPC service is enabled.
 //
 // Defaults to 1.
@@ -172,6 +181,22 @@
 #ifndef PW_SYSTEM_CRASH_SNAPSHOT_MEMORY_SIZE_BYTES
 #define PW_SYSTEM_CRASH_SNAPSHOT_MEMORY_SIZE_BYTES 2048
 #endif  // PW_SYSTEM_CRASH_SNAPSHOT_MEMORY_SIZE_BYTES
+
+// PW_SYSTEM_ENABLE_RPC_BENCHMARK_SERVICE specifies if a default RPC benchmark
+// service is added to the system server.
+//
+// Defaults to 0 (disabled).
+#ifndef PW_SYSTEM_ENABLE_RPC_BENCHMARK_SERVICE
+#define PW_SYSTEM_ENABLE_RPC_BENCHMARK_SERVICE 0
+#endif
+
+// PW_SYSTEM_ALLOCATOR_HEAP_SIZE_BYTES specifies how much memory to reserve for
+// dynamic allocation via the system allocator.
+//
+// Defaults to 8192
+#ifndef PW_SYSTEM_ALLOCATOR_HEAP_SIZE_BYTES
+#define PW_SYSTEM_ALLOCATOR_HEAP_SIZE_BYTES 8192
+#endif
 
 namespace pw::system {
 

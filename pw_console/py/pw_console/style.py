@@ -15,6 +15,7 @@
 
 import logging
 from dataclasses import dataclass
+import sys
 
 from prompt_toolkit.formatted_text import StyleAndTextTuples
 from prompt_toolkit.formatted_text.base import OneStyleAndTextTuple
@@ -25,266 +26,278 @@ _LOG = logging.getLogger(__package__)
 
 
 @dataclass
-class HighContrastDarkColors:
-    """Dark high contrast colors."""
+class UiTheme:
+    """UiTheme dataclass that stores colors."""
 
     # pylint: disable=too-many-instance-attributes
-    display_name = 'High Contrast'
+    display_name: str
 
-    default_bg = '#100f10'
-    default_fg = '#ffffff'
+    default_bg: str
+    default_fg: str
 
-    dim_bg = '#000000'
-    dim_fg = '#e0e6f0'
+    dim_bg: str
+    dim_fg: str
 
-    button_active_bg = '#4e4e4e'
-    button_inactive_bg = '#323232'
+    button_active_bg: str
+    button_inactive_bg: str
 
-    active_bg = '#323232'
-    active_fg = '#f4f4f4'
+    active_bg: str
+    active_fg: str
 
-    inactive_bg = '#1e1e1e'
-    inactive_fg = '#bfc0c4'
+    inactive_bg: str
+    inactive_fg: str
 
-    line_highlight_bg = '#2f2f2f'
-    selected_line_bg = '#4e4e4e'
-    dialog_bg = '#3c3c3c'
+    line_highlight_bg: str
+    selected_line_bg: str
+    dialog_bg: str
 
-    red_accent = '#ffc0bf'
-    orange_accent = '#f5ca80'
-    yellow_accent = '#eedc82'
-    green_accent = '#88ef88'
-    cyan_accent = '#60e7e0'
-    blue_accent = '#92d9ff'
-    purple_accent = '#cfcaff'
-    magenta_accent = '#ffb8ff'
-
-
-@dataclass
-class DarkColors:
-    """The default dark UI color theme."""
-
-    # pylint: disable=too-many-instance-attributes
-    display_name = 'Dark'
-
-    default_bg = '#2e2e2e'
-    default_fg = '#eeeeee'
-
-    dim_bg = '#262626'
-    dim_fg = '#dfdfdf'
-
-    button_active_bg = '#626262'
-    button_inactive_bg = '#525252'
-
-    active_bg = '#525252'
-    active_fg = '#dfdfdf'
-
-    inactive_bg = '#3f3f3f'
-    inactive_fg = '#bfbfbf'
-
-    line_highlight_bg = '#525252'
-    selected_line_bg = '#626262'
-    dialog_bg = '#3c3c3c'
-
-    red_accent = '#ff6c6b'
-    orange_accent = '#da8548'
-    yellow_accent = '#ffcc66'
-    green_accent = '#98be65'
-    cyan_accent = '#66cccc'
-    blue_accent = '#6699cc'
-    purple_accent = '#a9a1e1'
-    magenta_accent = '#c678dd'
+    red_accent: str
+    orange_accent: str
+    yellow_accent: str
+    green_accent: str
+    cyan_accent: str
+    blue_accent: str
+    purple_accent: str
+    magenta_accent: str
 
 
-@dataclass
-class NordColors:
-    """Nord UI color theme."""
+DEFAULT_UI_THEMES = [
+    UiTheme(
+        display_name='dark',
+        default_bg='#2e2e2e',
+        default_fg='#eeeeee',
+        dim_bg='#262626',
+        dim_fg='#dfdfdf',
+        button_active_bg='#626262',
+        button_inactive_bg='#525252',
+        active_bg='#525252',
+        active_fg='#dfdfdf',
+        inactive_bg='#3f3f3f',
+        inactive_fg='#bfbfbf',
+        line_highlight_bg='#525252',
+        selected_line_bg='#626262',
+        dialog_bg='#3c3c3c',
+        red_accent='#ff6c6b',
+        orange_accent='#da8548',
+        yellow_accent='#ffcc66',
+        green_accent='#98be65',
+        cyan_accent='#66cccc',
+        blue_accent='#6699cc',
+        purple_accent='#a9a1e1',
+        magenta_accent='#c678dd',
+    ),
+    UiTheme(
+        display_name='high-contrast-dark',
+        default_bg='#100f10',
+        default_fg='#ffffff',
+        dim_bg='#000000',
+        dim_fg='#e0e6f0',
+        button_active_bg='#4e4e4e',
+        button_inactive_bg='#323232',
+        active_bg='#323232',
+        active_fg='#f4f4f4',
+        inactive_bg='#1e1e1e',
+        inactive_fg='#bfc0c4',
+        line_highlight_bg='#2f2f2f',
+        selected_line_bg='#4e4e4e',
+        dialog_bg='#3c3c3c',
+        red_accent='#ffc0bf',
+        orange_accent='#f5ca80',
+        yellow_accent='#eedc82',
+        green_accent='#88ef88',
+        cyan_accent='#60e7e0',
+        blue_accent='#92d9ff',
+        purple_accent='#cfcaff',
+        magenta_accent='#ffb8ff',
+    ),
+    UiTheme(
+        display_name='high-contrast-light',
+        default_bg='#ffffff',
+        default_fg='#000000',
+        dim_bg='#ffffff',
+        dim_fg='#595959',
+        button_active_bg='#c4c4c4',
+        button_inactive_bg='#e6e6e6',
+        active_bg='#e0e0e0',
+        active_fg='#000000',
+        inactive_bg='#e0e0e0',
+        inactive_fg='#9f9f9f',
+        line_highlight_bg='#bfc0c4',
+        selected_line_bg='#92d9ff',
+        dialog_bg='#ffffff',
+        red_accent='#a60000',
+        orange_accent='#80601f',
+        yellow_accent='#808000',
+        green_accent='#006800',
+        cyan_accent='#005e8b',
+        blue_accent='#0031a9',
+        purple_accent='#531ab6',
+        magenta_accent='#721045',
+    ),
+    UiTheme(
+        display_name='nord',
+        default_bg='#2e3440',
+        default_fg='#eceff4',
+        dim_bg='#272c36',
+        dim_fg='#e5e9f0',
+        button_active_bg='#4c566a',
+        button_inactive_bg='#434c5e',
+        active_bg='#434c5e',
+        active_fg='#eceff4',
+        inactive_bg='#373e4c',
+        inactive_fg='#d8dee9',
+        line_highlight_bg='#191c25',
+        selected_line_bg='#4c566a',
+        dialog_bg='#2c333f',
+        red_accent='#bf616a',
+        orange_accent='#d08770',
+        yellow_accent='#ebcb8b',
+        green_accent='#a3be8c',
+        cyan_accent='#88c0d0',
+        blue_accent='#81a1c1',
+        purple_accent='#a9a1e1',
+        magenta_accent='#b48ead',
+    ),
+    UiTheme(
+        display_name='nord-light',
+        default_bg='#e5e9f0',
+        default_fg='#3b4252',
+        dim_bg='#d8dee9',
+        dim_fg='#2e3440',
+        button_active_bg='#aebacf',
+        button_inactive_bg='#b8c5db',
+        active_bg='#b8c5db',
+        active_fg='#3b4252',
+        inactive_bg='#c2d0e7',
+        inactive_fg='#60728c',
+        line_highlight_bg='#aebacf',
+        selected_line_bg='#b8c5db',
+        dialog_bg='#d8dee9',
+        red_accent='#99324b',
+        orange_accent='#ac4426',
+        yellow_accent='#9a7500',
+        green_accent='#4f894c',
+        cyan_accent='#398eac',
+        blue_accent='#3b6ea8',
+        purple_accent='#842879',
+        magenta_accent='#97365b',
+    ),
+    UiTheme(
+        display_name='moonlight',
+        default_bg='#212337',
+        default_fg='#c8d3f5',
+        dim_bg='#191a2a',
+        dim_fg='#b4c2f0',
+        button_active_bg='#444a73',
+        button_inactive_bg='#2f334d',
+        active_bg='#2f334d',
+        active_fg='#c8d3f5',
+        inactive_bg='#222436',
+        inactive_fg='#a9b8e8',
+        line_highlight_bg='#383e5c',
+        selected_line_bg='#444a73',
+        dialog_bg='#1e2030',
+        red_accent='#d95468',
+        orange_accent='#d98e48',
+        yellow_accent='#ebbf83',
+        green_accent='#8bd49c',
+        cyan_accent='#70e1e8',
+        blue_accent='#5ec4ff',
+        purple_accent='#b62d65',
+        magenta_accent='#e27e8d',
+    ),
+    UiTheme(
+        display_name='synthwave84',
+        default_bg='#252334',
+        default_fg='#ffffff',
+        dim_bg='#2a2139',
+        dim_fg='#ffffff',
+        button_active_bg='#614d85',
+        button_inactive_bg='#2f334d',
+        active_bg='#2f334d',
+        active_fg='#c8d3f5',
+        inactive_bg='#222436',
+        inactive_fg='#a9b8e8',
+        line_highlight_bg='#383e5c',
+        selected_line_bg='#444a73',
+        dialog_bg='#1e2030',
+        red_accent='#fe4450',
+        orange_accent='#f97e72',
+        yellow_accent='#fede5d',
+        green_accent='#72f1b8',
+        cyan_accent='#03edf9',
+        blue_accent='#2ee2fa',
+        purple_accent='#9d8bca',
+        magenta_accent='#ff7edb',
+    ),
+    UiTheme(
+        display_name='ansi',
+        default_bg='default',
+        default_fg='default',
+        dim_bg='default',
+        dim_fg='default',
+        button_active_bg='default underline',
+        button_inactive_bg='default',
+        active_bg='default',
+        active_fg='default',
+        inactive_bg='default',
+        inactive_fg='default',
+        line_highlight_bg='ansidarkgray white',
+        selected_line_bg='default reverse',
+        dialog_bg='default',
+        red_accent='ansired',
+        orange_accent='orange',
+        yellow_accent='ansiyellow',
+        green_accent='ansigreen',
+        cyan_accent='ansicyan',
+        blue_accent='ansiblue',
+        purple_accent='ansipurple',
+        magenta_accent='ansimagenta',
+    ),
+]
 
-    # pylint: disable=too-many-instance-attributes
-    display_name = 'Nord'
+DEFAULT_UI_THEME = DEFAULT_UI_THEMES[0]
 
-    default_bg = '#2e3440'
-    default_fg = '#eceff4'
-
-    dim_bg = '#272c36'
-    dim_fg = '#e5e9f0'
-
-    button_active_bg = '#4c566a'
-    button_inactive_bg = '#434c5e'
-
-    active_bg = '#434c5e'
-    active_fg = '#eceff4'
-
-    inactive_bg = '#373e4c'
-    inactive_fg = '#d8dee9'
-
-    line_highlight_bg = '#191c25'
-    selected_line_bg = '#4c566a'
-    dialog_bg = '#2c333f'
-
-    red_accent = '#bf616a'
-    orange_accent = '#d08770'
-    yellow_accent = '#ebcb8b'
-    green_accent = '#a3be8c'
-    cyan_accent = '#88c0d0'
-    blue_accent = '#81a1c1'
-    purple_accent = '#a9a1e1'
-    magenta_accent = '#b48ead'
+THEME_NAME_MAPPING = {theme.display_name: theme for theme in DEFAULT_UI_THEMES}
 
 
-@dataclass
-class NordLightColors:
-    """Nord light UI color theme."""
+def add_user_ui_themes(new_themes: dict[str, dict]) -> None:
+    """Adds user themes to the THEME_NAME_MAPPING.
 
-    # pylint: disable=too-many-instance-attributes
-    display_name = 'Nord Light'
+    If a theme with the same name already exists, it will be overwritten."""
 
-    default_bg = '#e5e9f0'
-    default_fg = '#3b4252'
-    dim_bg = '#d8dee9'
-    dim_fg = '#2e3440'
-    button_active_bg = '#aebacf'
-    button_inactive_bg = '#b8c5db'
-    active_bg = '#b8c5db'
-    active_fg = '#3b4252'
-    inactive_bg = '#c2d0e7'
-    inactive_fg = '#60728c'
-    line_highlight_bg = '#f0f4fc'
-    selected_line_bg = '#f0f4fc'
-    dialog_bg = '#d8dee9'
-
-    red_accent = '#99324b'
-    orange_accent = '#ac4426'
-    yellow_accent = '#9a7500'
-    green_accent = '#4f894c'
-    cyan_accent = '#398eac'
-    blue_accent = '#3b6ea8'
-    purple_accent = '#842879'
-    magenta_accent = '#97365b'
+    for name, theme in new_themes.items():
+        # Add in display_name if omitted.
+        if 'display_name' not in theme:
+            theme['display_name'] = name
+        try:
+            THEME_NAME_MAPPING[name] = UiTheme(**theme)
+        except TypeError as error:
+            # Print error and exit immediately. At this point in startup logging
+            # may not be hooked up to stdout.
+            print(
+                f'ERROR: Failed to load user UI theme "{name}":\n\n'
+                f'  {error}\n\n'
+                'Please ensure all required fields are present. '
+                'For an example see:\n'
+                'https://pigweed.dev/pw_console/py/pw_console/docs/'
+                'user_guide.html#example-config'
+            )
+            sys.exit(1)
 
 
-@dataclass
-class MoonlightColors:
-    """Moonlight UI color theme."""
-
-    # pylint: disable=too-many-instance-attributes
-    display_name = 'Moonlight'
-
-    default_bg = '#212337'
-    default_fg = '#c8d3f5'
-    dim_bg = '#191a2a'
-    dim_fg = '#b4c2f0'
-    button_active_bg = '#444a73'
-    button_inactive_bg = '#2f334d'
-    active_bg = '#2f334d'
-    active_fg = '#c8d3f5'
-    inactive_bg = '#222436'
-    inactive_fg = '#a9b8e8'
-    line_highlight_bg = '#383e5c'
-    selected_line_bg = '#444a73'
-    dialog_bg = '#1e2030'
-
-    red_accent = '#d95468'
-    orange_accent = '#d98e48'
-    yellow_accent = '#ebbf83'
-    green_accent = '#8bd49c'
-    cyan_accent = '#70e1e8'
-    blue_accent = '#5ec4ff'
-    purple_accent = '#b62d65'
-    magenta_accent = '#e27e8d'
-
-
-@dataclass
-class Synthwave84Colors:
-    """Synthwave84 UI color theme."""
-
-    # pylint: disable=too-many-instance-attributes
-    display_name = 'Synthwave84'
-
-    default_bg = '#252334'
-    default_fg = '#ffffff'
-    dim_bg = '#2a2139'
-    dim_fg = '#ffffff'
-    button_active_bg = '#614d85'
-    button_inactive_bg = '#2f334d'
-    active_bg = '#2f334d'
-    active_fg = '#c8d3f5'
-    inactive_bg = '#222436'
-    inactive_fg = '#a9b8e8'
-    line_highlight_bg = '#383e5c'
-    selected_line_bg = '#444a73'
-    dialog_bg = '#1e2030'
-
-    red_accent = '#fe4450'
-    orange_accent = '#f97e72'
-    yellow_accent = '#fede5d'
-    green_accent = '#72f1b8'
-    cyan_accent = '#03edf9'
-    blue_accent = '#2ee2fa'
-    purple_accent = '#9d8bca'
-    magenta_accent = '#ff7edb'
-
-
-@dataclass
-class AnsiTerm:
-    """Color theme that uses the default terminal color codes."""
-
-    # pylint: disable=too-many-instance-attributes
-    display_name = 'ANSI Term'
-
-    default_bg = 'default'
-    default_fg = 'default'
-
-    dim_bg = 'default'
-    dim_fg = 'default'
-
-    button_active_bg = 'default underline'
-    button_inactive_bg = 'default'
-
-    active_bg = 'default'
-    active_fg = 'default'
-
-    inactive_bg = 'default'
-    inactive_fg = 'default'
-
-    line_highlight_bg = 'ansidarkgray white'
-    selected_line_bg = 'default reverse'
-    dialog_bg = 'default'
-
-    red_accent = 'ansired'
-    orange_accent = 'orange'
-    yellow_accent = 'ansiyellow'
-    green_accent = 'ansigreen'
-    cyan_accent = 'ansicyan'
-    blue_accent = 'ansiblue'
-    purple_accent = 'ansipurple'
-    magenta_accent = 'ansimagenta'
-
-
-THEME_NAME_MAPPING = {
-    'dark': DarkColors(),
-    'high-contrast-dark': HighContrastDarkColors(),
-    'nord': NordColors(),
-    'nord-light': NordLightColors(),
-    'synthwave84': Synthwave84Colors(),
-    'moonlight': MoonlightColors(),
-    'ansi': AnsiTerm(),
-}
-
-
-def get_theme_colors(theme_name=''):
-    theme = THEME_NAME_MAPPING.get(theme_name, DarkColors())
-    return theme
-
-
-def generate_styles(theme_name='dark'):
+def generate_styles(theme_name: str | None = None) -> Style:
     """Return prompt_toolkit styles for the given theme name."""
-    # Use DarkColors() if name not found.
-    theme = THEME_NAME_MAPPING.get(theme_name, DarkColors())
+    if not theme_name:
+        theme_name = DEFAULT_UI_THEME.display_name
+
+    theme = THEME_NAME_MAPPING.get(theme_name, DEFAULT_UI_THEME)
 
     pw_console_styles = {
         # Default text and background.
         'default': 'bg:{} {}'.format(theme.default_bg, theme.default_fg),
+        'default-fg': '{}'.format(theme.default_fg),
+        'default-bg': 'bg:{}'.format(theme.default_bg),
         # Dim inactive panes.
         'pane_inactive': 'bg:{} {}'.format(theme.dim_bg, theme.dim_fg),
         # Use default for active panes.
@@ -325,9 +338,9 @@ def generate_styles(theme_name='dark'):
         # 'scrollbar.start'
         # 'scrollbar.end'
         # Top menu bar styles
-        'menu-bar': 'bg:{} {}'.format(theme.inactive_bg, theme.inactive_fg),
+        'menu-bar': 'bg:{} {}'.format(theme.inactive_bg, theme.default_fg),
         'menu-bar.selected-item': 'bg:{} {}'.format(
-            theme.blue_accent, theme.inactive_bg
+            theme.blue_accent, theme.default_bg
         ),
         # Menu background
         'menu': 'bg:{} {}'.format(theme.dialog_bg, theme.dim_fg),

@@ -60,6 +60,7 @@ void GoogleTestHandlerAdapter::OnTestPartResult(
       {.suite_name = "", .test_name = "", .file_name = tpr.file_name()},
       {.expression = "",
        .evaluated_expression = tpr.summary(),
+       .file_name = tpr.file_name(),
        .line_number = tpr.line_number(),
        .success = tpr.passed() || tpr.skipped()});
 }

@@ -12,11 +12,6 @@
 // License for the specific language governing permissions and limitations under
 // the License.
 #pragma once
-/// @file pw_string/string_builder.h
-///
-/// @brief `pw::StringBuilder` facilitates creating formatted strings in a
-/// fixed-sized buffer or in a `pw::InlineString`. It is designed to give the
-/// flexibility of std::ostringstream, but with a small footprint.
 
 #include <algorithm>
 #include <cstdarg>
@@ -35,7 +30,11 @@
 
 namespace pw {
 
-/// @class StringBuilder
+/// @submodule{pw_string,builder}
+
+/// `pw::StringBuilder` facilitates creating formatted strings in a fixed-sized
+/// buffer or in a `pw::InlineString`. It is designed to give the flexibility of
+/// std::ostringstream, but with a small footprint.
 ///
 /// `pw::StringBuilder` instances are always null-terminated (unless they are
 /// constructed with an empty buffer) and never overflow. Status is tracked for
@@ -107,11 +106,10 @@ class StringBuilder {
 
   StringBuilder& operator=(const StringBuilder&) = delete;
 
-  /// @fn data
-  /// @fn c_str
-  ///
   /// Returns the contents of the string buffer. Always null-terminated.
   const char* data() const { return buffer_.data(); }
+
+  /// @copydoc data
   const char* c_str() const { return data(); }
 
   /// Returns a `std::string_view` of the contents of this `pw::StringBuilder`.
@@ -134,19 +132,11 @@ class StringBuilder {
   /// status remains non-OK until it is cleared with
   /// `pw::StringBuilder::clear()` or `pw::StringBuilder::clear_status()`.
   ///
-  /// @returns @rst
-  ///
-  /// .. pw-status-codes::
-  ///
-  ///    OK: No errors have occurred.
-  ///
-  ///    RESOURCE_EXHAUSTED: Output to the ``StringBuilder`` was truncated.
-  ///
-  ///    INVALID_ARGUMENT: ``printf``-style formatting failed.
-  ///
-  ///    OUT_OF_RANGE: An operation outside the buffer was attempted.
-  ///
-  /// @endrst
+  /// @returns
+  /// * @OK: No errors have occurred.
+  /// * @RESOURCE_EXHAUSTED: Output to the `StringBuilder` was truncated.
+  /// * @INVALID_ARGUMENT: `printf`-style formatting failed.
+  /// * @OUT_OF_RANGE: An operation outside the buffer was attempted.
   Status status() const { return static_cast<Status::Code>(status_); }
 
   /// Returns `status()` and `size()` as a `StatusWithSize`.
@@ -250,7 +240,6 @@ class StringBuilder {
 
   StringBuilder& operator<<(Status status) { return *this << status.str(); }
 
-  /// @fn pw::StringBuilder::Format
   /// Appends a `printf`-style string to the end of the `StringBuilder`. If the
   /// formatted string does not fit, the results are truncated and the status is
   /// set to `RESOURCE_EXHAUSTED`.
@@ -399,6 +388,8 @@ class StringBuffer : public StringBuilder {
   char buffer_[kSizeBytes];
 };
 
+/// @}
+
 namespace string_internal {
 
 // Internal code for determining the default size of StringBuffers created with
@@ -448,6 +439,8 @@ auto InitializeStringBuffer(const Args&... args) {
 
 }  // namespace string_internal
 
+/// @submodule{pw_string,builder}
+
 // Makes a StringBuffer with a string version of a series of values. This is
 // useful for creating and initializing a StringBuffer or for conveniently
 // getting a null-terminated string. For example:
@@ -476,5 +469,7 @@ auto MakeString(Args&&... args) {
                         : kBufferSize;
   return string_internal::InitializeStringBuffer<kSize>(args...);
 }
+
+/// @}
 
 }  // namespace pw

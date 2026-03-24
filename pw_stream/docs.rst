@@ -33,9 +33,9 @@ Example:
    }
 
 In this example, ``DumpSensorData()`` only cares that it has access to a
-:cpp:class:`Writer` that it can use to stream data to using ``Writer::Write()``.
-The :cpp:class:`Writer` itself can be backed by anything that can act as a data
-"sink."
+:cc:`Writer <pw::stream::Writer>` that it can use to stream data to using
+``Writer::Write()``.  The :cc:`Writer <pw::stream::Writer>` itself can be
+backed by anything that can act as a data "sink."
 
 ---------------------
 pw::stream Interfaces
@@ -47,9 +47,9 @@ There are three basic capabilities of a stream:
 * Seeking -- The position in the stream can be changed.
 
 ``pw_stream`` provides a family of stream classes with different capabilities.
-The most basic class, :cpp:class:`Stream` guarantees no functionality, while the
-most capable class, :cpp:class:`SeekableReaderWriter` supports reading, writing,
-and seeking.
+The most basic class, :cc:`Stream <pw::stream::Stream>` guarantees no
+functionality, while the most capable class, :cpp:class:`SeekableReaderWriter`
+supports reading, writing, and seeking.
 
 Usage overview
 ==============
@@ -83,116 +83,10 @@ Usage overview
      - ❌
      - ✅
 
-
-Interface documentation
-=======================
-Summary documentation for the ``pw_stream`` interfaces is below. See the API
-comments in `pw_stream/public/pw_stream/stream.h
-<https://cs.pigweed.dev/pigweed/+/main:pw_stream/public/pw_stream/stream.h>`_
-for full details.
-
-.. doxygenclass:: pw::stream::Stream
-   :members:
-   :private-members:
-
-Reader interfaces
------------------
-.. doxygenclass:: pw::stream::Reader
-   :members:
-
-.. doxygenclass:: pw::stream::SeekableReader
-   :members:
-
-.. doxygenclass:: pw::stream::RelativeSeekableReader
-   :members:
-
-.. doxygenclass:: pw::stream::NonSeekableReader
-   :members:
-
-Writer interfaces
------------------
-.. doxygenclass:: pw::stream::Writer
-   :members:
-
-.. doxygenclass:: pw::stream::SeekableWriter
-   :members:
-
-.. doxygenclass:: pw::stream::RelativeSeekableWriter
-   :members:
-
-.. doxygenclass:: pw::stream::NonSeekableWriter
-   :members:
-
-
-ReaderWriter interfaces
------------------------
-.. doxygenclass:: pw::stream::ReaderWriter
-   :members:
-
-.. doxygenclass:: pw::stream::SeekableReaderWriter
-   :members:
-
-.. doxygenclass:: pw::stream::RelativeSeekableReaderWriter
-   :members:
-
-.. doxygenclass:: pw::stream::NonSeekableReaderWriter
-   :members:
-
----------------
-Implementations
----------------
-``pw_stream`` includes a few stream implementations for general use.
-
-.. cpp:class:: MemoryWriter : public SeekableWriter
-
-  The ``MemoryWriter`` class implements the :cpp:class:`Writer` interface by
-  backing the data destination with an **externally-provided** memory buffer.
-  ``MemoryWriterBuffer`` extends ``MemoryWriter`` to internally provide a memory
-  buffer.
-
-  The ``MemoryWriter`` can be accessed like a standard C++ container. The
-  contents grow as data is written.
-
-.. cpp:class:: MemoryReader : public SeekableReader
-
-  The ``MemoryReader`` class implements the :cpp:class:`Reader` interface by
-  backing the data source with an **externally-provided** memory buffer.
-
-.. cpp:class:: NullStream : public SeekableReaderWriter
-
-  ``NullStream`` is a no-op stream implementation, similar to ``/dev/null``.
-  Writes are always dropped. Reads always return ``OUT_OF_RANGE``. Seeks have no
-  effect.
-
-.. cpp:class:: CountingNullStream : public SeekableReaderWriter
-
-  ``CountingNullStream`` is a no-op stream implementation, like
-  :cpp:class:`NullStream`, that counts the number of bytes written.
-
-  .. cpp:function:: size_t bytes_written() const
-
-    Returns the number of bytes provided to previous ``Write()`` calls.
-
-.. cpp:class:: StdFileWriter : public SeekableWriter
-
-  ``StdFileWriter`` wraps an ``std::ofstream`` with the :cpp:class:`Writer`
-  interface.
-
-.. cpp:class:: StdFileReader : public SeekableReader
-
-  ``StdFileReader`` wraps an ``std::ifstream`` with the :cpp:class:`Reader`
-  interface.
-
-.. cpp:class:: SocketStream : public NonSeekableReaderWriter
-
-  ``SocketStream`` wraps posix-style TCP sockets with the :cpp:class:`Reader`
-  and :cpp:class:`Writer` interfaces. It can be used to connect to a TCP server,
-  or to communicate with a client via the ``ServerSocket`` class.
-
-.. cpp:class:: ServerSocket
-
-  ``ServerSocket`` wraps a posix server socket, and produces a
-  :cpp:class:`SocketStream` for each accepted client connection.
+-------------
+API reference
+-------------
+Moved: :cc:`pw_stream`
 
 ------------------
 Why use pw_stream?
@@ -202,18 +96,19 @@ Standard API
 ============
 ``pw_stream`` provides a standard way for classes to express that they have the
 ability to write data. Writing to one sink versus another sink is a matter of
-just passing a reference to the appropriate :cpp:class:`Writer`.
+just passing a reference to the appropriate :cc:`Writer
+<pw::stream::Writer>`.
 
-As an example, imagine dumping sensor data. If written against a random HAL
-or one-off class, there's porting work required to write to a different sink
+As an example, imagine dumping sensor data. If written against a random HAL or
+one-off class, there's porting work required to write to a different sink
 (imagine writing over UART vs dumping to flash memory). Building a "dumping"
-implementation against the :cpp:class:`Writer` interface prevents a dependency
-on a bespoke API that would require porting work.
+implementation against the :cc:`Writer <pw::stream::Writer>` interface
+prevents a dependency on a bespoke API that would require porting work.
 
-Similarly, after building a :cpp:class:`Writer` implementation for a Sink that
-data could be dumped to, that same :cpp:class:`Writer` can be reused for other
-contexts that already write data to the :cpp:class:`pw::stream::Writer`
-interface.
+Similarly, after building a :cc:`Writer <pw::stream::Writer>`
+implementation for a Sink that data could be dumped to, that same
+:cc:`Writer <pw::stream::Writer>` can be reused for other contexts that
+already write data to the :cpp:class:`pw::stream::Writer` interface.
 
 Before:
 
@@ -225,7 +120,7 @@ Before:
      ImuSample imu_sample;
      imu.GetSample(&info);
      size_t bytes_written = imu_sample.AsCsv(temp, sizeof(temp));
-     uart.Transmit(temp, bytes_written, /*timeout_ms=*/ 200);
+     uart.Transmit(temp, bytes_written, /*timeout_ms=*/200);
    }
 
 After:
@@ -249,8 +144,8 @@ allocated, even if the data only exists in that buffer for a very short period
 of time before it's written somewhere else.
 
 In situations where data read from somewhere will immediately be written
-somewhere else, a :cpp:class:`Writer` interface can cut out the middleman
-buffer.
+somewhere else, a :cc:`Writer <pw::stream::Writer>` interface can cut out
+the middleman buffer.
 
 Before:
 
@@ -262,7 +157,7 @@ Before:
      ImuSample imu_sample;
      imu.GetSample(&info);
      size_t bytes_written = imu_sample.AsCsv(temp, sizeof(temp));
-     uart.Transmit(temp, bytes_written, /*timeout_ms=*/ 200);
+     uart.Transmit(temp, bytes_written, /*timeout_ms=*/200);
    }
 
 After:
@@ -285,15 +180,17 @@ duplicated throughout a codebase, there's more opportunities for bound-checking
 bugs to sneak in. ``Writers`` manage this logic internally rather than pushing
 the bounds checking to the code that is moving or writing the data.
 
-Similarly, since only the :cpp:class:`Writer` has access to any underlying
-buffers, it's harder for functions that share a :cpp:class:`Writer` to
-accidentally clobber data written by others using the same buffer.
+Similarly, since only the :cc:`Writer <pw::stream::Writer>` has access to
+any underlying buffers, it's harder for functions that share a
+:cc:`Writer <pw::stream::Writer>` to accidentally clobber data written by
+others using the same buffer.
 
 Before:
 
 .. code-block:: cpp
 
-   Status BuildPacket(Id dest, span<const std::byte> payload,
+   Status BuildPacket(Id dest,
+                      span<const std::byte> payload,
                       span<std::byte> dest) {
      Header header;
      if (dest.size_bytes() + payload.size_bytes() < sizeof(Header)) {
@@ -332,20 +229,21 @@ Design notes
 Sync & Flush
 ============
 The :cpp:class:`pw::stream::Stream` API does not include ``Sync()`` or
-``Flush()`` functions. There no mechanism in the :cpp:class:`Stream` API to
-synchronize a :cpp:class:`Reader`'s potentially buffered input with its
-underlying data source. This must be handled by the implementation if required.
-Similarly, the :cpp:class:`Writer` implementation is responsible for flushing
-any buffered data to the sink.
+``Flush()`` functions. There no mechanism in the :cc:`Stream
+<pw::stream::Stream>` API to synchronize a :cpp:class:`Reader`'s potentially
+buffered input with its underlying data source. This must be handled by the
+implementation if required.  Similarly, the :cc:`Writer
+<pw::stream::Writer>` implementation is responsible for flushing any buffered
+data to the sink.
 
-``Flush()`` and ``Sync()`` were excluded from :cpp:class:`Stream` for a few
-reasons:
+``Flush()`` and ``Sync()`` were excluded from :cc:`Stream
+<pw::stream::Stream>` for a few reasons:
 
 * The semantics of when to call ``Flush()``/``Sync()`` on the stream are
   unclear. The presence of these methods complicates using a :cpp:class:`Reader`
-  or :cpp:class:`Writer`.
+  or :cc:`Writer <pw::stream::Writer>`.
 * Adding one or two additional virtual calls increases the size of all
-  :cpp:class:`Stream` vtables.
+  :cc:`Stream <pw::stream::Stream>` vtables.
 
 .. _module-pw_stream-class-hierarchy:
 
@@ -385,8 +283,9 @@ We chose to use a single base class for a few reasons:
   there are distinct interfaces for each capability. ``Reader``, ``Writer``,
   and ``Seeker`` interfaces would not be sufficient. To match the flexibility
   of the current structure, there would have to be separate optional versions
-  of each interface, and classes for various combinations. :cpp:class:`Stream`
-  would be an "OptionalReaderOptionalWriterOptionalSeeker" in this model.
+  of each interface, and classes for various combinations. :cc:`Stream
+  <pw::stream::Stream>` would be an "OptionalReaderOptionalWriterOptionalSeeker"
+  in this model.
 * Code reuse is maximized. For example, a single
   :cpp:func:`Stream::ConservativeLimit` implementation supports many stream
   implementations.
@@ -407,13 +306,14 @@ interface may not justify the performance cost.
 
 Asynchronous APIs
 =================
-At present, ``pw_stream`` is synchronous. All :cpp:class:`Stream` API calls are
-expected to block until the operation is complete. This might be undesirable
-for slow operations, like writing to NOR flash.
+At present, ``pw_stream`` is synchronous. All :cc:`Stream
+<pw::stream::Stream>` API calls are expected to block until the operation is
+complete. This might be undesirable for slow operations, like writing to NOR
+flash.
 
 Pigweed has not yet established a pattern for asynchronous C++ APIs. The
-:cpp:class:`Stream` class may be extended in the future to add asynchronous
-capabilities, or a separate ``AsyncStream`` could be created.
+:cc:`Stream <pw::stream::Stream>` class may be extended in the future to
+add asynchronous capabilities, or a separate ``AsyncStream`` could be created.
 
 .. cpp:namespace-pop::
 

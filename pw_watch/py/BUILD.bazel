@@ -12,14 +12,13 @@
 # License for the specific language governing permissions and limitations under
 # the License.
 
-load("@rules_python//python:defs.bzl", "py_library")
-load("//pw_build:python.bzl", "pw_py_binary", "pw_py_test")
+load("//pw_build:python.bzl", "pw_py_binary", "pw_py_library", "pw_py_test")
 
 package(default_visibility = ["//visibility:public"])
 
 licenses(["notice"])
 
-py_library(
+pw_py_library(
     name = "pw_watch",
     srcs = [
         "pw_watch/__init__.py",
@@ -30,8 +29,9 @@ py_library(
     ],
     imports = ["."],
     deps = [
+        "//pw_build/py:pw_project_builder",
         "//pw_cli/py:pw_cli",
-        "@python_packages//watchdog",
+        "@pigweed_python_packages//watchdog",
     ],
 )
 
@@ -46,7 +46,8 @@ pw_py_binary(
         "//pw_build/py:pw_project_builder",
         "//pw_config_loader/py:pw_config_loader",
         "//pw_console/py:pw_console",
-        "@python_packages//prompt_toolkit",
+        "@pigweed_python_packages//prompt_toolkit",
+        "@pigweed_python_packages//watchdog",
     ],
 )
 
@@ -60,13 +61,19 @@ pw_py_binary(
         "--pw-watch-commands",
     ],
     main = "pw_watch/run.py",
-    deps = [":pw_watch"],
+    deps = [
+        ":pw_watch",
+        "@pigweed_python_packages//watchdog",
+    ],
 )
 
 pw_py_binary(
     name = "run",
     srcs = ["pw_watch/run.py"],
-    deps = [":pw_watch"],
+    deps = [
+        ":pw_watch",
+        "@pigweed_python_packages//watchdog",
+    ],
 )
 
 pw_py_test(

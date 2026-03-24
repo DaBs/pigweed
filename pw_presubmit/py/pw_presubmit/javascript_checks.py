@@ -33,12 +33,23 @@ def eslint(ctx: PresubmitContext):
     ctx.paths = presubmit_context.apply_exclusions(ctx)
 
     # Check if npm deps are installed.
-    npm_list = log_run(['npm', 'list'])
+    npm_list = log_run(['npm', 'list'], cwd='pw_web')
     if npm_list.returncode != 0:
-        npm_install = log_run(['npm', 'install'])
+        npm_install = log_run(['npm', 'install'], cwd='pw_web')
         if npm_install.returncode != 0:
             raise PresubmitFailure('npm install failed.')
 
-    result = log_run(['npm', 'exec', 'eslint', *ctx.paths])
+    result = log_run(
+        [
+            'npm',
+            'exec',
+            'eslint',
+            '--',
+            '--config',
+            '.eslintrc.cjs',
+            *ctx.paths,
+        ],
+        cwd='pw_web',
+    )
     if result.returncode != 0:
         raise PresubmitFailure('eslint identifed issues.')

@@ -19,6 +19,7 @@ from tempfile import TemporaryDirectory
 import unittest
 
 from format_testing_utils import CapturingToolRunner
+from pw_build.runfiles_manager import RunfilesManager
 from pw_presubmit.format.python import BlackFormatter
 
 
@@ -34,10 +35,24 @@ class TestBlackFormatter(unittest.TestCase):
 
     maxDiff = None
 
+    def setUp(self):
+        self.runfiles = RunfilesManager()
+        self.runfiles.add_bazel_tool(
+            'black', 'pw_presubmit.py.black_runfiles', exclusive=True
+        )
+        self.runfiles.add_bootstrapped_tool(
+            'black', 'black', from_shell_path=True
+        )
+        self.tool_runner = CapturingToolRunner(
+            {'black': self.runfiles['black']}
+        )
+
+    def _black_path(self) -> str:
+        return str(self.runfiles['black'])
+
     def test_check_file(self):
-        tool_runner = CapturingToolRunner()
         formatter = BlackFormatter(_BLACK_CONFIG_PATH)
-        formatter.run_tool = tool_runner
+        formatter.run_tool = self.tool_runner
 
         result = formatter.format_file_in_memory(
             _TEST_SRC_FILE, _TEST_SRC_FILE.read_bytes()
@@ -49,10 +64,10 @@ class TestBlackFormatter(unittest.TestCase):
         )
 
         self.assertEqual(
-            tool_runner.command_history.pop(0),
+            self.tool_runner.command_history.pop(0),
             ' '.join(
                 (
-                    'black',
+                    self._black_path(),
                     '--config',
                     str(_BLACK_CONFIG_PATH),
                     '-q',
@@ -62,9 +77,8 @@ class TestBlackFormatter(unittest.TestCase):
         )
 
     def test_check_file_error(self):
-        tool_runner = CapturingToolRunner()
         formatter = BlackFormatter(_BLACK_CONFIG_PATH)
-        formatter.run_tool = tool_runner
+        formatter.run_tool = self.tool_runner
 
         result = formatter.format_file_in_memory(
             _TEST_MALFORMED, _TEST_MALFORMED.read_bytes()
@@ -74,10 +88,10 @@ class TestBlackFormatter(unittest.TestCase):
         self.assertTrue(result.error_message.startswith('error: cannot format'))
 
         self.assertEqual(
-            tool_runner.command_history.pop(0),
+            self.tool_runner.command_history.pop(0),
             ' '.join(
                 (
-                    'black',
+                    self._black_path(),
                     '--config',
                     str(_BLACK_CONFIG_PATH),
                     '-q',
@@ -89,9 +103,8 @@ class TestBlackFormatter(unittest.TestCase):
     def test_fix_file(self):
         """Tests that formatting is properly applied to files."""
 
-        tool_runner = CapturingToolRunner()
         formatter = BlackFormatter(_BLACK_CONFIG_PATH)
-        formatter.run_tool = tool_runner
+        formatter.run_tool = self.tool_runner
 
         with TemporaryDirectory() as temp_dir:
             file_to_fix = Path(temp_dir) / _TEST_SRC_FILE.name
@@ -106,10 +119,10 @@ class TestBlackFormatter(unittest.TestCase):
             # both files together, and then the fallback logic that formats
             # them individually to isolate errors.
             self.assertEqual(
-                tool_runner.command_history.pop(0),
+                self.tool_runner.command_history.pop(0),
                 ' '.join(
                     (
-                        'black',
+                        self._black_path(),
                         '--config',
                         str(_BLACK_CONFIG_PATH),
                         '-q',
@@ -120,10 +133,10 @@ class TestBlackFormatter(unittest.TestCase):
             )
 
             self.assertEqual(
-                tool_runner.command_history.pop(0),
+                self.tool_runner.command_history.pop(0),
                 ' '.join(
                     (
-                        'black',
+                        self._black_path(),
                         '--config',
                         str(_BLACK_CONFIG_PATH),
                         '-q',
@@ -133,10 +146,10 @@ class TestBlackFormatter(unittest.TestCase):
             )
 
             self.assertEqual(
-                tool_runner.command_history.pop(0),
+                self.tool_runner.command_history.pop(0),
                 ' '.join(
                     (
-                        'black',
+                        self._black_path(),
                         '--config',
                         str(_BLACK_CONFIG_PATH),
                         '-q',

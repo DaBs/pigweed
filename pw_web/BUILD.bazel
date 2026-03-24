@@ -12,7 +12,9 @@
 # License for the specific language governing permissions and limitations under
 # the License.
 
-load("@aspect_rules_js//js:defs.bzl", "js_library")
+load("@aspect_bazel_lib//lib:directory_path.bzl", "directory_path")
+load("@aspect_rules_js//js:defs.bzl", "js_binary", "js_library", "js_run_binary")
+load("@npm//:defs.bzl", "npm_link_all_packages")
 load("@rules_python//sphinxdocs:sphinx_docs_library.bzl", "sphinx_docs_library")
 load("//pw_build:compatibility.bzl", "incompatible_with_mcu")
 
@@ -32,7 +34,7 @@ sphinx_docs_library(
 
 js_library(
     name = "js_files",
-    srcs = [
+    srcs = glob(["ts/**/*.ts"]) + [
         "log-viewer/src/assets/material_symbols_rounded_subset.woff2",
         "log-viewer/src/components/log-list/log-list.styles.ts",
         "log-viewer/src/components/log-list/log-list.ts",
@@ -82,4 +84,120 @@ js_library(
         "log-viewer/src/utils/strings.ts",
         "log-viewer/src/utils/throttle.ts",
     ],
+)
+
+npm_link_all_packages(name = "node_modules")
+
+directory_path(
+    name = "rollup_entry_point",
+    directory = ":node_modules/rollup/dir",
+    path = "dist/bin/rollup",
+    target_compatible_with = incompatible_with_mcu(),
+)
+
+js_binary(
+    name = "rollup_bin",
+    entry_point = ":rollup_entry_point",
+    target_compatible_with = incompatible_with_mcu(),
+)
+
+directory_path(
+    name = "prettier_entry_point",
+    directory = ":node_modules/prettier/dir",
+    path = "bin/prettier.cjs",
+    target_compatible_with = incompatible_with_mcu(),
+)
+
+js_binary(
+    name = "prettier",
+    entry_point = ":prettier_entry_point",
+    env = {
+        "BAZEL_BINDIR": ".",
+    },
+    target_compatible_with = incompatible_with_mcu(),
+)
+
+js_run_binary(
+    name = "build_protos_builder",
+    srcs = [
+        "package.json",
+        "rollup-protos.config.js",
+        ":node_modules",
+        "//:tsconfig",
+        "//pw_hdlc/ts:js_files",
+        "//pw_protobuf_compiler/ts:js_files",
+        "//pw_status/ts:js_files",
+        "//pw_tokenizer/ts:js_files",
+    ],
+    outs = ["dist/bin/build_default_protos.js"],
+    args = [
+        "-c",
+        "rollup-protos.config.js",
+    ],
+    chdir = package_name(),
+    target_compatible_with = incompatible_with_mcu(),
+    tool = ":rollup_bin",
+)
+
+js_binary(
+    name = "build_protos_binary",
+    entry_point = ":build_protos_builder",
+    target_compatible_with = incompatible_with_mcu(),
+)
+
+js_run_binary(
+    name = "build_protos",
+    srcs = [
+        "package.json",
+        ":node_modules",
+        "//pw_log:js_protos",
+        "//pw_protobuf:js_protos",
+        "//pw_protobuf_compiler/ts:js_files",
+        "//pw_rpc/ts:js_files",
+        "//pw_tokenizer/ts:js_files",
+        "//pw_transfer/ts:js_files",
+    ],
+    chdir = package_name(),
+    out_dirs = ["dist/protos"],
+    target_compatible_with = incompatible_with_mcu(),
+    tool = ":build_protos_binary",
+)
+
+js_run_binary(
+    name = "pw_web_bundle",
+    srcs = [
+        "package.json",
+        "rollup.config.js",
+        ":build_protos",
+        ":node_modules",
+        "//:tsconfig",
+        "//pw_hdlc/ts:js_files",
+        "//pw_protobuf_compiler/ts:js_files",
+        "//pw_rpc/ts:js_files",
+        "//pw_status/ts:js_files",
+        "//pw_tokenizer/ts:js_files",
+        "//pw_transfer/ts:js_files",
+        "//pw_web:js_files",
+    ],
+    outs = [
+        "dist/index.mjs",
+        "dist/index.mjs.map",
+        "dist/index.umd.js",
+        "dist/index.umd.js.map",
+        "dist/logging.mjs",
+        "dist/logging.umd.js",
+        "dist/logging.umd.js.map",
+        "dist/proto_collection.umd.js",
+        "dist/proto_collection.umd.js.map",
+        "dist/pw_console.mjs",
+        "dist/pw_console.umd.js",
+        "dist/pw_console.umd.js.map",
+    ],
+    args = [
+        "-c",
+        "rollup.config.js",
+    ],
+    chdir = package_name(),
+    target_compatible_with = incompatible_with_mcu(),
+    tool = ":rollup_bin",
 )

@@ -75,6 +75,21 @@ class UartNonBlockingMock : public UartNonBlocking {
     write->Complete(status_size);
   }
 
+  void SetNextReadStatus(Status status) PW_LOCKS_EXCLUDED(mutex_) {
+    std::lock_guard lock(mutex_);
+    next_read_status_ = status;
+  }
+
+  void SetNextWriteStatus(Status status) PW_LOCKS_EXCLUDED(mutex_) {
+    std::lock_guard lock(mutex_);
+    next_write_status_ = status;
+  }
+
+  void SetNextFlushStatus(Status status) PW_LOCKS_EXCLUDED(mutex_) {
+    std::lock_guard lock(mutex_);
+    next_flush_status_ = status;
+  }
+
   void WaitAndCompleteFlush(Status status) {
     // Wait for a flush to start.
     ASSERT_WAIT(flush_started_);
@@ -88,6 +103,16 @@ class UartNonBlockingMock : public UartNonBlocking {
  private:
   sync::Mutex mutex_;
   bool enabled_ = false;
+
+  // Stores a status to return for the next call to DoRead().
+  // Becomes std::nullopt after being returned once.
+  std::optional<Status> next_read_status_ PW_GUARDED_BY(mutex_);
+  // Stores a status to return for the next call to DoWrite().
+  // Becomes std::nullopt after being returned once.
+  std::optional<Status> next_write_status_ PW_GUARDED_BY(mutex_);
+  // Stores a status to return for the next call to DoFlushOutput().
+  // Becomes std::nullopt after being returned once.
+  std::optional<Status> next_flush_status_ PW_GUARDED_BY(mutex_);
 
   //
   // UartNonBlocking impl.
@@ -126,6 +151,13 @@ class UartNonBlockingMock : public UartNonBlocking {
       override PW_LOCKS_EXCLUDED(mutex_) {
     {
       std::lock_guard lock(mutex_);
+
+      // If a next_read_status_ is set, return it immediately and clear.
+      if (next_read_status_) {
+        Status status = *next_read_status_;
+        next_read_status_ = std::nullopt;
+        return status;
+      }
 
       if (current_read_) {
         return Status::Unavailable();
@@ -173,6 +205,13 @@ class UartNonBlockingMock : public UartNonBlocking {
     {
       std::lock_guard lock(mutex_);
 
+      // If a next_write_status_ is set, return it immediately and clear.
+      if (next_write_status_) {
+        Status status = *next_write_status_;
+        next_write_status_ = std::nullopt;
+        return status;
+      }
+
       if (current_write_) {
         return Status::Unavailable();
       }
@@ -215,6 +254,13 @@ class UartNonBlockingMock : public UartNonBlocking {
       PW_LOCKS_EXCLUDED(mutex_) {
     {
       std::lock_guard lock(mutex_);
+
+      // If a next_flush_status_ is set, return it immediately and clear.
+      if (next_flush_status_) {
+        Status status = *next_flush_status_;
+        next_flush_status_ = std::nullopt;
+        return status;
+      }
 
       if (current_flush_) {
         return Status::Unavailable();
@@ -409,6 +455,109 @@ TEST_F(BlockingAdapterTest, FlushOutputWorks) {
   underlying.WaitAndCompleteFlush(OkStatus());
 
   // Wait for the flush to complete.
+  ASSERT_WAIT(blocking_action_complete);
+  PW_TEST_EXPECT_OK(write_result);
+}
+
+TEST_F(BlockingAdapterTest, ReadReturnsErrorAndCleansUpState) {
+  // Set the mock to return an error immediately for the next read.
+  underlying.SetNextReadStatus(Status::DataLoss());
+
+  // Call blocking ReadExactly on the work queue.
+  work_queue.CheckPushWork([this]() {
+    PW_LOG_DEBUG("Calling adapter.ReadExactly()...");
+    read_result = adapter.ReadExactly(read_buffer);
+    blocking_action_complete.release();
+  });
+
+  // Wait for the read to complete.
+  ASSERT_WAIT(blocking_action_complete);
+
+  // Expect the error status.
+  EXPECT_EQ(read_result.status(), Status::DataLoss());
+
+  // Verify that the adapter state is cleaned up by performing a successful
+  // read.
+  work_queue.CheckPushWork([this]() {
+    PW_LOG_DEBUG("Calling adapter.ReadExactly() again...");
+    read_result = adapter.ReadExactly(read_buffer);
+    blocking_action_complete.release();
+  });
+
+  constexpr auto kRxData = bytes::Array<0xAA, 0xBB>();
+  static_assert(kRxData.size() <= kReadBufferSize);
+  underlying.WaitAndCompleteRead(OkStatus(), kRxData);
+
+  ASSERT_WAIT(blocking_action_complete);
+  PW_TEST_EXPECT_OK(read_result.status());
+  EXPECT_EQ(read_result.size(), kRxData.size());
+  EXPECT_TRUE(std::equal(kRxData.begin(), kRxData.end(), read_buffer.begin()));
+}
+
+TEST_F(BlockingAdapterTest, WriteReturnsErrorAndCleansUpState) {
+  static constexpr auto kTxData = bytes::Array<0x11, 0x22>();
+
+  // Set the mock to return an error immediately for the next write.
+  underlying.SetNextWriteStatus(Status::ResourceExhausted());
+
+  // Call blocking Write on the work queue.
+  work_queue.CheckPushWork([this]() {
+    PW_LOG_DEBUG("Calling adapter.Write()...");
+    write_result = adapter.Write(kTxData);
+    blocking_action_complete.release();
+  });
+
+  // Wait for the write to complete.
+  ASSERT_WAIT(blocking_action_complete);
+
+  // Expect the error status.
+  EXPECT_EQ(write_result, Status::ResourceExhausted());
+
+  // Verify that the adapter state is cleaned up by performing a successful
+  // write.
+  work_queue.CheckPushWork([this]() {
+    PW_LOG_DEBUG("Calling adapter.Write() again...");
+    write_result = adapter.Write(kTxData);
+    blocking_action_complete.release();
+  });
+
+  ConstByteSpan tx_buffer = underlying.WaitForWrite();
+  EXPECT_EQ(tx_buffer.size(), kTxData.size());
+  EXPECT_TRUE(std::equal(tx_buffer.begin(), tx_buffer.end(), kTxData.begin()));
+
+  underlying.CompleteWrite(StatusWithSize(tx_buffer.size()));
+
+  ASSERT_WAIT(blocking_action_complete);
+  PW_TEST_EXPECT_OK(write_result);
+}
+
+TEST_F(BlockingAdapterTest, FlushOutputReturnsErrorAndCleansUpState) {
+  // Set the mock to return an error immediately for the next flush.
+  underlying.SetNextFlushStatus(Status::FailedPrecondition());
+
+  // Call blocking FlushOutput on the work queue.
+  work_queue.CheckPushWork([this]() {
+    PW_LOG_DEBUG("Calling adapter.FlushOutput()...");
+    write_result = adapter.FlushOutput();
+    blocking_action_complete.release();
+  });
+
+  // Wait for the flush to complete.
+  ASSERT_WAIT(blocking_action_complete);
+
+  // Expect the error status.
+  EXPECT_EQ(write_result, Status::FailedPrecondition());
+
+  // Verify that the adapter state is cleaned up by performing a successful
+  // flush.
+  work_queue.CheckPushWork([this]() {
+    PW_LOG_DEBUG("Calling adapter.FlushOutput() again...");
+    write_result = adapter.FlushOutput();
+    blocking_action_complete.release();
+  });
+
+  underlying.WaitAndCompleteFlush(OkStatus());
+
   ASSERT_WAIT(blocking_action_complete);
   PW_TEST_EXPECT_OK(write_result);
 }

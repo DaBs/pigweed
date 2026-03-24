@@ -16,18 +16,18 @@ import("//build_overrides/pigweed.gni")
 
 import("$dir_pigweed/targets/common/stl.gni")
 import("$dir_pw_async/backend.gni")
-import("$dir_pw_async2/backend.gni")
+
 import("$dir_pw_perf_test/perf_test.gni")
 import("$dir_pw_protobuf_compiler/proto.gni")
 import("$dir_pw_rpc/system_server/backend.gni")
 import("$dir_pw_sys_io/backend.gni")
 import("$dir_pw_system/backend.gni")
-import("$dir_pw_third_party/nanopb/nanopb.gni")
 import("$dir_pw_toolchain/host_clang/toolchains.gni")
 import("$dir_pw_toolchain/host_gcc/toolchains.gni")
 import("$dir_pw_toolchain/traits.gni")
 import("$dir_pw_trace/backend.gni")
 import("$dir_pw_trace_tokenized/config.gni")
+import("$pw_external_nanopb/nanopb.gni")
 
 _host_common = {
   forward_variables_from(pw_targets_STL_BACKEND_GROUP, "*")
@@ -47,7 +47,8 @@ _host_common = {
   pw_async_FAKE_DISPATCHER_BACKEND = "$dir_pw_async_basic:fake_dispatcher"
 
   # Configure backend for async facade.
-  pw_async2_DISPATCHER_BACKEND = "$dir_pw_async2_basic:dispatcher_backend"
+  pw_async2_DISPATCHER_FOR_TEST_BACKEND =
+      "$dir_pw_async2:basic_dispatcher_for_test"
 
   # Configure backend for logging facade.
   pw_log_BACKEND = "$dir_pw_log_basic"
@@ -85,7 +86,6 @@ _host_common = {
 _linux_config = {
   pw_bloat_BLOATY_CONFIG = get_path_info("linux.bloaty", "abspath")
   pw_unit_test_AUTOMATIC_RUNNER = get_path_info("run_test", "abspath")
-  pw_async2_DISPATCHER_BACKEND = "$dir_pw_async2_epoll:dispatcher_backend"
   pw_rust_ENABLE_EXPERIMENTAL_BUILD = true
 }
 
@@ -431,19 +431,6 @@ pw_internal_host_toolchains = [
 
       # Set the C++ standard to C++20 instead of the default.
       pw_toolchain_CXX_STANDARD = pw_toolchain_STANDARD.CXX20
-    }
-  },
-  {
-    name = "pw_strict_host_clang_size_optimized_minimal_cpp_stdlib"
-    _toolchain_base = pw_toolchain_host_clang.size_optimized
-    forward_variables_from(_toolchain_base, "*", _excluded_members)
-    defaults = {
-      forward_variables_from(_toolchain_base.defaults, "*")
-      forward_variables_from(_host_common, "*")
-      forward_variables_from(_pigweed_internal, "*")
-      forward_variables_from(_os_specific_config, "*")
-      default_configs += _internal_clang_default_configs
-      default_public_deps = [ "$dir_pw_minimal_cpp_stdlib" ]
     }
   },
   {

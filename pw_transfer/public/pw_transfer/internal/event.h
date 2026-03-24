@@ -36,6 +36,12 @@ enum class TransferStream {
   kServerWrite,
 };
 
+enum class SetStreamBehavior {
+  kNewClient,    // Aborts all existing transfers on the stream.
+  kReopen,       // Restarts initiating transfers and aborts others.
+  kCloseStream,  // Clears the existing stream without creating a new one.
+};
+
 enum class IdentifierType {
   Session,
   Resource,
@@ -139,6 +145,7 @@ struct SendStatusChunkEvent {
 
 struct SetStreamEvent {
   TransferStream stream;
+  SetStreamBehavior behavior;
 };
 
 struct UpdateTransferEvent {

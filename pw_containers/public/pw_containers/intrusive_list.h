@@ -30,7 +30,13 @@
 #include "pw_containers/intrusive_forward_list.h"
 
 namespace pw {
+
+/// @module{pw_containers}
+
 namespace containers::future {
+
+/// @addtogroup pw_containers_lists
+/// @{
 
 /// A doubly-linked intrusive list.
 ///
@@ -245,17 +251,17 @@ class IntrusiveList {
     return iterator(list_.erase_after((--first).item_, last.item_));
   }
 
-  /// Inserts an element at the end of the list.
-  void push_back(T& item) { list_.insert_after(list_.before_end(), item); }
+  /// @copydoc internal::GenericIntrusiveList<ItemBase>::push_back
+  void push_back(T& item) { list_.push_back(item); }
 
-  /// Removes the last item in the list. The list must not be empty.
-  void pop_back() { remove(back()); }
+  /// @copydoc internal::GenericIntrusiveList<ItemBase>::pop_back
+  void pop_back() { list_.pop_back(); }
 
-  /// Inserts an element at the beginning of the list.
-  void push_front(T& item) { list_.insert_after(list_.before_begin(), item); }
+  /// @copydoc internal::GenericIntrusiveList<ItemBase>::push_front
+  void push_front(T& item) { list_.push_front(item); }
 
-  /// Removes the first item in the list. The list must not be empty.
-  void pop_front() { remove(front()); }
+  /// @copydoc internal::GenericIntrusiveList<ItemBase>::pop_front
+  void pop_front() { list_.pop_front(); }
 
   /// Exchanges this list's items with the `other` list's items.
   ///

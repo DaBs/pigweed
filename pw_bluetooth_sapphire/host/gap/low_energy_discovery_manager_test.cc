@@ -24,10 +24,11 @@
 #include "pw_bluetooth_sapphire/internal/host/common/macros.h"
 #include "pw_bluetooth_sapphire/internal/host/gap/peer.h"
 #include "pw_bluetooth_sapphire/internal/host/gap/peer_cache.h"
+#include "pw_bluetooth_sapphire/internal/host/hci/advertising_packet_filter.h"
 #include "pw_bluetooth_sapphire/internal/host/hci/discovery_filter.h"
+#include "pw_bluetooth_sapphire/internal/host/hci/extended_low_energy_scanner.h"
 #include "pw_bluetooth_sapphire/internal/host/hci/fake_local_address_delegate.h"
 #include "pw_bluetooth_sapphire/internal/host/hci/legacy_low_energy_scanner.h"
-#include "pw_bluetooth_sapphire/internal/host/hci/low_energy_scanner.h"
 #include "pw_bluetooth_sapphire/internal/host/testing/controller_test.h"
 #include "pw_bluetooth_sapphire/internal/host/testing/fake_controller.h"
 #include "pw_bluetooth_sapphire/internal/host/testing/fake_peer.h"
@@ -70,39 +71,50 @@ class LowEnergyDiscoveryManagerTest : public TestingBase {
     scan_enabled_ = false;
 
     FakeController::Settings settings;
-    settings.ApplyLegacyLEConfig();
+    settings.ApplyExtendedLEConfig();
     test_device()->set_settings(settings);
-
-    hci::LowEnergyScanner::PacketFilterConfig packet_filter_config(false, 0);
-
-    // TODO(armansito): Now that the hci::LowEnergyScanner is injected into
-    // |discovery_manager_| rather than constructed by it, a fake implementation
-    // could be injected directly. Consider providing fake behavior here in this
-    // harness rather than using a FakeController.
-    scanner_ =
-        std::make_unique<hci::LegacyLowEnergyScanner>(&fake_address_delegate_,
-                                                      packet_filter_config,
-                                                      transport()->GetWeakPtr(),
-                                                      dispatcher());
-    discovery_manager_ = std::make_unique<LowEnergyDiscoveryManager>(
-        scanner_.get(), &peer_cache_, packet_filter_config, dispatcher());
-    discovery_manager_->AttachInspect(inspector_.GetRoot(), kInspectNodeName);
 
     test_device()->set_scan_state_callback([this](auto&& PH1) {
       OnScanStateChanged(std::forward<decltype(PH1)>(PH1));
     });
+
+    SetupDiscoveryManager();
   }
 
   void TearDown() override {
-    if (discovery_manager_) {
-      discovery_manager_ = nullptr;
-    }
+    discovery_manager_ = nullptr;
     scanner_ = nullptr;
     test_device()->Stop();
     TestingBase::TearDown();
   }
 
  protected:
+  void SetupDiscoveryManager(
+      bool extended = false,
+      hci::AdvertisingPacketFilter::Config packet_filter_config = {
+          false,
+          0,
+          hci::AdvertisingPacketFilter::Config::DeliveryMode::kImmediate}) {
+    discovery_manager_ = nullptr;
+    if (extended) {
+      scanner_ = std::make_unique<hci::ExtendedLowEnergyScanner>(
+          &fake_address_delegate_,
+          packet_filter_config,
+          transport()->GetWeakPtr(),
+          dispatcher());
+    } else {
+      scanner_ = std::make_unique<hci::LegacyLowEnergyScanner>(
+          &fake_address_delegate_,
+          packet_filter_config,
+          transport()->GetWeakPtr(),
+          dispatcher());
+    }
+
+    discovery_manager_ = std::make_unique<LowEnergyDiscoveryManager>(
+        scanner_.get(), &peer_cache_, packet_filter_config, dispatcher());
+    discovery_manager_->AttachInspect(inspector_.GetRoot(), kInspectNodeName);
+  }
+
   LowEnergyDiscoveryManager* discovery_manager() const {
     return discovery_manager_.get();
   }
@@ -298,7 +310,7 @@ class LowEnergyDiscoveryManagerTest : public TestingBase {
  private:
   PeerCache peer_cache_{dispatcher()};
   hci::FakeLocalAddressDelegate fake_address_delegate_{dispatcher()};
-  std::unique_ptr<hci::LegacyLowEnergyScanner> scanner_;
+  std::unique_ptr<hci::LowEnergyScanner> scanner_;
   std::unique_ptr<LowEnergyDiscoveryManager> discovery_manager_;
 
   bool scan_enabled_;
@@ -812,11 +824,9 @@ TEST_F(LowEnergyDiscoveryManagerTest, StartDiscoveryWithFilters) {
   };
   sessions.push_back(
       StartDiscoverySession(/*active=*/true, discovery_filters5));
-
   sessions[5]->SetResultCallback(std::move(result_cb));
 
   RunUntilIdle();
-
   EXPECT_EQ(6u, sessions.size());
 
   // At this point all sessions should have processed all peers at least once.
@@ -1231,6 +1241,31 @@ TEST_F(LowEnergyDiscoveryManagerTest, StartActiveScanDuringPassiveScan) {
   EXPECT_TRUE(test_device()->le_scan_state().enabled);
   EXPECT_EQ(pw::bluetooth::emboss::LEScanType::ACTIVE,
             test_device()->le_scan_state().scan_type);
+  EXPECT_THAT(scan_states(), ::testing::ElementsAre(true, false, true));
+}
+
+TEST_F(LowEnergyDiscoveryManagerTest,
+       DISABLED_StartScanDuringOffloadedFilters) {
+  SetupDiscoveryManager(
+      /*extended=*/false,
+      {true,
+       8,
+       hci::AdvertisingPacketFilter::Config::DeliveryMode::kImmediate});
+
+  auto session_a = StartDiscoverySession(false);
+  RunUntilIdle();
+  ASSERT_TRUE(test_device()->le_scan_state().enabled);
+
+  // The scan state should transition to enabled.
+  ASSERT_EQ(1u, scan_states().size());
+  EXPECT_TRUE(scan_states()[0]);
+
+  // starting another discovery session while offloading is enabled should cause
+  // us to restart the scan so the new filters can take effect in the Controller
+  hci::DiscoveryFilter filter;
+  filter.set_name_substring("bort");
+  auto session_b = StartDiscoverySession(false, {filter});
+
   EXPECT_THAT(scan_states(), ::testing::ElementsAre(true, false, true));
 }
 
@@ -1697,6 +1732,68 @@ TEST_F(LowEnergyDiscoveryManagerTest, SetResultCallbackIgnoresRemovedPeers) {
   RunUntilIdle();
   EXPECT_EQ(result_counts[peer_id_0], 1);
   EXPECT_EQ(result_counts[peer_id_1], 2);
+}
+
+TEST_F(LowEnergyDiscoveryManagerTest, NewSessionJoinsOngoingScan) {
+  auto fake_peer = std::make_unique<FakePeer>(kAddress0, dispatcher());
+  test_device()->AddPeer(std::move(fake_peer));
+  Peer* peer = peer_cache()->NewPeer(kAddress0, /*connectable=*/true);
+
+  // Start active session so that results get cached.
+  auto unused_session = StartDiscoverySession();
+
+  auto session = StartDiscoverySession();
+  std::unordered_set<PeerId> results;
+  session->SetResultCallback(
+      [&](const Peer& peer) { results.insert(peer.identifier()); });
+  RunUntilIdle();
+  ASSERT_EQ(1u, results.size());
+  EXPECT_EQ(peer->identifier(), *results.begin());
+}
+
+// Client code may be multithreaded and use mutexes while calling
+// LowEnergyDiscoverySession::SetPacketFilters(...). Enusre that we don't call
+// the peer found callback in the same call stack to avoid client bugs
+// (e.g. deadlock).
+TEST_F(LowEnergyDiscoveryManagerTest, SetResultCallbackPostsDiscoveryResults) {
+  auto fake_peer = std::make_unique<FakePeer>(kAddress0, dispatcher());
+  test_device()->AddPeer(std::move(fake_peer));
+  peer_cache()->NewPeer(kAddress0, /*connectable=*/true);
+
+  // Start active session so that results get cached.
+  auto session = StartDiscoverySession();
+
+  bool callback_called = false;
+  session->SetResultCallback(
+      [&](const Peer& /*peer*/) { callback_called = true; });
+
+  ASSERT_FALSE(callback_called);
+  RunUntilIdle();
+  ASSERT_TRUE(callback_called);
+}
+
+// Information only found in the extended data advertisement is properly
+// translated from scan results to peer fields.
+TEST_F(LowEnergyDiscoveryManagerTest, LeExtendedDataIsPopulated) {
+  SetupDiscoveryManager(/*extended=*/true);
+  uint8_t kAdvertisingSid = 0x08;
+  uint16_t kPeriodicAdvertisingInterval = 0xfedc;
+  auto fake_peer = std::make_unique<FakePeer>(kAddress0, dispatcher());
+  fake_peer->set_advertising_sid(kAdvertisingSid);
+  fake_peer->set_periodic_advertising_interval(kPeriodicAdvertisingInterval);
+  test_device()->AddPeer(std::move(fake_peer));
+
+  auto session = StartDiscoverySession();
+  bool peer_seen = false;
+  session->SetResultCallback([&](const Peer& peer) {
+    ASSERT_EQ(peer.address(), kAddress0);
+    peer_seen = true;
+    EXPECT_EQ(peer.le()->advertising_sid(), kAdvertisingSid);
+    EXPECT_EQ(peer.le()->periodic_advertising_interval(),
+              kPeriodicAdvertisingInterval);
+  });
+  RunUntilIdle();
+  EXPECT_TRUE(peer_seen);
 }
 
 }  // namespace

@@ -27,8 +27,9 @@ class FreeRtos(pw_package.git_repo.GitRepo):
         super().__init__(
             *args,
             name='freertos',
-            url='https://github.com/FreeRTOS/FreeRTOS-Kernel',
-            commit='a4b28e35103d699edf074dfff4835921b481b301',
+            # pylint: disable=line-too-long
+            url='https://pigweed.googlesource.com/third_party/github/FreeRTOS/FreeRTOS-Kernel',
+            commit='dbf70559b27d39c1fdb68dfb9a32140b6a6777a0',
             **kwargs,
         )
 

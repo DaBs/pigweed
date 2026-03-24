@@ -14,7 +14,9 @@
 
 #include "pw_protobuf/encoder.h"
 
+#include "pw_bytes/array.h"
 #include "pw_bytes/span.h"
+#include "pw_protobuf/serialized_size.h"
 #include "pw_span/span.h"
 #include "pw_stream/memory_stream.h"
 #include "pw_unit_test/framework.h"
@@ -162,6 +164,118 @@ TEST(StreamEncoder, EncodeInvalidArguments) {
   ASSERT_EQ(encoder.status(), Status::InvalidArgument());
 }
 
+TEST(StreamEncoder, WriteBytesWithCallback) {
+  constexpr uint32_t kArbitraryFieldNumber = 3;
+  std::array<std::byte, 16> encode_buffer;
+  constexpr auto kData = bytes::Initialized<8>(0xaa);
+  constexpr size_t kEncodedSize =
+      SizeOfDelimitedField(kArbitraryFieldNumber, kData.size());
+
+  MemoryEncoder encoder(encode_buffer);
+  EXPECT_EQ(encoder.WriteBytes(kArbitraryFieldNumber,
+                               kData.size(),
+                               [&kData](stream::Writer& writer) -> Status {
+                                 ConstByteSpan data_span(kData);
+                                 PW_TRY(writer.Write(data_span.first(4)));
+                                 return writer.Write(data_span.subspan(4));
+                               }),
+            OkStatus());
+
+  EXPECT_EQ(encoder.status(), OkStatus());
+  EXPECT_EQ(encoder.size(), kEncodedSize);
+
+  EXPECT_EQ(encoder.status_with_size().status(), OkStatus());
+  EXPECT_EQ(encoder.status_with_size().size(), kEncodedSize);
+}
+
+TEST(StreamEncoder, WriteBytesWithCallbackZeroLength) {
+  constexpr uint32_t kArbitraryFieldNumber = 3;
+  std::array<std::byte, 16> encode_buffer;
+  MemoryEncoder encoder(encode_buffer);
+
+  bool invoked = false;
+  EXPECT_EQ(encoder.WriteBytes(kArbitraryFieldNumber,
+                               0,
+                               [&invoked](stream::Writer&) -> Status {
+                                 invoked = true;
+                                 return OkStatus();
+                               }),
+            OkStatus());
+  EXPECT_EQ(encoder.status(), OkStatus());
+  EXPECT_FALSE(invoked);
+}
+
+TEST(StreamEncoder, WriteBytesWithCallbackForwardsCallbackReturn) {
+  constexpr uint32_t kArbitraryFieldNumber = 3;
+  std::array<std::byte, 16> encode_buffer;
+  MemoryEncoder encoder(encode_buffer);
+
+  EXPECT_EQ(encoder.WriteBytes(kArbitraryFieldNumber,
+                               8,
+                               [](stream::Writer&) -> Status {
+                                 return Status::Unimplemented();
+                               }),
+            Status::Unimplemented());
+  EXPECT_EQ(encoder.status(), Status::Unimplemented());
+}
+
+TEST(StreamEncoder, WriteBytesWithCallbackFailsIfSizeMismatch) {
+  constexpr uint32_t kArbitraryFieldNumber = 3;
+  std::array<std::byte, 16> encode_buffer;
+  constexpr auto kData = bytes::Initialized<8>(0xaa);
+
+  MemoryEncoder encoder1(encode_buffer);
+
+  // Write larger than specified size.
+  EXPECT_EQ(encoder1.WriteBytes(kArbitraryFieldNumber,
+                                kData.size() - 2,
+                                [&kData](stream::Writer& writer) -> Status {
+                                  return writer.Write(kData);
+                                }),
+            Status::OutOfRange());
+  EXPECT_EQ(encoder1.status(), Status::OutOfRange());
+
+  MemoryEncoder encoder2(encode_buffer);
+
+  // Write smaller than specified size.
+  EXPECT_EQ(encoder2.WriteBytes(kArbitraryFieldNumber,
+                                kData.size() + 2,
+                                [&kData](stream::Writer& writer) -> Status {
+                                  return writer.Write(kData);
+                                }),
+            Status::DataLoss());
+  EXPECT_EQ(encoder2.status(), Status::DataLoss());
+}
+
+// clang-format off
+constexpr auto kExpectedDoubleNestedEncodedProto = bytes::Array<
+  // magic_number
+  0x08, 0x2a,
+  // nested header (key, size)
+  0x32, 0x30,
+    // nested.hello
+    0x0a, 0x05, 'w', 'o', 'r', 'l', 'd',
+    // nested.pair[0] header (key, size) [MIX]
+    0x1a, 0x10,
+      // nested.pair[0].key
+      0x0a, 0x07, 'v', 'e', 'r', 's', 'i', 'o', 'n',
+      // nested.pair[0].value
+      0x12, 0x05, '2', '.', '9', '.', '1',
+    // nested.id
+    0x10, 0xe7, 0x07,
+    // nested.pair[1] header (key, size)
+    0x1a, 0x12,
+      // nested.pair[1].key
+      0x0a, 0x06, 'd', 'e', 'v', 'i', 'c', 'e',
+      // nested.pair[1].value
+      0x12, 0x08, 'l', 'e', 'f', 't', '-', 's', 'o', 'c',
+  // ziggy
+  0x10, 0x19
+>();
+// clang-format on
+
+// Encode a (double) nested proto using the traditional single-pass,
+// scratch-based encoder.
 TEST(StreamEncoder, Nested) {
   // This is the largest complete submessage in this test.
   constexpr size_t kLargestSubmessageSize = 0x30;
@@ -220,38 +334,258 @@ TEST(StreamEncoder, Nested) {
   // test_proto.ziggy = -13;
   EXPECT_EQ(encoder.WriteSint32(kTestProtoZiggyField, -13), OkStatus());
 
+  // Verify success
+  ASSERT_EQ(encoder.status(), OkStatus());
+  EXPECT_EQ(writer.bytes_written(), kExpectedDoubleNestedEncodedProto.size());
+  EXPECT_TRUE(std::equal(writer.begin(),
+                         writer.end(),
+                         kExpectedDoubleNestedEncodedProto.begin(),
+                         kExpectedDoubleNestedEncodedProto.end()));
+}
+
+// Encode a (double) nested proto using the two-pass, scratch-less encoder.
+TEST(StreamEncoder, NestedDoubleTwoPass) {
+  std::byte dest_buffer[128];
+  MemoryWriter writer(dest_buffer);
+  StreamEncoder encoder(writer, {});  // No scratch buffer!
+
+  // TestProto test_proto;
+  // test_proto.magic_number = 42;
+  EXPECT_EQ(encoder.WriteUint32(kTestProtoMagicNumberField, 42), OkStatus());
+
+  // Exercise flexible capture
+  uint32_t id = 999;
+  std::string_view key1 = "version";
+  std::string_view value1 = "2.9.1";
+  std::string_view key2 = "device";
+  std::string_view value2 = "left-soc";
+
+  // NestedProto& nested_proto = test_proto.nested;
+  auto status = encoder.WriteNestedMessage(
+      kTestProtoNestedField, [&](StreamEncoder& nested_proto) {
+        // nested_proto.hello = "one";
+        PW_TRY(nested_proto.WriteString(kNestedProtoHelloField, "world"));
+
+        // DoubleNestedProto& double_nested_proto = nested_proto.append_pair();
+        PW_TRY(nested_proto.WriteNestedMessage(
+            kNestedProtoPairField, [&](StreamEncoder& double_nested_proto) {
+              PW_TRY(double_nested_proto.WriteString(kDoubleNestedProtoKeyField,
+                                                     key1));
+              PW_TRY(double_nested_proto.WriteString(
+                  kDoubleNestedProtoValueField, value1));
+              return OkStatus();
+            }));
+
+        // nested_proto.id = 999;
+        PW_TRY(nested_proto.WriteUint32(kNestedProtoIdField, id));
+
+        // DoubleNestedProto& double_nested_proto = nested_proto.append_pair();
+        PW_TRY(nested_proto.WriteNestedMessage(
+            kNestedProtoPairField, [&](StreamEncoder& double_nested_proto) {
+              PW_TRY(double_nested_proto.WriteString(kDoubleNestedProtoKeyField,
+                                                     key2));
+              PW_TRY(double_nested_proto.WriteString(
+                  kDoubleNestedProtoValueField, value2));
+              return OkStatus();
+            }));
+
+        return OkStatus();
+      });
+  PW_TEST_EXPECT_OK(status);
+
+  // test_proto.ziggy = -13;
+  EXPECT_EQ(encoder.WriteSint32(kTestProtoZiggyField, -13), OkStatus());
+
+  // Verify success
+  ASSERT_EQ(encoder.status(), OkStatus());
+  EXPECT_EQ(writer.bytes_written(), kExpectedDoubleNestedEncodedProto.size());
+  EXPECT_TRUE(std::equal(writer.begin(),
+                         writer.end(),
+                         kExpectedDoubleNestedEncodedProto.begin(),
+                         kExpectedDoubleNestedEncodedProto.end()));
+}
+
+// Encode a (double) nested proto using a mix of the two-pass, scratch-less
+// encoder and the traditional single-pass, scratch-based encoder. See [MIX].
+TEST(StreamEncoder, NestedDoubleTwoPassMixed) {
+  // This is the largest complete submessage in this test.
+  // [MIX] This is only used for the submessage written using the single-pass,
+  // scratch-based encoder.
+  constexpr size_t kLargestSubmessageSize = 18;
+  constexpr size_t kScratchBufferSize =
+      MaxScratchBufferSize(kLargestSubmessageSize, 2);
+  std::byte encode_buffer[kScratchBufferSize];
+  std::byte dest_buffer[128];
+  MemoryWriter writer(dest_buffer);
+  StreamEncoder encoder(writer, encode_buffer);  // Minimal scratch buffer
+
+  // TestProto test_proto;
+  // test_proto.magic_number = 42;
+  EXPECT_EQ(encoder.WriteUint32(kTestProtoMagicNumberField, 42), OkStatus());
+
+  // NestedProto& nested_proto = test_proto.nested;
+  auto status = encoder.WriteNestedMessage(
+      kTestProtoNestedField, [](StreamEncoder& nested_proto) {
+        // nested_proto.hello = "one";
+        PW_TRY(nested_proto.WriteString(kNestedProtoHelloField, "world"));
+
+        // [MIX] Use the single-pass, scratch-based encoder for this first
+        // double-nested message.
+        {
+          // DoubleNestedProto& double_nested_proto =
+          // nested_proto.append_pair();
+          StreamEncoder double_nested_proto =
+              nested_proto.GetNestedEncoder(kNestedProtoPairField);
+          // double_nested_proto.key = "version";
+          EXPECT_EQ(double_nested_proto.WriteString(kDoubleNestedProtoKeyField,
+                                                    "version"),
+                    OkStatus());
+          // double_nested_proto.value = "2.9.1";
+          EXPECT_EQ(double_nested_proto.WriteString(
+                        kDoubleNestedProtoValueField, "2.9.1"),
+                    OkStatus());
+        }  // end DoubleNestedProto
+
+        // nested_proto.id = 999;
+        PW_TRY(nested_proto.WriteUint32(kNestedProtoIdField, 999));
+
+        // Use the two-pass encoder for the second double-nested message.
+        // DoubleNestedProto& double_nested_proto = nested_proto.append_pair();
+        PW_TRY(nested_proto.WriteNestedMessage(
+            kNestedProtoPairField, [](StreamEncoder& double_nested_proto) {
+              PW_TRY(double_nested_proto.WriteString(kDoubleNestedProtoKeyField,
+                                                     "device"));
+              PW_TRY(double_nested_proto.WriteString(
+                  kDoubleNestedProtoValueField, "left-soc"));
+              return OkStatus();
+            }));
+
+        return OkStatus();
+      });
+  PW_TEST_EXPECT_OK(status);
+
+  // test_proto.ziggy = -13;
+  EXPECT_EQ(encoder.WriteSint32(kTestProtoZiggyField, -13), OkStatus());
+
+  // Verify success
+  ASSERT_EQ(encoder.status(), OkStatus());
+  EXPECT_EQ(writer.bytes_written(), kExpectedDoubleNestedEncodedProto.size());
+  EXPECT_TRUE(std::equal(writer.begin(),
+                         writer.end(),
+                         kExpectedDoubleNestedEncodedProto.begin(),
+                         kExpectedDoubleNestedEncodedProto.end()));
+}
+
+TEST(StreamEncoder, NestedTwoPassFailsIfInconsistentLonger) {
+  std::byte dest_buffer[128];
+  MemoryWriter writer(dest_buffer);
+  StreamEncoder encoder(writer, {});
+
+  unsigned int pass = 0;
+  auto status = encoder.WriteNestedMessage(
+      kTestProtoNestedField, [&pass](StreamEncoder& nested_proto) {
+        // BAD BEHAVIOR: Writing different content on each pass.
+        const char* value = (pass++ == 0) ? "first" : "much much longer!";
+        PW_TRY(nested_proto.WriteString(kNestedProtoHelloField, value));
+        return OkStatus();
+      });
+
+  // NOTE: This could reasonably return either RESOURCE_EXHAUSTED or
+  // OUT_OF_RANGE. Stream::Write() can return either, depending on a boundary
+  // condition, but StreamEncoder::UpdateStatusForWrite() checks
+  // writer_.ConservativeWriteLimit() explicitly and returns
+  // RESOURCE_EXHAUSTED.
+  EXPECT_EQ(status, Status::ResourceExhausted());
+  EXPECT_EQ(status, encoder.status());
+}
+
+TEST(StreamEncoder, NestedTwoPassFailsIfInconsistentShorter) {
+  std::byte dest_buffer[128];
+  MemoryWriter writer(dest_buffer);
+  StreamEncoder encoder(writer, {});
+
+  unsigned int pass = 0;
+  auto status = encoder.WriteNestedMessage(
+      kTestProtoNestedField, [&pass](StreamEncoder& nested_proto) {
+        // BAD BEHAVIOR: Writing different content on each pass.
+        const char* value = (pass++ == 0) ? "the first pass" : "short";
+        PW_TRY(nested_proto.WriteString(kNestedProtoHelloField, value));
+        return OkStatus();
+      });
+
+  // This comes from the check in WriteNestedMessage().
+  EXPECT_EQ(status, Status::OutOfRange());
+  EXPECT_EQ(status, encoder.status());
+}
+
+TEST(StreamEncoder, NestedTwoPassRespectsEmptyEncoderBehaviorWriteField) {
+  std::byte dest_buffer[128];
+  MemoryWriter writer(dest_buffer);
+  StreamEncoder encoder(writer, {});
+
+  // TestProto test_proto;
+  // test_proto.magic_number = 42;
+  EXPECT_EQ(encoder.WriteUint32(kTestProtoMagicNumberField, 42), OkStatus());
+
+  auto status = encoder.WriteNestedMessage(
+      kTestProtoNestedField,
+      [](StreamEncoder& /*nested_proto*/) {
+        // Don't write any fields.
+        return OkStatus();
+      },
+      StreamEncoder::EmptyEncoderBehavior::kWriteFieldNumber);
+
+  // test_proto.ziggy = -13;
+  EXPECT_EQ(encoder.WriteSint32(kTestProtoZiggyField, -13), OkStatus());
+
   // clang-format off
-  constexpr uint8_t encoded_proto[] = {
+  constexpr auto kExpectedEncodedProto = bytes::Array<
     // magic_number
     0x08, 0x2a,
     // nested header (key, size)
-    0x32, 0x30,
-    // nested.hello
-    0x0a, 0x05, 'w', 'o', 'r', 'l', 'd',
-    // nested.pair[0] header (key, size)
-    0x1a, 0x10,
-    // nested.pair[0].key
-    0x0a, 0x07, 'v', 'e', 'r', 's', 'i', 'o', 'n',
-    // nested.pair[0].value
-    0x12, 0x05, '2', '.', '9', '.', '1',
-    // nested.id
-    0x10, 0xe7, 0x07,
-    // nested.pair[1] header (key, size)
-    0x1a, 0x12,
-    // nested.pair[1].key
-    0x0a, 0x06, 'd', 'e', 'v', 'i', 'c', 'e',
-    // nested.pair[1].value
-    0x12, 0x08, 'l', 'e', 'f', 't', '-', 's', 'o', 'c',
+    0x32, 0x00,
+      // No fields in nested message
     // ziggy
     0x10, 0x19
-  };
+  >();
   // clang-format on
 
-  ASSERT_EQ(encoder.status(), OkStatus());
-  ConstByteSpan result = ConstByteSpan(writer.data(), writer.bytes_written());
-  EXPECT_EQ(result.size(), sizeof(encoded_proto));
-  EXPECT_EQ(std::memcmp(result.data(), encoded_proto, sizeof(encoded_proto)),
-            0);
+  PW_TEST_EXPECT_OK(status);
+  EXPECT_EQ(writer.bytes_written(), kExpectedEncodedProto.size());
+}
+
+TEST(StreamEncoder, NestedTwoPassRespectsEmptyEncoderBehaviorWriteNothing) {
+  std::byte dest_buffer[128];
+  MemoryWriter writer(dest_buffer);
+  StreamEncoder encoder(writer, {});
+
+  // TestProto test_proto;
+  // test_proto.magic_number = 42;
+  EXPECT_EQ(encoder.WriteUint32(kTestProtoMagicNumberField, 42), OkStatus());
+
+  auto status = encoder.WriteNestedMessage(
+      kTestProtoNestedField,
+      [](StreamEncoder& /*nested_proto*/) {
+        // Don't write any fields.
+        return OkStatus();
+      },
+      StreamEncoder::EmptyEncoderBehavior::kWriteNothing);
+
+  // test_proto.ziggy = -13;
+  EXPECT_EQ(encoder.WriteSint32(kTestProtoZiggyField, -13), OkStatus());
+
+  // clang-format off
+  constexpr auto kExpectedEncodedProto = bytes::Array<
+    // magic_number
+    0x08, 0x2a,
+    // No nested header
+    // ziggy
+    0x10, 0x19
+  >();
+  // clang-format on
+
+  PW_TEST_EXPECT_OK(status);
+  EXPECT_EQ(writer.bytes_written(), kExpectedEncodedProto.size());
 }
 
 TEST(StreamEncoder, RepeatedField) {

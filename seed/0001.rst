@@ -93,7 +93,7 @@ Process
 Suppose you'd like to propose a new Pigweed RPC Over Smoke Signals protocol.
 
 #. If you haven't already, clone the Pigweed repository and set it up locally,
-   following the :ref:`docs-get-started-upstream` guide.
+   following :ref:`docs-contributing`.
 
 #. Check out a clean Git branch off of ``main`` for your SEED.
 
@@ -129,7 +129,7 @@ Suppose you'd like to propose a new Pigweed RPC Over Smoke Signals protocol.
    ``Pigweed-Auto-Submit`` to +1. This change will be approved promptly and
    lock in your assigned SEED number.
 
-   .. image:: https://storage.googleapis.com/pigweed-media/seed/0001/seed-index-gerrit.png
+   .. image:: https://www.gstatic.com/pigweed/seed/0001/seed-index-gerrit.png
 
 #. Fill out your proposal document, using the :ref:`SEED template<seed-0002>` as
    a guide.

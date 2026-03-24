@@ -18,6 +18,14 @@ import("$dir_pw_unit_test/test.gni")
 
 # Examples
 
+pw_test("bitset") {
+  deps = [
+    "$dir_pw_containers:bitset",
+    dir_pw_assert,
+  ]
+  sources = [ "bitset.cc" ]
+}
+
 pw_test("flat_map") {
   deps = [ "$dir_pw_containers:flat_map" ]
   sources = [ "flat_map.cc" ]
@@ -63,6 +71,11 @@ pw_test("multiple_containers") {
   sources = [ "multiple_containers.cc" ]
 }
 
+pw_test("optional_tuple") {
+  deps = [ "$dir_pw_containers:optional_tuple" ]
+  sources = [ "optional_tuple.cc" ]
+}
+
 pw_test("vector") {
   deps = [
     "$dir_pw_containers:vector",
@@ -79,6 +92,7 @@ pw_test("wrapped_iterator") {
 
 pw_test_group("examples") {
   tests = [
+    ":bitset",
     ":flat_map",
     ":intrusive_forward_list",
     ":intrusive_list",
@@ -87,6 +101,7 @@ pw_test_group("examples") {
     ":intrusive_set",
     ":intrusive_multiset",
     ":multiple_containers",
+    ":optional_tuple",
     ":vector",
     ":wrapped_iterator",
   ]

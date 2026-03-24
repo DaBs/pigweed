@@ -270,7 +270,11 @@ TEST_F(TransferThreadTest, StartTransferExhausted_Server) {
 TEST_F(TransferThreadTest, StartTransferExhausted_Client) {
   rpc::RawClientReaderWriter read_stream = pw_rpc::raw::Transfer::Read(
       rpc_client_context_.client(), rpc_client_context_.channel().id());
-  transfer_thread_.SetClientReadStream(read_stream, [](ConstByteSpan) {});
+  transfer_thread_.SetClientReadStream(
+      read_stream,
+      nullptr,
+      [](ConstByteSpan) {},
+      internal::SetStreamBehavior::kNewClient);
 
   Status status3 = Status::Unknown();
   Status status4 = Status::Unknown();
@@ -316,6 +320,51 @@ TEST_F(TransferThreadTest, StartTransferExhausted_Client) {
 
   transfer_thread_.EndClientTransfer(3, Status::Cancelled());
   transfer_thread_.EndClientTransfer(4, Status::Cancelled());
+}
+
+TEST_F(TransferThreadTest, SetClientReadStream_RestartsInitiatingTransfer) {
+  rpc::RawClientReaderWriter read_stream = pw_rpc::raw::Transfer::Read(
+      rpc_client_context_.client(), rpc_client_context_.channel().id());
+  transfer_thread_.SetClientReadStream(
+      read_stream,
+      nullptr,
+      [](ConstByteSpan) {},
+      internal::SetStreamBehavior::kNewClient);
+
+  Status completion_status = Status::Unknown();
+  stream::MemoryWriterBuffer<16> buffer;
+
+  // Start a client read transfer. It will be in kInitiating state.
+  transfer_thread_.StartClientTransfer(
+      internal::TransferType::kReceive,
+      ProtocolVersion::kVersionTwo,
+      /*resource_id=*/3,
+      /*handle_id=*/27,
+      &buffer,
+      max_parameters_,
+      [&completion_status](Status status) { completion_status = status; },
+      kNeverTimeout,
+      kNeverTimeout,
+      3,
+      10);
+  transfer_thread_.WaitUntilEventIsProcessed();
+
+  EXPECT_EQ(completion_status, Status::Unknown());
+
+  // Reopen the stream.
+  rpc::RawClientReaderWriter new_read_stream = pw_rpc::raw::Transfer::Read(
+      rpc_client_context_.client(), rpc_client_context_.channel().id());
+  transfer_thread_.SetClientReadStream(
+      new_read_stream,
+      nullptr,
+      [](ConstByteSpan) {},
+      internal::SetStreamBehavior::kReopen);
+  transfer_thread_.WaitUntilEventIsProcessed();
+
+  EXPECT_EQ(completion_status, Status::Unknown());
+
+  transfer_thread_.CancelClientTransfer(27);
+  transfer_thread_.WaitUntilEventIsProcessed();
 }
 
 TEST_F(TransferThreadTest, VersionTwo_NoHandler) {
@@ -396,6 +445,68 @@ TEST_F(TransferThreadTest, SetStream_TerminatesActiveTransfers) {
   EXPECT_EQ(handler.finalize_read_status, Status::Aborted());
 
   transfer_thread_.RemoveTransferHandler(handler);
+}
+
+class LongRunningHandler final : public ReadOnlyHandler {
+ public:
+  LongRunningHandler(uint32_t session_id, ConstByteSpan data)
+      : ReadOnlyHandler(session_id), reader_(data) {}
+
+  Status PrepareRead() final {
+    set_reader(reader_);
+    notification.acquire();
+    return OkStatus();
+  }
+
+  void FinalizeRead(Status) final {}
+
+  sync::ThreadNotification notification;
+
+ private:
+  stream::MemoryReader reader_;
+};
+
+TEST_F(TransferThreadTest,
+       EnqueueResourceEvent_InvokesCallbackIfUnableToStageEvent) {
+  auto reader_writer = ctx_.reader_writer();
+  transfer_thread_.SetServerReadStream(reader_writer, [](ConstByteSpan) {});
+
+  LongRunningHandler handler(3, kData);
+  transfer_thread_.AddTransferHandler(handler);
+
+  transfer_thread_.StartServerTransfer(
+      internal::TransferType::kTransmit,
+      ProtocolVersion::kLegacy,
+      3,
+      3,
+      EncodeChunk(
+          Chunk(ProtocolVersion::kLegacy, Chunk::Type::kParametersRetransmit)
+              .set_session_id(3)
+              .set_window_end_offset(8)
+              .set_max_chunk_size_bytes(8)
+              .set_offset(0)),
+      max_parameters_,
+      kNeverTimeout,
+      3,
+      10);
+
+  // Try to enqueue a resource status request while the `LongRunningHandler` is
+  // blocked. This will result in a timeout waiting for it to process. The
+  // callback should be invoked with an error status.
+  Status resource_status = Status::Unknown();
+  transfer_thread_.EnqueueResourceEvent(
+      3, [&](Status status, const internal::ResourceStatus&) {
+        resource_status = status;
+      });
+
+  EXPECT_EQ(resource_status, Status::Unavailable());
+
+  // Allow the start request to complete.
+  handler.notification.release();
+  transfer_thread_.WaitUntilEventIsProcessed();
+
+  transfer_thread_.RemoveTransferHandler(handler);
+  transfer_thread_.WaitUntilEventIsProcessed();
 }
 
 }  // namespace

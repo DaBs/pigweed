@@ -1,0 +1,114 @@
+<!--
+Copyright 2025 The Pigweed Authors
+
+Licensed under the Apache License, Version 2.0 (the "License"); you may not
+use this file except in compliance with the License. You may obtain a copy of
+the License at
+
+    https://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+License for the specific language governing permissions and limitations under
+the License.
+-->
+
+<!-- HTML footer for doxygen 1.9.6-->
+<!-- start footer part -->
+<!--BEGIN GENERATE_TREEVIEW-->
+<div id="nav-path" class="navpath"><!-- id is needed for treeview function! -->
+  <ul>
+    $navpath
+    <li class="footer">$generatedby <a href="https://www.doxygen.org/index.html"><img class="footer" src="$relpath^doxygen.svg" width="104" height="31" alt="doxygen"/></a> $doxygenversion </li>
+  </ul>
+</div>
+<!--END GENERATE_TREEVIEW-->
+<!--BEGIN !GENERATE_TREEVIEW-->
+<hr class="footer"/><address class="footer"><small>
+$generatedby&#160;<a href="https://www.doxygen.org/index.html"><img class="footer" src="$relpath^doxygen.svg" width="104" height="31" alt="doxygen"/></a> $doxygenversion
+</small></address>
+<!--END !GENERATE_TREEVIEW-->
+<script>
+  window.pw = {};
+  // Set up Google Analytics for the Doxygen subsite. How it works:
+  //
+  // 1. Fetch the Pigweed homepage
+  // 2. grep the Google Analytics ID from the homepage's source code
+  // 3. Manually init Google Analytics through JS with the grep'd ID
+  //
+  // Our Google Analytics ID is supplied at build time through an OS env var.
+  // Ideally, we would pass the env var to Doxygen, and Doxygen would stamp
+  // the env var into a specified location within a template. But Doxygen
+  // doesn't support that workflow.
+  //
+  // We could alternatively set up our own build-time templating system, but
+  // that's a lot more work for little gain. The JS-based implementation works
+  // fine. Sphinx's native in-site search uses an implementation similar to
+  // this approach, i.e. it's been battle-tested at major scale.
+  window.pw.initAnalytics = async () => {
+    // Fetch the Pigweed homepage.
+    //
+    // Doxygen outputs all URLs into a single directory, so the Pigweed
+    // homepage will always be two directories below any given Doxygen page.
+    // There's a few reasons to use a relative path:
+    //
+    // * Guarantees that the request will succeed by ensuring that it's a
+    //   same-origin request. A request from localhost to pigweed.dev
+    //   will be cross-origin and will probably fail.
+    // * On staging sites we pass in a fake Google Analytics ID because
+    //   we don't want those pageviews showing up in the production data.
+    const response = await fetch("../../index.html");
+    const text = await response.text();
+    // grep the Google Analytics ID from the homepage's source code.
+    const regex = /gtag\('config', '(.*?)'\)/;
+    const match = text.match(regex);
+    if (!match) {
+      return;
+    }
+    const id = match[1];
+    // Load the gtag script.
+    let lib = document.createElement('script');
+    lib.src = `https://www.googletagmanager.com/gtag/js?id=${id}`;
+    document.body.appendChild(lib);
+    // Init Google Analytics with the grep'd ID.
+    let init = document.createElement('script');
+    init.textContent = `
+      window.dataLayer = window.dataLayer || [];
+      function gtag() { dataLayer.push(arguments); }
+      gtag('js', new Date());
+      gtag('config', '${id}');
+    `;
+    document.body.appendChild(init);
+  };
+  // For any given page related to a module, link back to that module's main
+  // docs. This implementation is similar to the Google Analytics solution.
+  window.pw.createDocsLinks = async () => {
+    // .ingroups is the breadcrumbs that appear below the page title. The
+    // first breadcrumb contains the link to the module's Doxygen homepage.
+    const module = document.querySelector('.ingroups .el');
+    if (!module) return;
+    // Don't use module.href because that will return a full URL. What we want
+    // is the relative path.
+    const url = module.getAttribute('href');
+    // Fetch the source code of the module's Doxygen homepage because that
+    // page contains the links to the module's main docs.
+    const response = await fetch(url);
+    const text = await response.text();
+    // Parse the main docs from the homepage source code.
+    const regex = /\<\!-- maindocs --\>(.*?)\<\!-- endmaindocs --\>/;
+    const match = text.match(regex);
+    if (!match) return;
+    const links = match[1];
+    // Insert the main docs links below the breadcrumbs.
+    const p = document.createElement('p');
+    p.innerHTML = links;
+    const div = document.querySelector('div.ingroups');
+    if (!div) return;
+    div.appendChild(p);
+  };
+  window.pw.initAnalytics();
+  window.pw.createDocsLinks();
+</script>
+</body>
+</html>

@@ -18,12 +18,7 @@ import("$dir_pw_build/python.gni")
 import("$dir_pw_build/python_dist.gni")
 import("$dir_pw_build/python_gn_args.gni")
 import("$dir_pw_build/python_venv.gni")
-import("$dir_pw_docgen/docs.gni")
 import("$dir_pw_unit_test/test.gni")
-
-pw_doc_group("docs") {
-  sources = [ "docs.rst" ]
-}
 
 pw_python_group("core_pigweed_python_packages") {
   python_deps = [
@@ -31,8 +26,10 @@ pw_python_group("core_pigweed_python_packages") {
     "$dir_pw_arduino_build/py",
     "$dir_pw_bloat/py",
     "$dir_pw_build/py",
+    "$dir_pw_build/py:workflows",
     "$dir_pw_build_info/py",
     "$dir_pw_build_mcuxpresso/py",
+    "$dir_pw_change/py",
     "$dir_pw_chrono/py",
     "$dir_pw_cli/py",
     "$dir_pw_cli_analytics/py",
@@ -93,6 +90,10 @@ pw_python_group("pigweed_target_support_packages") {
   ]
 }
 
+pw_python_group("pigweed_upstream_build_packages") {
+  python_deps = [ "$dir_pw_build/py:pigweed_upstream_build" ]
+}
+
 pw_python_group("python") {
   python_deps = [
     ":core_pigweed_python_packages",
@@ -106,8 +107,8 @@ pw_python_group("python") {
     "$dir_pw_emu/py:mock_emu",
     "$dir_pw_emu/py:mock_emu_frontend",
     "$dir_pw_preprocessor/py:generate_apply_macros",
-    "$dir_pw_third_party/fuchsia:generate_fuchsia_patch",
-    "$dir_pw_third_party/nanopb:generate_nanopb_proto",
+    "$pw_external_fuchsia:generate_fuchsia_patch",
+    "$pw_external_nanopb:generate_nanopb_proto",
   ]
 }
 
@@ -125,11 +126,8 @@ pw_python_venv("upstream_pigweed_build_venv") {
   source_packages = [
     ":core_pigweed_python_packages",
     ":pigweed_target_support_packages",
+    ":pigweed_upstream_build_packages",
   ]
-}
-
-pw_python_group("target_support_packages") {
-  python_deps = [ ":pip_install_target_support_packages" ]
 }
 
 pw_python_pip_install("pip_install_target_support_packages") {
@@ -140,6 +138,20 @@ pw_python_distribution("target_support_package_distribution") {
   packages = [ ":pigweed_target_support_packages" ]
   generate_setup_cfg = {
     name = "pigweed_target_support"
+    version = "0.0.1"
+    include_default_pyproject_file = true
+    append_date_to_version = true
+  }
+}
+
+pw_python_pip_install("pip_install_pigweed_upstream_build") {
+  packages = [ ":pigweed_upstream_build_distribution" ]
+}
+
+pw_python_distribution("pigweed_upstream_build_distribution") {
+  packages = [ ":pigweed_upstream_build_packages" ]
+  generate_setup_cfg = {
+    name = "pigweed_upstream_build"
     version = "0.0.1"
     include_default_pyproject_file = true
     append_date_to_version = true

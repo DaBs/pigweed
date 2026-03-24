@@ -15,7 +15,6 @@
 import("//build_overrides/pigweed.gni")
 
 import("$dir_pw_build/target_types.gni")
-import("$dir_pw_docgen/docs.gni")
 import("$dir_pw_unit_test/test.gni")
 
 config("public_include_path") {
@@ -26,12 +25,14 @@ config("public_include_path") {
 pw_source_set("checked_arithmetic") {
   public = [ "public/pw_numeric/checked_arithmetic.h" ]
   public_configs = [ ":public_include_path" ]
-  public_deps = [ dir_pw_preprocessor ]
 }
 
 pw_test("checked_arithmetic_test") {
   sources = [ "checked_arithmetic_test.cc" ]
-  deps = [ ":checked_arithmetic" ]
+  deps = [
+    ":checked_arithmetic",
+    "$dir_pw_unit_test:constexpr",
+  ]
 }
 
 pw_source_set("integer_division") {
@@ -44,13 +45,24 @@ pw_test("integer_division_test") {
   deps = [ ":integer_division" ]
 }
 
+pw_source_set("saturating_arithmetic") {
+  public = [ "public/pw_numeric/saturating_arithmetic.h" ]
+  public_configs = [ ":public_include_path" ]
+  deps = [ ":checked_arithmetic" ]
+}
+
+pw_test("saturating_arithmetic_test") {
+  sources = [ "saturating_arithmetic_test.cc" ]
+  deps = [
+    ":saturating_arithmetic",
+    "$dir_pw_unit_test:constexpr",
+  ]
+}
+
 pw_test_group("tests") {
   tests = [
     ":checked_arithmetic_test",
     ":integer_division_test",
+    ":saturating_arithmetic_test",
   ]
-}
-
-pw_doc_group("docs") {
-  sources = [ "docs.rst" ]
 }

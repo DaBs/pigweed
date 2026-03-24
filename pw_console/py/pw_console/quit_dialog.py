@@ -127,7 +127,7 @@ class QuitDialog(ConditionalContainer):
 
     def _default_on_quit_function(self):
         if hasattr(self.application, 'application'):
-            self.application.application.exit()
+            self.application.exit_console()
         else:
             sys.exit()
 
@@ -151,7 +151,8 @@ class QuitDialog(ConditionalContainer):
         # Default button style
         button_style = 'class:toolbar-button-inactive'
 
-        fragments = [('', self.exit_message), separator_text]
+        # Use default foreground color to respect light/dark mode themes.
+        fragments = [('class:default-fg', self.exit_message), separator_text]
         fragments.append(('', '\n'))
 
         # Cancel button

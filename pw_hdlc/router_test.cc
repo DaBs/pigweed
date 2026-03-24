@@ -15,7 +15,8 @@
 #include "pw_hdlc/router.h"
 
 #include "pw_allocator/testing.h"
-#include "pw_async2/pend_func_task.h"
+#include "pw_async2/dispatcher_for_test.h"
+#include "pw_async2/func_task.h"
 #include "pw_bytes/suffix.h"
 #include "pw_channel/forwarding_channel.h"
 #include "pw_channel/loopback_channel.h"
@@ -28,10 +29,12 @@ namespace {
 
 using ::pw::allocator::test::AllocatorForTest;
 using ::pw::async2::Context;
-using ::pw::async2::Dispatcher;
-using ::pw::async2::PendFuncTask;
+using ::pw::async2::DispatcherForTest;
+
+using ::pw::async2::FuncTask;
 using ::pw::async2::Pending;
 using ::pw::async2::Poll;
+using ::pw::async2::PollResult;
 using ::pw::async2::Ready;
 using ::pw::async2::Task;
 using ::pw::async2::Waker;
@@ -90,7 +93,7 @@ class ReceiveDatagramsUntilClosed : public Task {
  private:
   Poll<> DoPend(Context& cx) final {
     while (true) {
-      Poll<Result<MultiBuf>> result = channel_.PendRead(cx);
+      PollResult<MultiBuf> result = channel_.PendRead(cx);
       if (result.IsPending()) {
         return Pending();
       }
@@ -153,7 +156,7 @@ void ExpectSendAndReceive(
 
   std::array<std::byte, kDecodeBufferSize> decode_buffer;
   Router router(io_loopback.channel(), decode_buffer);
-  PendFuncTask router_task([&router](Context& cx) { return router.Pend(cx); });
+  FuncTask router_task([&router](Context& cx) { return router.Pend(cx); });
 
   SendDatagrams send_task(datagrams_to_send, outgoing_pair.first());
   ReceiveDatagramsUntilClosed recv_task(incoming_pair.first());
@@ -165,12 +168,12 @@ void ExpectSendAndReceive(
       router.AddChannel(incoming_pair.second(), kAddress, kArbitraryAddressTwo),
       OkStatus());
 
-  Dispatcher dispatcher;
+  DispatcherForTest dispatcher;
   dispatcher.Post(router_task);
   dispatcher.Post(send_task);
   dispatcher.Post(recv_task);
 
-  EXPECT_EQ(dispatcher.RunUntilStalled(), Pending());
+  EXPECT_TRUE(dispatcher.RunUntilStalled());
   ASSERT_EQ(recv_task.received.size(), data.size());
   for (size_t i = 0; i < data.size(); i++) {
     ExpectElementsEqual(recv_task.received[i], std::data(data)[i]);
@@ -217,13 +220,13 @@ TEST(Router, PendOnClosedIoChannelReturnsReady) {
                               /*arbitrary outgoing address*/ 2019),
             OkStatus());
 
-  PendFuncTask router_task([&router](Context& cx) { return router.Pend(cx); });
+  FuncTask router_task([&router](Context& cx) { return router.Pend(cx); });
 
-  Dispatcher dispatcher;
+  DispatcherForTest dispatcher;
   dispatcher.Post(router_task);
   dispatcher.Post(recv_task);
 
-  EXPECT_EQ(dispatcher.RunUntilStalled(), Pending());
+  EXPECT_TRUE(dispatcher.RunUntilStalled());
 
   // Close the underlying byte channel.
   Waker null_waker;
@@ -231,7 +234,7 @@ TEST(Router, PendOnClosedIoChannelReturnsReady) {
   EXPECT_EQ(byte_pair.second().PendClose(null_cx), Ready(OkStatus()));
 
   // Both the router and the receive task should complete.
-  EXPECT_EQ(dispatcher.RunUntilStalled(), Ready());
+  dispatcher.RunToCompletion();
 }
 
 }  // namespace

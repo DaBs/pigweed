@@ -24,15 +24,14 @@ namespace pw::sync {
 
 inline BinarySemaphore::BinarySemaphore() : native_type_() {
   constexpr unsigned int kInitialCount = 0;
-  k_sem_init(&native_type_, kInitialCount, backend::kBinarySemaphoreMaxValue);
+  PW_ASSERT(k_sem_init(&native_type_,
+                       kInitialCount,
+                       backend::kBinarySemaphoreMaxValue) == 0);
 }
 
 inline BinarySemaphore::~BinarySemaphore() = default;
 
-inline void BinarySemaphore::release() {
-  PW_DASSERT(!interrupt::InInterruptContext());
-  k_sem_give(&native_type_);
-}
+inline void BinarySemaphore::release() { k_sem_give(&native_type_); }
 
 inline void BinarySemaphore::acquire() {
   PW_DASSERT(!interrupt::InInterruptContext());
@@ -43,12 +42,14 @@ inline bool BinarySemaphore::try_acquire() noexcept {
   return k_sem_take(&native_type_, K_NO_WAIT) == 0;
 }
 
+#ifndef CONFIG_TIMEOUT_64BIT
 inline bool BinarySemaphore::try_acquire_until(
     chrono::SystemClock::time_point deadline) {
   // Note that if this deadline is in the future, it will get rounded up by
   // one whole tick due to how try_acquire_for is implemented.
   return try_acquire_for(deadline - chrono::SystemClock::now());
 }
+#endif  // CONFIG_TIMEOUT_64BIT
 
 inline BinarySemaphore::native_handle_type BinarySemaphore::native_handle() {
   return native_type_;

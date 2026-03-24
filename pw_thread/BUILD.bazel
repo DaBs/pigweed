@@ -14,8 +14,8 @@
 
 load("@bazel_skylib//lib:selects.bzl", "selects")
 load("@com_google_protobuf//bazel:proto_library.bzl", "proto_library")
+load("@com_google_protobuf//bazel:py_proto_library.bzl", "py_proto_library")
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
-load("@rules_python//python:proto.bzl", "py_proto_library")
 load("@rules_python//sphinxdocs:sphinx_docs_library.bzl", "sphinx_docs_library")
 load("//pw_build:compatibility.bzl", "HOST_PLATFORMS", "host_backend_alias", "incompatible_with_mcu")
 load("//pw_build:pw_facade.bzl", "pw_facade")
@@ -196,6 +196,7 @@ cc_library(
         "thread_snapshot_service.cc",
     ],
     hdrs = ["public/pw_thread/thread_snapshot_service.h"],
+    features = ["-conversion_warnings"],
     implementation_deps = ["//pw_containers:vector"],
     strip_include_prefix = "public",
     tags = ["noclangtidy"],
@@ -295,6 +296,7 @@ cc_library(
     hdrs = [
         "public/pw_thread/snapshot.h",
     ],
+    features = ["-conversion_warnings"],
     strip_include_prefix = "public",
     deps = [
         ":config",
@@ -316,6 +318,19 @@ cc_library(
     strip_include_prefix = "public",
     deps = [
         ":thread",
+    ],
+)
+
+cc_library(
+    name = "checker",
+    hdrs = [
+        "public/pw_thread/checker.h",
+    ],
+    strip_include_prefix = "public",
+    deps = [
+        ":config",
+        ":thread",
+        "//pw_sync:lock_annotations",
     ],
 )
 
@@ -372,9 +387,9 @@ pw_cc_test(
 pw_cc_test(
     name = "options_test",
     srcs = ["options_test.cc"],
+    has_nc_test = True,
     deps = [
         ":options",
-        "//pw_compilation_testing:negative_compilation_testing",
     ],
 )
 
@@ -409,6 +424,7 @@ pw_cc_test(
         "pw_thread_private/thread_snapshot_service.h",
         "thread_snapshot_service_test.cc",
     ],
+    features = ["-conversion_warnings"],
     # TODO: https://pwbug.dev/342662853 - This test fails under ASAN.
     tags = [
         "noasan",
@@ -429,9 +445,9 @@ pw_cc_test(
 pw_cc_test(
     name = "priority_test",
     srcs = ["priority_test.cc"],
+    has_nc_test = True,
     deps = [
         ":generic_priority",
-        "//pw_compilation_testing:negative_compilation_testing",
         "//pw_unit_test:constexpr",
     ],
 )
@@ -439,18 +455,19 @@ pw_cc_test(
 pw_cc_test(
     name = "thread_creation_test",
     srcs = ["thread_creation_test.cc"],
+    has_nc_test = True,
     deps = [
         ":thread",
-        "//pw_compilation_testing:negative_compilation_testing",
+        "//pw_sync:binary_semaphore",
     ],
 )
 
 pw_cc_test(
     name = "attrs_test",
     srcs = ["attrs_test.cc"],
+    has_nc_test = True,
     deps = [
         ":thread",
-        "//pw_compilation_testing:negative_compilation_testing",
         "//pw_unit_test:constexpr",
     ],
 )
@@ -521,6 +538,7 @@ filegroup(
     name = "doxygen",
     srcs = [
         "public/pw_thread/attrs.h",
+        "public/pw_thread/checker.h",
         "public/pw_thread/context.h",
         "public/pw_thread/internal/priority.h",
         "public/pw_thread/options.h",

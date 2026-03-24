@@ -4,8 +4,8 @@
 Kudzu
 =====
 .. card::
-    :img-background: https://storage.googleapis.com/pigweed-media/kudzu-finished-photo-diagonal.jpg
-    :link: https://storage.googleapis.com/pigweed-media/kudzu-finished-photo-diagonal.jpg
+    :img-background: https://www.gstatic.com/pigweed/kudzu-finished-photo-diagonal.jpg
+    :link: https://www.gstatic.com/pigweed/kudzu-finished-photo-diagonal.jpg
     :img-alt: A single Kudzu badge face-up on a table viewed at a diagonal.
 
 Kudzu is a just-for-fun project that the Pigweed team made for Maker Faire

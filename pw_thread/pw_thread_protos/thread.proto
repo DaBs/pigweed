@@ -90,6 +90,20 @@ message Thread {
   optional uint64 stack_end_pointer = 8;
 
   // The current stack pointer of this thread.
+  //
+  // This value depends on the state of the thread:
+  //
+  // * If the thread is not running, this reflects the stack pointer saved in
+  //   the TCB. Note that this points to the register context saved by the OS
+  //   scheduler, and does not reflect the SP value that the thread will have
+  //   when it is resumed.
+  //
+  // * If the thread is running, this should correctly reflect the most recent
+  //   stack pointer for the running thread. Note that some projects may
+  //   unintentionally report a stack pointer value as stored in the TCB, which
+  //   is often stale/inaccurate.
+  //
+  // See uses of the StackContext struct for more detail.
   optional uint64 stack_pointer = 9;
 
   // CPU usage info. This is the percentage of CPU time the thread has been
@@ -101,6 +115,22 @@ message Thread {
   // (stack_estimate_max_addr-stack_start_pointer) /
   // (stack_end_pointer-stack_start_pointer) * 100%
   optional uint64 stack_pointer_est_peak = 11;
+
+  // A unique, numeric identifier for this thread.
+  //
+  // For most thread backends, this will match the value returned by
+  // Thread::get_id().native(), though it is not required or guaranteed.
+  //
+  // This value should be used to refer to this thread in a context that
+  // requires numeric thread IDs, e.g. in a coredump for use with GDB or LLDB.
+  optional uint64 id = 12;
+
+  // RESERVED FOR PIGWEED. Downstream projects may NOT write to these fields.
+  // Encodes to two bytes of tag overhead.
+  reserved 13 to 1031;
+
+  // RESERVED FOR USERS. Encodes to two or more bytes of tag overhead.
+  reserved 1032 to max;
 }
 
 // This message overlays the pw.snapshot.Snapshot proto. It's valid to encode

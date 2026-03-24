@@ -1,54 +1,68 @@
 .. _target-rp2040:
 
-===================
-Raspberry Pi RP2040
-===================
-.. _Raspberry Pi RP2040: https://www.raspberrypi.com/documentation/microcontrollers/rp2040.html
+==============================
+Raspberry Pi RP2040 and RP2350
+==============================
+.. _Raspberry Pi RP2040: https://www.raspberrypi.com/documentation/microcontrollers/silicon.html#rp2040
+.. _Raspberry Pi RP2350: https://www.raspberrypi.com/documentation/microcontrollers/silicon.html#rp2350
 .. _Raspberry Pi Pico: https://www.raspberrypi.com/products/raspberry-pi-pico/
+.. _Raspberry Pi Pico 2: https://www.raspberrypi.com/products/raspberry-pi-pico-2/
 
-This page explains Pigweed's support for the `Raspberry Pi RP2040`_ microcontroller
-and for boards built on top of the RP2040, such as the `Raspberry Pi Pico`_.
+This page explains Pigweed's support for the `Raspberry Pi RP2040`_ and
+`Raspberry Pi RP2350`_ micro-controllers, and for
+boards built on top of them, such as the `Raspberry Pi Pico`_ and
+`Raspberry Pi Pico 2`_ (collectively we call them "RP2s", and just "Pico") .
 
---------------
+.. important::
+
+  Some parts of Pigweed such as module names and other configuration files
+  still identify themselves as for the "rp2040", as that was first released,
+  and so first supported. However the rp2350 is similar enough that the two can
+  share most source code, so an rp2350 build will use them.
+
+  That said, you do have to specify the correct target name when using a
+  ``--config`` or ``--chip`` argument to certain commands, as there are details
+  such as the memory map that are incompatible.
+
+
 Intended usage
 --------------
-Pigweed's :ref:`mission <docs-mission>` is to help large teams
-develop embedded systems sustainably, robustly, and rapidly.
-Our support for the RP2040 revolves around making it easier for
-these teams to develop complex prototypes or mass market products
-on top of the RP2040. Our main goals are to make it easy to:
+Pigweed's :ref:`mission <docs-mission>` is to help large teams develop embedded
+systems sustainably, robustly, and rapidly. Our support for the RP2s revolves
+around making it easier for these teams to develop complex prototypes or mass
+market products on top of the RP2s. Our main goals are to make it easy to:
 
 .. _C/C++ SDK: https://www.raspberrypi.com/documentation/microcontrollers/c_sdk.html
 
 * Do your end-to-end development lifecycle (building, flashing, testing, etc.)
   in Bazel.
 * Author your embedded system in portable C++. You can write most of your
-  system on top of Pigweed's hardware-agnostic :ref:`modules <docs-glossary-module>`.
-  If there's anything not covered by Pigweed's modules, you can fallback
-  to using the official `C/C++ SDK`_ directly.
+  system on top of Pigweed's hardware-agnostic
+  :ref:`modules <docs-glossary-module>`. If there's anything not covered by
+  Pigweed's modules, you can fallback to using the official `C/C++ SDK`_
+  directly.
 
 .. _MicroPython SDK: https://www.raspberrypi.com/documentation/microcontrollers/micropython.html
 
-If you're building relatively simple stuff solely for the RP2040 and just want
-to get everything working very quickly and easily, then Pigweed probably won't
-be a good fit for you. You'll probably be happier with the official
-`MicroPython SDK`_ or the official `C/C++ SDK`_.
+If you're building relatively simple stuff solely for the RP2s,
+and just want to get everything working very quickly and easily, then Pigweed
+probably won't be a good fit for you. You'll probably be happier with the
+official `MicroPython SDK`_ or the official `C/C++ SDK`_.
 
 --------
 Examples
 --------
 .. _Sense showcase: https://pigweed.googlesource.com/pigweed/showcase/sense/
 
-The `Sense showcase`_ is our work-in-progress demonstration of using
-the RP2040, Bazel, and Pigweed together. The showcase is scheduled to be
-completed in July 2024.
+The `Sense showcase`_ is our work-in-progress demonstration product for using
+Pigweed with a Pico or Pico 2.
 
 -------
 Modules
 -------
-Most Pigweed :ref:`modules <docs-glossary-module>` work on all
-hardware platforms. A few areas such as I2C require integrating with
-a specific Pigweed module.
+Most Pigweed :ref:`modules <docs-glossary-module>` work on all hardware
+platforms. A few areas such as I2C require integrating with a specific Pigweed
+module.
 
 .. csv-table::
    :header: "Description", "Module"

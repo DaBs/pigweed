@@ -27,8 +27,10 @@
 namespace bt::testing {
 
 struct ExpectationMetadata {
-  ExpectationMetadata(const char* file, int line, const char* expectation)
-      : file(file), line(line), expectation(expectation) {}
+  ExpectationMetadata(const char* file_init,
+                      int line_init,
+                      const char* expectation_init)
+      : file(file_init), line(line_init), expectation(expectation_init) {}
   const char* file;
   int line;
   // String inside of the expectation expression:

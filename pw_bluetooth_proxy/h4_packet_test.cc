@@ -24,6 +24,8 @@ namespace pw::bluetooth::proxy {
 
 namespace {
 
+using ReleaseFn = H4PacketWithH4::ReleaseFn;
+
 TEST(H4Packet, H4PacketWithHciGets) {
   std::array<uint8_t, 5> hci_buffer{0, 1, 2, 3, 4};
   H4PacketWithHci packet{emboss::H4PacketType::COMMAND, pw::span{hci_buffer}};
@@ -225,8 +227,7 @@ TEST(H4PacketRelease, ResetAndReturnReleaseFn) {
     pw::span<uint8_t> span_from_packet = packet.GetH4Span();
     EXPECT_FALSE(span_from_packet.empty());
 
-    pw::Function<void(const uint8_t*)> release_fn =
-        packet.ResetAndReturnReleaseFn();
+    ReleaseFn release_fn = packet.ResetAndReturnReleaseFn();
     EXPECT_TRUE(release_fn);
 
     // packet was reset by ResetAndReturnReleaseFn

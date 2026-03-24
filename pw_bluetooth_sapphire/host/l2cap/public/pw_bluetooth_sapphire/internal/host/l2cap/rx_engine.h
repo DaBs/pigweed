@@ -36,6 +36,12 @@ class RxEngine {
   // * The caller must ensure that |pdu.is_valid() == true|.
   virtual ByteBufferPtr ProcessPdu(PDU pdu) = 0;
 
+  // Acknowledge that a packet has been read. This does nothing in most modes,
+  // but will return credits in credit-based modes.
+  virtual void AcknowledgeRead() {}
+
+  virtual bool IsQueueEmpty() = 0;
+
  private:
   BT_DISALLOW_COPY_AND_ASSIGN_ALLOW_MOVE(RxEngine);
 };

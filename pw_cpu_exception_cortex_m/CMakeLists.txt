@@ -160,6 +160,7 @@ if("${pw_cpu_exception.entry_BACKEND}" STREQUAL
     SOURCES
       exception_entry_test.cc
     PRIVATE_DEPS
+      pw_containers.storage
       pw_cpu_exception.entry
       pw_cpu_exception.handler
       pw_cpu_exception.support
@@ -167,7 +168,7 @@ if("${pw_cpu_exception.entry_BACKEND}" STREQUAL
       pw_cpu_exception_cortex_m.cpu_exception
       pw_cpu_exception_cortex_m.cpu_state
       pw_span
-      pw_toolchain.infinite_loop
+      pw_toolchain.busy_wait_forever
     GROUPS
       modules
       pw_cpu_exception_cortex_m

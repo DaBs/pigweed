@@ -14,6 +14,7 @@
 
 package dev.pigweed.pw_rpc;
 
+import com.google.errorprone.annotations.concurrent.GuardedBy;
 import com.google.protobuf.ByteString;
 import com.google.protobuf.MessageLite;
 import dev.pigweed.pw_log.Logger;
@@ -21,6 +22,7 @@ import dev.pigweed.pw_rpc.internal.Packet.RpcPacket;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.function.BiFunction;
@@ -42,12 +44,30 @@ import javax.annotation.Nullable;
 class Endpoint {
   private static final Logger logger = Logger.forClass(Endpoint.class);
 
+  // Call IDs are varint encoded. Limit the varint size to 2 bytes (14 usable bits).
+  private static final int MAX_CALL_ID = 1 << 14;
+  static final int FIRST_CALL_ID = 1;
+  // These call Ids are specifically reserved for open call ids.
+  static final int LEGACY_OPEN_CALL_ID = 0;
+  static final int OPEN_CALL_ID = -1;
+
+  private final Packets packets;
   private final Map<Integer, Channel> channels;
   private final Map<PendingRpc, AbstractCall<?, ?>> pending = new HashMap<>();
   private final BlockingQueue<Runnable> callUpdates = new LinkedBlockingQueue<>();
+  private final int maxCallId;
 
-  public Endpoint(List<Channel> channels) {
+  @GuardedBy("this") private int nextCallId = FIRST_CALL_ID;
+
+  Endpoint(CallIdMode callIdMode, List<Channel> channels) {
+    this(callIdMode, channels, MAX_CALL_ID);
+  }
+
+  /** Create endpoint with {@code maxCallId} possible call_ids for testing purposes */
+  Endpoint(CallIdMode callIdMode, List<Channel> channels, int maxCallId) {
+    this.packets = new Packets(callIdMode);
     this.channels = channels.stream().collect(Collectors.toMap(Channel::id, c -> c));
+    this.maxCallId = maxCallId;
   }
 
   /**
@@ -70,7 +90,7 @@ class Endpoint {
 
     try {
       // If sending the packet fails, the RPC is never considered pending.
-      call.rpc().channel().send(Packets.request(call.rpc(), request));
+      call.rpc().channel().send(packets.request(call.rpc(), request));
     } catch (ChannelOutputException e) {
       call.handleExceptionOnInitialPacket(e);
     }
@@ -86,7 +106,7 @@ class Endpoint {
    */
   <CallT extends AbstractCall<?, ?>> CallT openRpc(
       int channelId, Method method, BiFunction<Endpoint, PendingRpc, CallT> createCall) {
-    CallT call = createCall(channelId, method, createCall);
+    CallT call = createCall(channelId, method, createCall, OPEN_CALL_ID);
     logger.atFiner().log("Opening %s", call);
     registerCall(call);
     return call;
@@ -94,20 +114,25 @@ class Endpoint {
 
   private <CallT extends AbstractCall<?, ?>> CallT createCall(
       int channelId, Method method, BiFunction<Endpoint, PendingRpc, CallT> createCall) {
+    return createCall(channelId, method, createCall, getNewCallId());
+  }
+
+  private <CallT extends AbstractCall<?, ?>> CallT createCall(int channelId,
+      Method method,
+      BiFunction<Endpoint, PendingRpc, CallT> createCall,
+      int callId) {
     Channel channel = channels.get(channelId);
     if (channel == null) {
       throw InvalidRpcChannelException.unknown(channelId);
     }
 
-    return createCall.apply(this, PendingRpc.create(channel, method));
+    // Use 0 for call ID when IDs are disabled, which is equivalent to an unset ID in the packet.
+    PendingRpc pendingRpc =
+        PendingRpc.create(channel, method, packets.callIdsEnabled() ? callId : 0);
+    return createCall.apply(this, pendingRpc);
   }
 
   private void registerCall(AbstractCall<?, ?> call) {
-    // TODO(hepler): Use call_id to support simultaneous calls for the same RPC on one channel.
-    //
-    // Originally, only one call per service/method/channel was supported. With this restriction,
-    // the original call should have been aborted here, but was not. The client will be updated to
-    // support multiple simultaneous calls instead of aborting the call.
     pending.put(call.rpc(), call);
   }
 
@@ -138,7 +163,7 @@ class Endpoint {
         }
 
         enqueueCallUpdate(() -> call.handleError(Status.CANCELLED));
-        call.sendPacket(Packets.cancel(call.rpc()));
+        call.sendPacket(packets.cancel(call.rpc()));
       }
     } finally {
       logger.atFiner().log("Cancelling %s", call);
@@ -162,12 +187,12 @@ class Endpoint {
 
   public synchronized boolean clientStream(AbstractCall<?, ?> call, MessageLite payload)
       throws ChannelOutputException {
-    return sendPacket(call, Packets.clientStream(call.rpc(), payload));
+    return sendPacket(call, packets.clientStream(call.rpc(), payload));
   }
 
   public synchronized boolean clientStreamEnd(AbstractCall<?, ?> call)
       throws ChannelOutputException {
-    return sendPacket(call, Packets.clientStreamEnd(call.rpc()));
+    return sendPacket(call, packets.clientStreamEnd(call.rpc()));
   }
 
   private boolean sendPacket(AbstractCall<?, ?> call, byte[] packet) throws ChannelOutputException {
@@ -199,7 +224,7 @@ class Endpoint {
   }
 
   private boolean handleNext(PendingRpc rpc, ByteString payload) {
-    AbstractCall<?, ?> call = pending.get(rpc);
+    AbstractCall<?, ?> call = getCall(rpc);
     if (call == null) {
       return false;
     }
@@ -209,7 +234,12 @@ class Endpoint {
   }
 
   private boolean handleUnaryCompleted(PendingRpc rpc, ByteString payload, Status status) {
-    AbstractCall<?, ?> call = pending.remove(rpc);
+    PendingRpc rpcToRemove = getRpc(rpc);
+    if (rpcToRemove == null) {
+      return false;
+    }
+
+    AbstractCall<?, ?> call = pending.remove(rpcToRemove);
     if (call == null) {
       return false;
     }
@@ -220,7 +250,11 @@ class Endpoint {
   }
 
   private boolean handleStreamCompleted(PendingRpc rpc, Status status) {
-    AbstractCall<?, ?> call = pending.remove(rpc);
+    PendingRpc rpcToRemove = getRpc(rpc);
+    if (rpcToRemove == null) {
+      return false;
+    }
+    AbstractCall<?, ?> call = pending.remove(rpcToRemove);
     if (call == null) {
       return false;
     }
@@ -254,7 +288,9 @@ class Endpoint {
         return true; // true since the packet was handled, even though it was invalid.
       }
 
-      PendingRpc rpc = PendingRpc.create(channel, method);
+      // Use 0 for call ID when IDs are disabled, which is equivalent to an unset ID in the packet.
+      int callId = packets.callIdsEnabled() ? packet.getCallId() : 0;
+      PendingRpc rpc = PendingRpc.create(channel, method, callId);
       if (!updateCall(packet, rpc)) {
         logger.atFine().log("Ignoring packet for %s, which isn't pending", rpc);
         sendError(channel, packet, Status.FAILED_PRECONDITION);
@@ -291,9 +327,9 @@ class Endpoint {
     return true;
   }
 
-  private static void sendError(Channel channel, RpcPacket packet, Status status) {
+  private void sendError(Channel channel, RpcPacket packet, Status status) {
     try {
-      channel.send(Packets.error(packet, status));
+      channel.send(packets.error(packet, status));
     } catch (ChannelOutputException e) {
       logger.atWarning().withCause(e).log("Failed to send error packet");
     }
@@ -307,5 +343,73 @@ class Endpoint {
       return Status.UNKNOWN;
     }
     return status;
+  }
+
+  @Nullable
+  private Map.Entry<PendingRpc, AbstractCall<?, ?>> getRpcCallPair(PendingRpc rpc) {
+    if (packets.callIdsEnabled()
+        && (rpc.callId() == LEGACY_OPEN_CALL_ID || rpc.callId() == OPEN_CALL_ID)) {
+      Optional<Map.Entry<PendingRpc, AbstractCall<?, ?>>> openCall =
+          pending.entrySet()
+              .stream()
+              .filter(entry -> entry.getKey().equalsExceptCallId(rpc))
+              .findFirst();
+
+      if (openCall.isEmpty()) {
+        return null;
+      }
+
+      PendingRpc newRpc = PendingRpc.withCallId(rpc, openCall.get().getKey().callId());
+      return Map.entry(newRpc, openCall.get().getValue());
+    }
+
+    AbstractCall<?, ?> call = pending.get(rpc);
+    return call == null ? null : Map.entry(rpc, pending.get(rpc));
+  }
+
+  /**
+   * Gets the correct pending rpc.
+   *
+   * If call ids are not enabled, this should always be the original rpc, however, if call_ids are
+   * enabled and the call_id is set to an open call id, then the rpc should be the first pending
+   * call to the corresponding <channel, service, method> tuple. If there aren't any pending calls
+   * that match, then null is returned.
+   */
+  @Nullable
+  private PendingRpc getRpc(PendingRpc rpc) {
+    Map.Entry<PendingRpc, AbstractCall<?, ?>> call = getRpcCallPair(rpc);
+    return call == null ? null : call.getKey();
+  }
+
+  /**
+   * Gets the correct pending call.
+   *
+   * If call ids are not enabled, this should always be the original call, however, if call_ids are
+   * enabled and the call_id is set to an open call id, then the call should be the first pending
+   * call to the corresponding <channel, service, method> tuple. If there aren't any pending calls
+   * that match, then null is returned.
+   */
+  @Nullable
+  private AbstractCall<?, ?> getCall(PendingRpc rpc) {
+    Map.Entry<PendingRpc, AbstractCall<?, ?>> call = getRpcCallPair(rpc);
+    return call == null ? null : call.getValue();
+  }
+
+  /** Gets the next available call id and increments internal count for next call. */
+  private synchronized int getNewCallId() {
+    int callId = nextCallId;
+    nextCallId = (nextCallId + 1) % maxCallId;
+
+    // Skip call_id `0` to avoid confusion with legacy servers which use call_id `0` as
+    // an open call id or which do not provide call_id at all.
+    if (nextCallId == 0) {
+      nextCallId = FIRST_CALL_ID;
+    }
+    return callId;
+  }
+
+  /** Expose the Packets object for internal use by TestClient. */
+  Packets getPackets() {
+    return packets;
   }
 }

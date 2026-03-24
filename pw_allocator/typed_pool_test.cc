@@ -62,6 +62,10 @@ TEST_F(TypedPoolTest, AllocateDeallocate) {
   allocator.Deallocate(ptr);
 }
 
+TEST_F(TypedPoolTest, NewDelete) {}
+TEST_F(TypedPoolTest, NewDeleteBoundedArray) {}
+TEST_F(TypedPoolTest, NewDeleteUnboundedArray) {}
+
 TEST_F(TypedPoolTest, MakeUnique) {
   TypedPool<U32> allocator(buffer_);
 

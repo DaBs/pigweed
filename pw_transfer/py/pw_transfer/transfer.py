@@ -211,6 +211,10 @@ class Transfer(abc.ABC):
         """Returns the identifier of the resource being transferred."""
         return self._resource_id
 
+    def is_initiating(self) -> bool:
+        """Returns true if the transfer is starting its handshake."""
+        return self._state is Transfer._State.INITIATING
+
     @property
     @abc.abstractmethod
     def data(self) -> bytes:

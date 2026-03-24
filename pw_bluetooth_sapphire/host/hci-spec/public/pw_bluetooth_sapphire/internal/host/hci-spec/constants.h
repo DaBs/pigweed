@@ -176,7 +176,7 @@ enum class LESupportedFeature : uint64_t {
   // Added in 5.2
   kConnectedIsochronousStreamCentral     = (1 << 28),
   kConnectedIsochronousStreamPeripheral  = (1 << 29),
-  kIsochronousBoradcaster                = (1 << 30),
+  kIsochronousBroadcaster                = (1 << 30),
   kSynchronizedReceiver                  = (1ull << 31),
   kConnectedIsochronousStreamHostSupport = (1ull << 32),
   kLEPowerControlRequest                 = (1ull << 33),
@@ -450,7 +450,16 @@ inline constexpr int8_t kLEAdvertisingTxPowerMin = -127;
 inline constexpr int8_t kLEAdvertisingTxPowerMax = 20;
 inline constexpr int8_t kLEExtendedAdvertisingTxPowerNoPreference = 0x7F; // Vol 4, Part E, 7.8.53
 
-// Values used in enabling extended advertising. See Core Spec v5.0 Vol 4, Part E, 7.8.56.
+// The valid range of RSSI values in event packets. Core Spec v6.0, Vol 4, Part E, 7.7.38.
+inline constexpr int8_t kMinRssi = -127;
+inline constexpr int8_t kMaxRssi = 20;
+
+// Core Spec v5.0 Volume 4, Part E, Section 7.8.56: The range of valid
+// advertising handles is 0x00 to 0xEF. However, some Controllers internally
+// reserve advertising handle 0x00 for legacy HCI LE command use. To avoid
+// issues with those Controllers, we avoid using 0x00 entirely. These values are
+// used in enabling extended advertising.
+inline constexpr uint8_t kMinAdvertisingHandle = 0x01;
 inline constexpr uint8_t kMaxAdvertisingHandle = 0xEF;
 inline constexpr uint8_t kNoMaxExtendedAdvertisingEvents = 0;
 inline constexpr uint8_t kNoAdvertisingDuration = 0;
@@ -663,6 +672,9 @@ inline constexpr int8_t kRSSIInvalid = 127;
 
 // Invalid advertising sid value
 inline constexpr uint8_t kAdvertisingSidInvalid = 0xFF;
+
+// Invalid periodic advertising interval
+inline constexpr uint16_t kPeriodicAdvertisingIntervalInvalid = 0x0000;
 
 // The maximum length of a friendly name that can be assigned to a BR/EDR
 // controller, in octets.

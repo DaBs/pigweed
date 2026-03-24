@@ -21,10 +21,8 @@ package {
 // backend.
 cc_library_static {
     name: "pw_sys_io_stdio",
-    cpp_std: "c++20",
-    vendor_available: true,
-    host_supported: true,
     defaults: [
+        "pw_android_common_target_support",
         "pw_log_basic_no_backends",
         "pw_sys_io_no_backends",
     ],

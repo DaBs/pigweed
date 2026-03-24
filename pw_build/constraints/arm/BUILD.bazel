@@ -97,3 +97,8 @@ constraint_value(
     constraint_setting = ":mcpu",
     deprecation = "FPU properties should be expressed with different constraints",
 )
+
+constraint_value(
+    name = "cortex-m55",
+    constraint_setting = ":mcpu",
+)

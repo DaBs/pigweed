@@ -41,8 +41,7 @@
 
 namespace pw::channel {
 
-/// @addtogroup pw_channel
-/// @{
+/// @module{pw_channel}
 
 /// The basic `Channel` type. Unlike `AnyChannel`, the `Channel`'s properties
 /// are expressed in template parameters and thus reflected in the type.
@@ -52,6 +51,10 @@ namespace pw::channel {
 ///
 /// To implement a `Channel`, inherit from `ChannelImpl` with the specified
 /// properties.
+///
+/// @deprecated `Channel` has not been updated for pw_async2 futures or the new
+/// `pw::MultiBuf`. It will be updated and renamed to avoid conflicts with
+/// `pw::async2::Channel`s.
 template <DataType kDataType, Property... kProperties>
 class Channel {
  public:
@@ -89,11 +92,11 @@ class Channel {
   }
 
   /// @copydoc AnyChannel::PendRead
-  async2::Poll<Result<multibuf::MultiBuf>> PendRead(async2::Context& cx);
+  async2::PollResult<multibuf::MultiBuf> PendRead(async2::Context& cx);
   /// @copydoc AnyChannel::PendReadyToWrite
   async2::Poll<Status> PendReadyToWrite(pw::async2::Context& cx);
   /// @copydoc AnyChannel::PendAllocateBuffer
-  async2::Poll<std::optional<multibuf::MultiBuf>> PendAllocateWriteBuffer(
+  async2::PollOptional<multibuf::MultiBuf> PendAllocateWriteBuffer(
       async2::Context& cx, size_t min_bytes);
   /// @copydoc AnyChannel::StageWrite
   Status StageWrite(multibuf::MultiBuf&& data);
@@ -139,6 +142,7 @@ class Channel {
     return as<Channel<data_type(), kOtherChannelProperties...>>();
   }
 
+  /// @returns A byte channel reference to a datagram channel
   [[nodiscard]] Channel<DataType::kByte, kProperties...>&
   IgnoreDatagramBoundaries() {
     static_assert(kDataType == DataType::kDatagram,
@@ -249,27 +253,19 @@ class AnyChannel
   ///
   /// Channels only support one read operation / waker at a time.
   ///
-  /// @returns @rst
-  ///
-  /// .. pw-status-codes::
-  ///
-  ///    OK: Data was read into a MultiBuf.
-  ///
-  ///    UNIMPLEMENTED: The channel does not support reading.
-  ///
-  ///    FAILED_PRECONDITION: The channel is closed.
-  ///
-  ///    OUT_OF_RANGE: The end of the stream was reached. This may be though
-  ///    of as reaching the end of a file. Future reads may succeed after
-  ///    ``Seek`` ing backwards, but no more new data will be produced. The
-  ///    channel is still open; writes and seeks may succeed.
-  ///
-  /// @endrst
-  async2::Poll<Result<multibuf::MultiBuf>> PendRead(async2::Context& cx) {
+  /// @returns
+  /// * @OK: Data was read into a `MultiBuf`.
+  /// * @UNIMPLEMENTED: The channel does not support reading.
+  /// * @FAILED_PRECONDITION: The channel is closed.
+  /// * @OUT_OF_RANGE: The end of the stream was reached. This may be thought of
+  ///   as reaching the end of a file. Future reads may succeed after seeking
+  ///   backwards, but no more new data will be produced. The channel is still
+  ///   open; writes and seeks may succeed.
+  async2::PollResult<multibuf::MultiBuf> PendRead(async2::Context& cx) {
     if (!is_read_open()) {
       return Status::FailedPrecondition();
     }
-    async2::Poll<Result<multibuf::MultiBuf>> result = DoPendRead(cx);
+    async2::PollResult<multibuf::MultiBuf> result = DoPendRead(cx);
     if (result.IsReady() && result->status().IsFailedPrecondition()) {
       set_read_closed();
     }
@@ -325,7 +321,7 @@ class AnyChannel
   /// * Pending - No buffer of at least `min_bytes` is available. The task
   ///   associated with the provided `pw::async2::Context` will be awoken
   ///   when a sufficiently-sized buffer becomes available.
-  async2::Poll<std::optional<multibuf::MultiBuf>> PendAllocateWriteBuffer(
+  async2::PollOptional<multibuf::MultiBuf> PendAllocateWriteBuffer(
       async2::Context& cx, size_t min_bytes) {
     return DoPendAllocateWriteBuffer(cx, min_bytes);
   }
@@ -346,21 +342,12 @@ class AnyChannel
   /// specialize ``PendAllocateWriteBuffer`` to return the next section of the
   /// buffer available for writing.
   ///
-  /// @returns @rst
-  /// May fail with the following error codes:
-  ///
-  /// .. pw-status-codes::
-  ///
-  ///    OK: Data was accepted by the channel.
-  ///
-  ///    UNIMPLEMENTED: The channel does not support writing.
-  ///
-  ///    UNAVAILABLE: The write failed due to a transient error (only applies
+  /// @returns May fail with the following error codes:
+  /// * @OK: Data was accepted by the channel.
+  /// * @UNIMPLEMENTED: The channel does not support writing.
+  /// * @UNAVAILABLE: The write failed due to a transient error (only applies
   ///    to unreliable channels).
-  ///
-  ///    FAILED_PRECONDITION: The channel is closed.
-  ///
-  /// @endrst
+  /// * @FAILED_PRECONDITION: The channel is closed.
   Status StageWrite(multibuf::MultiBuf&& data) {
     if (!is_write_open()) {
       return Status::FailedPrecondition();
@@ -399,23 +386,14 @@ class AnyChannel
   /// relative to the new position. Already-written data still being flushed
   /// will be output relative to the old position.
   ///
-  /// @returns @rst
-  ///
-  /// .. pw-status-codes::
-  ///
-  ///    OK: The current position was successfully changed.
-  ///
-  ///    UNIMPLEMENTED: The channel does not support seeking.
-  ///
-  ///    FAILED_PRECONDITION: The channel is closed.
-  ///
-  ///    NOT_FOUND: The seek was to a valid position, but the channel is no
-  ///    longer capable of seeking to this position (partially seekable
-  ///    channels only).
-  ///
-  ///    OUT_OF_RANGE: The seek went beyond the end of the stream.
-  ///
-  /// @endrst
+  /// @returns
+  /// * @OK: The current position was successfully changed.
+  /// * @UNIMPLEMENTED: The channel does not support seeking.
+  /// * @FAILED_PRECONDITION: The channel is closed.
+  /// * @NOT_FOUND: The seek was to a valid position, but the channel is no
+  ///   longer capable of seeking to this position (partially seekable
+  ///   channels only).
+  /// * @OUT_OF_RANGE: The seek went beyond the end of the stream.
   Status Seek(async2::Context& cx, ptrdiff_t position, Whence whence);
 
   /// Returns the current position in the stream, or `kUnknownPosition` if
@@ -426,19 +404,12 @@ class AnyChannel
 
   /// Closes the channel, flushing any data.
   ///
-  /// @returns @rst
-  ///
-  /// .. pw-status-codes::
-  ///
-  ///    OK: The channel was closed and all data was sent successfully.
-  ///
-  ///    DATA_LOSS: The channel was closed, but not all previously written
-  ///    data was delivered.
-  ///
-  ///    FAILED_PRECONDITION: Channel was already closed, which can happen
-  ///    out-of-band due to errors.
-  ///
-  /// @endrst
+  /// @returns
+  /// * @OK: The channel was closed and all data was sent successfully.
+  /// * @DATA_LOSS: The channel was closed, but not all previously written data
+  ///   was delivered.
+  /// * @FAILED_PRECONDITION: Channel was already closed, which can happen
+  ///   out-of-band due to errors.
   async2::Poll<pw::Status> PendClose(async2::Context& cx) {
     if (!is_read_or_write_open()) {
       return Status::FailedPrecondition();
@@ -482,13 +453,13 @@ class AnyChannel
 
   // Read functions
 
-  virtual async2::Poll<Result<multibuf::MultiBuf>> DoPendRead(
+  virtual async2::PollResult<multibuf::MultiBuf> DoPendRead(
       async2::Context& cx) = 0;
 
   // Write functions
 
-  virtual async2::Poll<std::optional<multibuf::MultiBuf>>
-  DoPendAllocateWriteBuffer(async2::Context& cx, size_t min_bytes) = 0;
+  virtual async2::PollOptional<multibuf::MultiBuf> DoPendAllocateWriteBuffer(
+      async2::Context& cx, size_t min_bytes) = 0;
 
   virtual pw::async2::Poll<Status> DoPendReadyToWrite(async2::Context& cx) = 0;
 

@@ -14,7 +14,20 @@
 
 import("//build_overrides/pigweed.gni")
 
+import("$dir_pw_sync/backend.gni")
+import("$dir_pw_thread/backend.gni")
+
 declare_args() {
-  # Configures the backend to use for the //pw_async2:dispatcher facade.
-  pw_async2_DISPATCHER_BACKEND = ""
+  # Configures the backend to use for the //pw_async2_for_test facade
+  if (host_os == "linux" && current_os == "linux") {
+    pw_async2_DISPATCHER_FOR_TEST_BACKEND =
+        "$dir_pw_async2:epoll_dispatcher_for_test"
+  } else if (pw_sync_THREAD_NOTIFICATION_BACKEND != "" &&
+             pw_sync_INTERRUPT_SPIN_LOCK_BACKEND != "" &&
+             pw_thread_SLEEP_BACKEND != "") {
+    pw_async2_DISPATCHER_FOR_TEST_BACKEND =
+        "$dir_pw_async2:basic_dispatcher_for_test"
+  } else {
+    pw_async2_DISPATCHER_FOR_TEST_BACKEND = ""
+  }
 }

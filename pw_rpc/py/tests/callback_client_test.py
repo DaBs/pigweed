@@ -154,9 +154,9 @@ class _CallbackClientImplTestBase(unittest.TestCase):
                 packet_pb2.RpcPacket(
                     type=packet_pb2.PacketType.SERVER_ERROR,
                     channel_id=channel_id,
-                    service_id=service
-                    if isinstance(service, int)
-                    else service.id,
+                    service_id=(
+                        service if isinstance(service, int) else service.id
+                    ),
                     method_id=method if isinstance(method, int) else method.id,
                     call_id=call_id,
                     status=status.value,
@@ -190,8 +190,7 @@ class _CallbackClientImplTestBase(unittest.TestCase):
         self.send_responses_after_packets = send_after_count
 
     def _sent_payload(self, message_type: type) -> Any:
-        message = message_type()
-        message.ParseFromString(self.last_request().payload)
+        message = message_type().FromString(self.last_request().payload)
         return message
 
 

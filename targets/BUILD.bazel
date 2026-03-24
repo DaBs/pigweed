@@ -31,6 +31,7 @@ sphinx_docs_library(
         "//targets/arduino:docs",
         "//targets/docs",
         "//targets/emcraft_sf2_som:docs",
+        "//targets/fuchsia:docs",
         "//targets/host:docs",
         "//targets/host_device_simulator:docs",
         "//targets/lm3s6965evb_qemu:docs",

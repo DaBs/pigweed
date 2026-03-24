@@ -19,6 +19,7 @@ from pathlib import Path
 import sys
 from typing import BinaryIO
 import elftools  # type: ignore
+import elftools.common  # type: ignore
 from elftools.elf import elffile, notes, sections  # type: ignore
 
 _LOG = logging.getLogger('build_id_parser')
@@ -38,13 +39,15 @@ def read_build_id_from_section(elf_file: BinaryIO) -> bytes | None:
         return None
 
     section_notes = list(
-        n
-        for n in notes.iter_notes(
+        notes.iter_notes(
             parsed_elf_file,
             build_id_section['sh_offset'],
             build_id_section['sh_size'],
         )
     )
+
+    if not section_notes:
+        raise GnuBuildIdError('GNU build ID section contains no notes')
 
     if len(section_notes) != 1:
         raise GnuBuildIdError('GNU build ID section contains multiple notes')

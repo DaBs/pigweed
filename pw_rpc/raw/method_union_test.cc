@@ -55,7 +55,9 @@ class FakeGeneratedServiceImpl
 
     std::byte response[32] = {};
     TestResponse::MemoryEncoder test_response(response);
-    ASSERT_EQ(OkStatus(), test_response.WriteValue(last_request.integer + 5));
+    ASSERT_EQ(OkStatus(),
+              test_response.WriteValue(
+                  static_cast<int32_t>(last_request.integer + 5)));
 
     ASSERT_EQ(OkStatus(),
               responder.Finish(span(response).first(test_response.size()),

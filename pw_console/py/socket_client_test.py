@@ -176,6 +176,58 @@ class TestSocketClient(unittest.TestCase):
             expected_port=socket_client.SocketClient.DEFAULT_SOCKET_PORT,
         )
 
+    def test_close(self) -> None:
+        with unittest.mock.patch.object(
+            socket_client.SocketClient, 'connect', return_value=None
+        ):
+            client = socket_client.SocketClient("default")
+            # Manually set connected to True since we mocked connect
+            client._connected = True  # pylint: disable=protected-access
+
+            # Mock the underlying socket
+            mock_socket = unittest.mock.MagicMock()
+            client.socket = mock_socket
+
+            client.close()
+
+            mock_socket.close.assert_called_once()
+            self.assertFalse(
+                client._connected  # pylint: disable=protected-access
+            )
+
+            # Call close again, should not call mock_socket.close again
+            client.close()
+            mock_socket.close.assert_called_once()
+
+    def test_del_calls_close(self) -> None:  # pylint: disable=no-self-use
+        with unittest.mock.patch.object(
+            socket_client.SocketClient, 'connect', return_value=None
+        ):
+            client = socket_client.SocketClient("default")
+            with unittest.mock.patch.object(client, 'close') as mock_close:
+                client.__del__()  # pylint: disable=unnecessary-dunder-call
+                mock_close.assert_called_once()
+
+    def test_handle_disconnect_calls_close(
+        self,
+    ) -> None:  # pylint: disable=no-self-use
+        on_disconnect_called = False
+
+        def on_disconnect(_client):
+            nonlocal on_disconnect_called
+            on_disconnect_called = True
+
+        with unittest.mock.patch.object(
+            socket_client.SocketClient, 'connect', return_value=None
+        ):
+            client = socket_client.SocketClient(
+                "default", on_disconnect=on_disconnect
+            )
+            with unittest.mock.patch.object(client, 'close') as mock_close:
+                client._handle_disconnect()  # pylint: disable=protected-access
+                mock_close.assert_called_once()
+                self.assertTrue(on_disconnect_called)
+
 
 if __name__ == '__main__':
     unittest.main()

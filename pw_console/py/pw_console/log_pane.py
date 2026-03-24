@@ -15,6 +15,7 @@
 
 from __future__ import annotations
 
+import copy
 import functools
 import logging
 import re
@@ -79,6 +80,7 @@ from pw_console.widgets import (
 
 if TYPE_CHECKING:
     from pw_console.console_app import ConsoleApp
+    from pw_console.background_command_runner import BackgroundTask
 
 _LOG_OUTPUT_SCROLL_AMOUNT = 5
 _LOG = logging.getLogger(__package__)
@@ -276,26 +278,22 @@ class LogContentControl(UIControl):
 
         return self.uicontent
 
-    def mouse_handler(self, mouse_event: MouseEvent):
+    def mouse_handler(
+        self, mouse_event: MouseEvent
+    ):  # pylint: disable=too-many-return-statements
         """Mouse handler for this control."""
         mouse_position = mouse_event.position
+        table_header = (
+            self.log_pane.table_header_toolbar.table_header_bar_control
+        )
 
-        # Left mouse button release should:
-        # 1. check if a mouse drag just completed.
-        # 2. If not in focus, switch focus to this log pane
-        #    If in focus, move the cursor to that position.
+        # Left mouse button press should:
+        # 1. If not in focus, switch focus to this log pane.
+        # 2. If in focus, move the cursor to that position.
         if (
-            mouse_event.event_type == MouseEventType.MOUSE_UP
+            mouse_event.event_type == MouseEventType.MOUSE_DOWN
             and mouse_event.button == MouseButton.LEFT
         ):
-            # If a drag was in progress and this is the first mouse release
-            # press, set the stop flag.
-            if (
-                self.visual_select_mode_drag_start
-                and not self.visual_select_mode_drag_stop
-            ):
-                self.visual_select_mode_drag_stop = True
-
             if not has_focus(self)():
                 # Focus the save as dialog if open.
                 if self.log_pane.saveas_dialog_active:
@@ -306,14 +304,47 @@ class LogContentControl(UIControl):
                 # Otherwise, focus on the log pane content.
                 else:
                     get_app().layout.focus(self)
+
                 # Mouse event handled, return None.
                 return None
 
             # Log pane in focus already, move the cursor to the position of the
-            # mouse click.
+            # mouse click and clear any visual selections.
+            self.log_pane.log_view.clear_visual_selection()
             self.log_pane.log_view.scroll_to_position(mouse_position)
+
             # Mouse event handled, return None.
             return None
+
+        # Left mouse button release should:
+        # 1. check if a mouse drag just completed.
+        if (
+            mouse_event.event_type == MouseEventType.MOUSE_UP
+            and mouse_event.button == MouseButton.LEFT
+        ):
+            # Check if a table resize is in progress and the cursor moved down
+            # over the log lines.
+            if (
+                self.log_pane.table_view
+                and table_header.column_drag_in_progress()
+            ):
+                table_header.handle_mouse_up_event(mouse_position)
+                return None
+
+            # If a drag was in progress and this is the first mouse release
+            # press, set the stop flag.
+            if (
+                self.visual_select_mode_drag_start
+                and not self.visual_select_mode_drag_stop
+            ):
+                if not has_focus(self)():
+                    # Don't modify the selection unless the window is in focus.
+                    return NotImplemented
+
+                self.visual_select_mode_drag_stop = True
+
+                # Mouse event handled, return None.
+                return None
 
         # Mouse drag with left button should start selecting lines.
         # The log pane does not need to be in focus to start this.
@@ -321,6 +352,19 @@ class LogContentControl(UIControl):
             mouse_event.event_type == MouseEventType.MOUSE_MOVE
             and mouse_event.button == MouseButton.LEFT
         ):
+            if not has_focus(self)():
+                # Don't modify the selection unless the window is in focus.
+                return NotImplemented
+
+            # Check if a table resize is in progress and the cursor moved down
+            # over the log lines.
+            if (
+                self.log_pane.table_view
+                and table_header.column_drag_in_progress()
+            ):
+                table_header.handle_mouse_drag_event(mouse_position)
+                return None
+
             # If a previous mouse drag was completed, clear the selection.
             if (
                 self.visual_select_mode_drag_start
@@ -465,16 +509,20 @@ class LogPaneWebsocketDialog(ConditionalContainer):
     def get_action_fragments(self):
         """Return FormattedText with the action buttons."""
         # Mouse handlers
-        focus = functools.partial(mouse_handlers.on_click, self.focus_self)
-        cancel = functools.partial(mouse_handlers.on_click, self.close_dialog)
-        copy = functools.partial(
+        focus_handler = functools.partial(
+            mouse_handlers.on_click, self.focus_self
+        )
+        cancel_handler = functools.partial(
+            mouse_handlers.on_click, self.close_dialog
+        )
+        copy_handler = functools.partial(
             mouse_handlers.on_click,
             self.copy_url_to_clipboard,
         )
 
         # Separator should have the focus mouse handler so clicking on any
         # whitespace focuses the input field.
-        separator_text = ('', '  ', focus)
+        separator_text = ('', '  ', focus_handler)
 
         # Default button style
         button_style = 'class:toolbar-button-inactive'
@@ -486,7 +534,7 @@ class LogPaneWebsocketDialog(ConditionalContainer):
             to_keybind_indicator(
                 key=None,
                 description='Stop',
-                mouse_handler=cancel,
+                mouse_handler=cancel_handler,
                 base_style=button_style,
             )
         )
@@ -496,13 +544,13 @@ class LogPaneWebsocketDialog(ConditionalContainer):
             to_keybind_indicator(
                 key=None,
                 description='Copy to Clipboard',
-                mouse_handler=copy,
+                mouse_handler=copy_handler,
                 base_style=button_style,
             )
         )
 
         # One space separator
-        fragments.append(('', ' ', focus))
+        fragments.append(('', ' ', focus_handler))
 
         return fragments
 
@@ -517,6 +565,7 @@ class LogPane(WindowPane):
         application: Any,
         pane_title: str = 'Logs',
         log_store: LogStore | None = None,
+        background_task: BackgroundTask | None = None,
     ):
         super().__init__(application, pane_title)
 
@@ -529,6 +578,8 @@ class LogPane(WindowPane):
         self.log_view: LogView = LogView(
             self, self.application, log_store=log_store
         )
+
+        self.background_task = background_task
 
         # Log pane size variables. These are updated just befor rendering the
         # pane by the LogLineHSplit class.
@@ -718,6 +769,7 @@ class LogPane(WindowPane):
             return
         # Show the search bar
         self.search_bar_active = True
+        self.search_toolbar.open_search_bar()
         # Focus on the search bar
         self.application.focus_on_container(self.search_toolbar)
 
@@ -834,6 +886,16 @@ class LogPane(WindowPane):
                 ),
                 self.toggle_websocket_server,
             ),
+        ]
+
+        options += [
+            (
+                'Reset column sizes',
+                self.log_view.reset_column_sizes,
+            ),
+        ]
+
+        options += [
             # Menu separator
             ('-', None),
             (
@@ -873,6 +935,42 @@ class LogPane(WindowPane):
             ),
         ]
 
+        # Table column visibility toggles
+        options += [
+            # Menu separator
+            ('-', None),
+        ]
+        for column_name in self.log_view.get_visible_table_columns():
+            if column_name == 'message':
+                continue
+
+            is_hidden = self.log_view.is_table_column_hidden(column_name)
+            checkbox = to_checkbox_text(not is_hidden, end='')
+            options.append(
+                (
+                    f'Log table show/hide: {checkbox} {column_name}',
+                    functools.partial(
+                        self.log_view.set_table_column_hidden,
+                        column_name,
+                        not is_hidden,
+                    ),
+                )
+            )
+
+        if self.background_task:
+            options += [
+                # Menu separator
+                ('-', None),
+                (
+                    'Stop process',
+                    self.background_task.stop_process,
+                ),
+                (
+                    'Restart process',
+                    self.background_task.restart_process,
+                ),
+            ]
+
         return options
 
     def apply_filters_from_config(self, window_options) -> None:
@@ -906,6 +1004,12 @@ class LogPane(WindowPane):
         # Register the duplicate pane as a viewer
         log_store.register_viewer(new_pane.log_view)
 
+        # Copy the current column visibility to the new pane.
+        new_pane.log_view.table.hidden_columns = copy.copy(
+            self.log_view.table.hidden_columns
+        )
+        new_pane.log_view.refresh_visible_table_columns()
+
         # Set any existing search state.
         new_pane.log_view.search_text = self.log_view.search_text
         new_pane.log_view.search_filter = self.log_view.search_filter
@@ -928,9 +1032,10 @@ class LogPane(WindowPane):
     ) -> None:
         """Add a log handlers to this LogPane."""
 
+        assert isinstance(logger, (logging.Logger, str))
         if isinstance(logger, logging.Logger):
             logger_instance = logger
-        elif isinstance(logger, str):
+        else:
             logger_instance = logging.getLogger(logger)
 
         if level_name:

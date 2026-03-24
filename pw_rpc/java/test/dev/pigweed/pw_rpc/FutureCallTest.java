@@ -33,10 +33,13 @@ import java.util.List;
 import java.util.concurrent.ExecutionException;
 import org.junit.Rule;
 import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.junit.runners.JUnit4;
 import org.mockito.Mock;
 import org.mockito.junit.MockitoJUnit;
 import org.mockito.junit.MockitoRule;
 
+@RunWith(JUnit4.class)
 public final class FutureCallTest {
   @Rule public final MockitoRule mockito = MockitoJUnit.rule();
 
@@ -51,8 +54,8 @@ public final class FutureCallTest {
   @Mock private Channel.Output mockOutput;
 
   private final Channel channel = new Channel(CHANNEL_ID, packet -> mockOutput.send(packet));
-  private final Endpoint endpoint = new Endpoint(ImmutableList.of(channel));
-  private final PendingRpc rpc = PendingRpc.create(channel, METHOD);
+  private final Endpoint endpoint = new Endpoint(CallIdMode.ENABLED, ImmutableList.of(channel));
+  private final PendingRpc rpc = PendingRpc.create(channel, METHOD, Endpoint.FIRST_CALL_ID);
 
   @Test
   public void unaryFuture_response_setsValue() throws Exception {

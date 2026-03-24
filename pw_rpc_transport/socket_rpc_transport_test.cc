@@ -17,7 +17,9 @@
 #include <algorithm>
 #include <random>
 
+#include "pw_allocator/testing.h"
 #include "pw_bytes/span.h"
+#include "pw_containers/dynamic_vector.h"
 #include "pw_log/log.h"
 #include "pw_rpc_transport/socket_rpc_transport.h"
 #include "pw_span/span.h"
@@ -41,7 +43,7 @@ constexpr uint16_t kServerPort = 0;
 class TestIngress : public RpcIngressHandler {
  public:
   explicit TestIngress(size_t num_bytes_expected)
-      : num_bytes_expected_(num_bytes_expected) {}
+      : num_bytes_expected_(num_bytes_expected), received_(allocator_) {}
 
   Status ProcessIncomingData(ConstByteSpan buffer) override {
     if (num_bytes_expected_ > 0) {
@@ -54,19 +56,20 @@ class TestIngress : public RpcIngressHandler {
     return OkStatus();
   }
 
-  std::vector<std::byte> received() const { return received_; }
+  const pw::DynamicVector<std::byte>& received() const { return received_; }
   void Wait() { done_.acquire(); }
 
  private:
   size_t num_bytes_expected_ = 0;
   sync::ThreadNotification done_;
-  std::vector<std::byte> received_;
+  pw::allocator::test::AllocatorForTest<32768> allocator_;
+  pw::DynamicVector<std::byte> received_;
 };
 
 class SocketSender {
  public:
   SocketSender(SocketRpcTransport<kReadBufferSize>& transport)
-      : transport_(transport) {
+      : transport_(transport), sent_(allocator_) {
     unsigned char c = 0;
     for (auto& i : data_) {
       i = std::byte{c++};
@@ -75,7 +78,7 @@ class SocketSender {
     std::shuffle(data_.begin(), data_.end(), rg);
   }
 
-  std::vector<std::byte> sent() { return sent_; }
+  const pw::DynamicVector<std::byte>& sent() const { return sent_; }
 
   RpcFrame MakeFrame(size_t max_size) {
     std::mt19937 rg{0x12345678};
@@ -117,7 +120,8 @@ class SocketSender {
 
  private:
   SocketRpcTransport<kReadBufferSize>& transport_;
-  std::vector<std::byte> sent_;
+  pw::allocator::test::AllocatorForTest<32768> allocator_;
+  pw::DynamicVector<std::byte> sent_;
   std::array<std::byte, 256> data_{};
   std::uniform_int_distribution<size_t> offset_dist_{0, 255};
   std::uniform_int_distribution<size_t> size_dist_{1, kMaxWriteSize};
@@ -177,13 +181,13 @@ TEST(SocketRpcTransportTest, SendAndReceiveFramesOverSocketConnection) {
   server_thread.join();
   client_thread.join();
 
-  auto received_by_server = server_ingress.received();
+  const auto& received_by_server = server_ingress.received();
   EXPECT_EQ(received_by_server.size(), kWriteSize);
   EXPECT_TRUE(std::equal(received_by_server.begin(),
                          received_by_server.end(),
                          client_sender.sent().begin()));
 
-  auto received_by_client = client_ingress.received();
+  const auto& received_by_client = client_ingress.received();
   EXPECT_EQ(received_by_client.size(), kWriteSize);
   EXPECT_TRUE(std::equal(received_by_client.begin(),
                          received_by_client.end(),
@@ -194,7 +198,8 @@ TEST(SocketRpcTransportTest, ServerReconnects) {
   // Set up a server and a client that reconnects multiple times. The server
   // must accept the new connection gracefully.
   constexpr size_t kWriteSize = 8192;
-  std::vector<std::byte> received;
+  pw::allocator::test::AllocatorForTest<32768> allocator;
+  pw::DynamicVector<std::byte> received(allocator);
 
   TestIngress server_ingress(0);
   auto server = SocketRpcTransport<kReadBufferSize>(
@@ -221,7 +226,7 @@ TEST(SocketRpcTransportTest, ServerReconnects) {
 
     server_sender.Send(kWriteSize);
     client_ingress.Wait();
-    auto client_received = client_ingress.received();
+    const auto& client_received = client_ingress.received();
     std::copy(client_received.begin(),
               client_received.end(),
               std::back_inserter(received));
@@ -248,7 +253,7 @@ TEST(SocketRpcTransportTest, ServerReconnects) {
 
     server_sender.Send(kWriteSize);
     client_ingress.Wait();
-    auto client_received = client_ingress.received();
+    const auto& client_received = client_ingress.received();
     std::copy(client_received.begin(),
               client_received.end(),
               std::back_inserter(received));
@@ -298,11 +303,12 @@ TEST(SocketRpcTransportTest, ClientReconnects) {
 
   SocketSender client_sender(client);
   SocketSender server1_sender(*server);
-  std::vector<std::byte> sent_by_server;
+  pw::allocator::test::AllocatorForTest<32768> allocator;
+  pw::DynamicVector<std::byte> sent_by_server(allocator);
 
   server1_sender.Send(kWriteSize);
   server->Stop();
-  auto server1_sent = server1_sender.sent();
+  const auto& server1_sent = server1_sender.sent();
   std::copy(server1_sent.begin(),
             server1_sent.end(),
             std::back_inserter(sent_by_server));
@@ -324,7 +330,7 @@ TEST(SocketRpcTransportTest, ClientReconnects) {
   client_ingress.Wait();
 
   server->Stop();
-  auto server2_sent = server2_sender.sent();
+  const auto& server2_sent = server2_sender.sent();
   std::copy(server2_sent.begin(),
             server2_sent.end(),
             std::back_inserter(sent_by_server));
@@ -335,7 +341,7 @@ TEST(SocketRpcTransportTest, ClientReconnects) {
   client_thread.join();
   server = nullptr;
 
-  auto received_by_client = client_ingress.received();
+  const auto& received_by_client = client_ingress.received();
   EXPECT_EQ(received_by_client.size(), 2 * kWriteSize);
   EXPECT_TRUE(std::equal(received_by_client.begin(),
                          received_by_client.end(),

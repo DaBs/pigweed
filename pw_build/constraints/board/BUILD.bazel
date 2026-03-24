@@ -15,21 +15,12 @@ package(default_visibility = ["//visibility:public"])
 
 licenses(["notice"])
 
+# These constraints are deprecated. Do not extend or use.
 constraint_setting(
     name = "board",
 )
 
 constraint_value(
-    name = "stm32f429i-disc1",
-    constraint_setting = ":board",
-)
-
-constraint_value(
     name = "mimxrt595_evk",
-    constraint_setting = ":board",
-)
-
-constraint_value(
-    name = "microbit",
     constraint_setting = ":board",
 )

@@ -19,7 +19,6 @@ import argparse
 import json
 from pathlib import Path
 import platform
-import subprocess
 import sys
 
 from typing import List
@@ -92,15 +91,6 @@ def _combine_fragments(output: Path, fragments: List[Path]) -> None:
     output.write_text(table)
 
 
-def _check_for_rosetta() -> bool:
-    try:
-        # Rosetta's internal name is OAH -- check if the OAH daemon is running.
-        subprocess.check_call(('pgrep', '-q', 'oahd'))
-        return True
-    except subprocess.CalledProcessError:
-        return False
-
-
 def main() -> int:
     """Program entry point."""
 
@@ -137,8 +127,6 @@ def main() -> int:
     match sys.platform, platform.machine():
         case ('linux' | 'darwin', 'x86_64'):
             platform_supported = True
-        case ('darwin', 'arm64'):
-            platform_supported = _check_for_rosetta()
         case _:
             platform_supported = False
 

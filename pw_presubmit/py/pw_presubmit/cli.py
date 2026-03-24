@@ -23,6 +23,7 @@ import textwrap
 from typing import Callable, Collection, Sequence
 
 from pw_presubmit import git_repo, presubmit
+from pw_cli import argument_types
 from pw_cli.collect_files import add_file_collection_arguments
 
 _LOG = logging.getLogger(__name__)
@@ -197,6 +198,14 @@ def add_arguments(
         help='Package root directory (default: <env directory>/packages)',
     )
 
+    parser.add_argument(
+        '-C',
+        '--directory',
+        type=argument_types.directory,
+        default=None,
+        help=argparse.SUPPRESS,
+    )
+
     exclusive = parser.add_mutually_exclusive_group()
     exclusive.add_argument(
         '--clear',
@@ -240,6 +249,7 @@ def run(  # pylint: disable=too-many-arguments
     only_list_steps=False,
     list_steps: Callable[[], None] | None = None,
     dry_run: bool = False,
+    directory: Path | None = None,
     **other_args,
 ) -> int:
     """Processes arguments from add_arguments and runs the presubmit.
@@ -259,11 +269,15 @@ def run(  # pylint: disable=too-many-arguments
       only_list_steps: list the steps that would be executed, one per line,
           instead of executing them
       list_steps: list the steps that would be executed with their docstrings
+      directory: Change to this directory before doing anything.
       **other_args: remaining arguments defined by by add_arguments
 
     Returns:
       exit code for sys.exit; 0 if successful, 1 if an error occurred
     """
+    if directory:
+        os.chdir(directory)
+
     if root is None:
         root = git_repo.root()
 
@@ -279,7 +293,12 @@ def run(  # pylint: disable=too-many-arguments
     )
 
     if not package_root:
-        package_root = Path(os.environ['PW_PACKAGE_ROOT'])
+        # Use PW_PACKAGE_ROOT by default. Fall back to package_root's second
+        # default (.presubmit/packages) if not in a bootsrapped environment.
+        # TODO: b/433258471 - Remove bootstrap assumptions from pw_presubmit.
+        package_root = Path(
+            os.environ.get('PW_PACKAGE_ROOT', root / '.presubmit' / 'packages')
+        )
 
     _LOG.debug('Using environment at %s', output_directory)
 

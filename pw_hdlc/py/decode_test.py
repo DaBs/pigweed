@@ -20,8 +20,9 @@ import queue
 from typing import Iterator, NamedTuple
 import unittest
 
+from pw_build import generated_tests
 from pw_build.generated_tests import Context, PyTest, TestGenerator, GroupOrTest
-from pw_build.generated_tests import parse_test_generation_args
+
 from pw_hdlc.decode import (
     Frame,
     FrameDecoder,
@@ -346,8 +347,6 @@ TEST_CASES: tuple[GroupOrTest[TestCase], ...] = (
 # Formatting for the above tuple is very slow, so disable yapf. Manually enable
 # it as needed to format the test cases.
 
-_TESTS = TestGenerator(TEST_CASES)
-
 
 def _expected(frames: list[Frame]) -> Iterator[str]:
     for i, frame in enumerate(frames, 1):
@@ -632,6 +631,13 @@ def _ts_test(ctx: Context) -> Iterator[str]:
 """
 
 
+_TESTS = TestGenerator(
+    TEST_CASES,
+    cc_test=(_cpp_test, _CPP_HEADER, _CPP_FOOTER),
+    ts_test=(_ts_test, _TS_HEADER, _TS_FOOTER),
+)
+
+
 # Class that tests all cases in TEST_CASES.
 DecoderTest = _TESTS.python_tests('DecoderTest', _define_py_decoder_test)
 NonFrameDecoderTest = _TESTS.python_tests(
@@ -710,12 +716,4 @@ class AdditionalNonFrameDecoderTests(unittest.TestCase):
 
 
 if __name__ == '__main__':
-    args = parse_test_generation_args()
-    if args.generate_cc_test:
-        _TESTS.cc_tests(
-            args.generate_cc_test, _cpp_test, _CPP_HEADER, _CPP_FOOTER
-        )
-    elif args.generate_ts_test:
-        _TESTS.ts_tests(args.generate_ts_test, _ts_test, _TS_HEADER, _TS_FOOTER)
-    else:
-        unittest.main()
+    generated_tests.main(_TESTS)

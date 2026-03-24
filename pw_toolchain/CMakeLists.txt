@@ -26,77 +26,34 @@ pw_add_library(pw_toolchain.constexpr_tag INTERFACE
 pw_add_library(pw_toolchain.no_destructor INTERFACE
   HEADERS
     public/pw_toolchain/no_destructor.h
+  PUBLIC_DEPS
+    pw_memory.no_destructor
   PUBLIC_INCLUDES
     public
-)
-
-pw_add_test(pw_toolchain.no_destructor_test
-  SOURCES
-    no_destructor_test.cc
-  PRIVATE_DEPS
-    pw_assert.check
-    pw_polyfill
-    pw_toolchain.no_destructor
-  GROUPS
-    modules
-    pw_toolchain
 )
 
 pw_add_library(pw_toolchain.globals INTERFACE
   HEADERS
     public/pw_toolchain/globals.h
+  PUBLIC_DEPS
+    pw_memory.globals
   PUBLIC_INCLUDES
     public
 )
 
-pw_add_test(pw_toolchain.globals_test
-  SOURCES
-    globals_test.cc
-  PRIVATE_DEPS
-    pw_assert.check
-    pw_polyfill
-    pw_toolchain.globals
-  GROUPS
-    modules
-    pw_toolchain
+pw_add_library(pw_toolchain.busy_wait_forever INTERFACE
+  HEADERS
+    public/pw_toolchain/busy_wait_forever.h
+    public/pw_toolchain/infinite_loop.h
+  PUBLIC_DEPS
+    pw_memory.busy_wait_forever
+  PUBLIC_INCLUDES
+    public
 )
 
 pw_add_library(pw_toolchain.infinite_loop INTERFACE
-  HEADERS
-    public/pw_toolchain/infinite_loop.h
   PUBLIC_DEPS
-    pw_preprocessor
-  PUBLIC_INCLUDES
-    public
-)
-
-pw_add_test(pw_toolchain.infinite_loop_test
-  SOURCES
-    infinite_loop_test.cc
-    infinite_loop_test_c.c
-  PRIVATE_DEPS
-    pw_toolchain.infinite_loop
-  GROUPS
-    modules
-    pw_toolchain
-)
-
-pw_add_library(pw_toolchain._sibling_cast INTERFACE
-  HEADERS
-    public/pw_toolchain/internal/sibling_cast.h
-  PUBLIC_INCLUDES
-    public
-)
-
-pw_add_test(pw_toolchain.sibling_cast_test
-  SOURCES
-    sibling_cast_test.cc
-  PRIVATE_DEPS
-    pw_compilation_testing._pigweed_only_negative_compilation
-    pw_toolchain._sibling_cast
-  GROUPS
-    modules
-    pw_toolchain
+    pw_toolchain.busy_wait_forever
 )
 
 pw_add_library(pw_toolchain.wrap_abort STATIC

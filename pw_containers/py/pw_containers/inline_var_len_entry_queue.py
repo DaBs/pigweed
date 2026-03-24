@@ -15,33 +15,16 @@
 
 import struct
 from typing import Iterable
+from pw_containers import var_len_entry_queue
 
 _HEADER = struct.Struct('III')  # data_size_bytes, head, tail
 
 
-def _decode_leb128(
-    data: bytes, offset: int = 0, max_bits: int = 32
-) -> tuple[int, int]:
-    count = value = shift = 0
-
-    while offset < len(data):
-        byte = data[offset]
-
-        count += 1
-        value |= (byte & 0x7F) << shift
-
-        if not byte & 0x80:
-            return offset + count, value
-
-        shift += 7
-        if shift >= max_bits:
-            raise ValueError(f'Varint exceeded {max_bits}-bit limit')
-
-    raise ValueError(f'Unterminated varint {data[offset:]!r}')
-
-
 def parse(queue: bytes) -> Iterable[bytes]:
     """Decodes the in-memory representation of a variable-length entry queue.
+
+    The queue includes both the data buffer and the indices that designate the
+    range in the buffer that contains variable-length entries.
 
     Args:
       queue: The bytes representation of a variable-length entry queue.
@@ -59,21 +42,4 @@ def parse(queue: bytes) -> Iterable[bytes]:
         )
 
     data = queue[_HEADER.size : total_encoded_size]
-
-    if tail < head:
-        data = data[head:] + data[:tail]
-    else:
-        data = data[head:tail]
-
-    index = 0
-    while index < len(data):
-        index, size = _decode_leb128(data, index)
-
-        if index + size > len(data):
-            raise ValueError(
-                f'Corruption detected; '
-                f'encoded size {size} B is too large for a {len(data)} B array'
-            )
-        yield data[index : index + size]
-
-        index += size
+    return var_len_entry_queue.parse(data, head, tail)

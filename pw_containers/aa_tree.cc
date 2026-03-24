@@ -45,11 +45,17 @@ GenericAATree::iterator GenericAATree::erase_one(AATreeItem& item) {
 
 GenericAATree::iterator GenericAATree::erase_range(AATreeItem& first,
                                                    AATreeItem& last) {
-  iterator iter(&root_, &first);
-  while (&(*iter) != &last) {
-    iter = erase_one(*iter);
+  iterator start(&root_, &first);
+  iterator end(&root_, &last);
+  return erase_range(start, end);
+}
+
+GenericAATree::iterator GenericAATree::erase_range(iterator first,
+                                                   iterator last) {
+  while (first != last) {
+    first = erase_one(*first);
   }
-  return iter;
+  return first;
 }
 
 void GenericAATree::swap(GenericAATree& other) {

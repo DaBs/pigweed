@@ -21,6 +21,7 @@ from parameterized import parameterized  # type: ignore
 
 from pw_console.console_prefs import ConsolePrefs
 from pw_console.log_line import LogLine
+from pw_console.log_store import LogStore
 from pw_console.widgets.table import TableView
 
 _TIMESTAMP_FORMAT = '%Y%m%d %H:%M:%S'
@@ -29,6 +30,7 @@ _TIMESTAMP_SAMPLE_STRING = _TIMESTAMP_SAMPLE.strftime(_TIMESTAMP_FORMAT)
 
 _TABLE_PADDING = '  '
 _TABLE_PADDING_FRAGMENT = ('', _TABLE_PADDING)
+_TABLE_HEADER_SEPARATOR = ('', '| ')
 
 formatter = logging.Formatter(
     '\x1b[30m\x1b[47m'
@@ -120,19 +122,22 @@ class TestTableView(unittest.TestCase):
     def test_column_widths(self, _name, logs, expected_widths) -> None:
         """Test colum widths calculation."""
         table = TableView(self.prefs)
+        log_store = LogStore()
         for log in logs:
-            table.update_metadata_column_widths(log)
+            log_store.update_metadata_column_widths(log)
+            table.update_column_widths_from_logs(log_store.column_widths)
             metadata_fields = {
                 k: v
                 for k, v in log.metadata.fields.items()
                 if k not in ['py_file', 'py_logger']
             }
-            # update_metadata_column_widths shoulp populate self.metadata.fields
+            # LogStore.update_metadata_column_widths should populate
+            # log the log metadata fields.
             self.assertEqual(metadata_fields, log.record.extra_metadata_fields)
         # Check expected column widths
         results = {
             k: v
-            for k, v in dict(table.column_widths).items()
+            for k, v in table.column_width_from_logs.items()
             if k not in ['time', 'level', 'py_file', 'py_logger']
         }
         self.assertCountEqual(expected_widths, results)
@@ -161,24 +166,24 @@ class TestTableView(unittest.TestCase):
                 [
                     [
                         ('bold', 'Time             '),
-                        _TABLE_PADDING_FRAGMENT,
+                        _TABLE_HEADER_SEPARATOR,
                         ('bold', 'Lev'),
-                        _TABLE_PADDING_FRAGMENT,
+                        _TABLE_HEADER_SEPARATOR,
                         ('bold', 'Module '),
-                        _TABLE_PADDING_FRAGMENT,
-                        ('bold', 'Message'),
+                        _TABLE_HEADER_SEPARATOR,
+                        ('bold', 'Message'.ljust(100)),
                     ],
                     [
                         ('bold', 'Time             '),
-                        _TABLE_PADDING_FRAGMENT,
+                        _TABLE_HEADER_SEPARATOR,
                         ('bold', 'Lev'),
-                        _TABLE_PADDING_FRAGMENT,
+                        _TABLE_HEADER_SEPARATOR,
                         ('bold', 'Module '),
-                        _TABLE_PADDING_FRAGMENT,
+                        _TABLE_HEADER_SEPARATOR,
                         # timestamp added in
                         ('bold', 'Timestamp'),
-                        _TABLE_PADDING_FRAGMENT,
-                        ('bold', 'Message'),
+                        _TABLE_HEADER_SEPARATOR,
+                        ('bold', 'Message'.ljust(100)),
                     ],
                 ],
             ),
@@ -187,9 +192,11 @@ class TestTableView(unittest.TestCase):
     def test_formatted_header(self, _name, logs, expected_headers) -> None:
         """Test colum widths calculation."""
         table = TableView(self.prefs)
+        log_store = LogStore()
 
         for log, header in zip(logs, expected_headers):
-            table.update_metadata_column_widths(log)
+            log_store.update_metadata_column_widths(log)
+            table.update_column_widths_from_logs(log_store.column_widths)
             self.assertEqual(table.formatted_header(), header)
 
     @parameterized.expand(
@@ -262,9 +269,11 @@ class TestTableView(unittest.TestCase):
     def test_formatted_rows(self, _name, logs, expected_log_format) -> None:
         """Test colum widths calculation."""
         table = TableView(self.prefs)
+        log_store = LogStore()
         # Check each row meets expected formats incrementally.
         for log, formatted_log in zip(logs, expected_log_format):
-            table.update_metadata_column_widths(log)
+            log_store.update_metadata_column_widths(log)
+            table.update_column_widths_from_logs(log_store.column_widths)
             self.assertEqual(formatted_log, table.formatted_row(log))
 
 

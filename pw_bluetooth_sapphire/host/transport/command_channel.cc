@@ -20,10 +20,20 @@
 #include <pw_bluetooth/hci_android.emb.h>
 #include <pw_bluetooth/hci_common.emb.h>
 #include <pw_bytes/endian.h>
+#include <pw_result/result.h>
+#include <pw_status/status.h>
+
+#include <cstddef>
+#include <cstdint>
+#include <memory>
+#include <optional>
+#include <utility>
 
 #include "pw_bluetooth_sapphire/internal/host/common/log.h"
 #include "pw_bluetooth_sapphire/internal/host/common/trace.h"
 #include "pw_bluetooth_sapphire/internal/host/transport/slab_allocators.h"
+#include "pw_multibuf/v2/multibuf.h"
+#include "pw_span/span.h"
 
 namespace bt::hci {
 
@@ -59,7 +69,8 @@ CommandChannel::TransactionData::TransactionData(
     hci_spec::EventCode complete_event_code,
     std::optional<hci_spec::EventCode> le_meta_subevent_code,
     std::unordered_set<hci_spec::OpCode> exclusions,
-    CommandCallback callback)
+    CommandCallback callback,
+    pw::bluetooth_sapphire::Lease wake_lease)
     : channel_(channel),
       transaction_id_(transaction_id),
       opcode_(opcode),
@@ -68,9 +79,14 @@ CommandChannel::TransactionData::TransactionData(
       exclusions_(std::move(exclusions)),
       callback_(std::move(callback)),
       timeout_task_(channel_->dispatcher_),
+      wake_lease_(std::move(wake_lease)),
+      state_(State::kQueued,
+             [](State s) {
+               return std::string(TransactionData::StateToString(s));
+             }),
       handler_id_(0u) {
   PW_DCHECK(transaction_id != 0u);
-  exclusions_.insert(opcode_);
+  exclusions_.insert(*opcode_);
 }
 
 CommandChannel::TransactionData::~TransactionData() {
@@ -83,6 +99,7 @@ CommandChannel::TransactionData::~TransactionData() {
 }
 
 void CommandChannel::TransactionData::StartTimer() {
+  state_.Set(State::kPending);
   // Transactions should only ever be started once.
   PW_DCHECK(!timeout_task_.is_pending());
   timeout_task_.set_function(
@@ -96,9 +113,11 @@ void CommandChannel::TransactionData::StartTimer() {
 
 void CommandChannel::TransactionData::Complete(
     std::unique_ptr<EventPacket> event) {
+  state_.Set(State::kComplete);
   timeout_task_.Cancel();
 
   if (!callback_) {
+    wake_lease_.reset();
     return;
   }
 
@@ -112,6 +131,8 @@ void CommandChannel::TransactionData::Complete(
   // unexpected command complete events or status events do not call this
   // reference to callback_ twice.
   callback_ = nullptr;
+
+  wake_lease_.reset();
 }
 
 void CommandChannel::TransactionData::Cancel() {
@@ -127,15 +148,39 @@ CommandChannel::EventCallback CommandChannel::TransactionData::MakeCallback() {
   };
 }
 
-CommandChannel::CommandChannel(pw::bluetooth::Controller* hci,
-                               pw::async::Dispatcher& dispatcher)
+void CommandChannel::TransactionData::AttachInspect(inspect::Node& parent) {
+  std::string node_name =
+      bt_lib_cpp_string::StringPrintf("transaction_%zu", transaction_id_);
+  node_ = parent.CreateChild(node_name);
+  opcode_.AttachInspect(node_, "opcode");
+  complete_event_code_.AttachInspect(node_, "complete_event_code");
+  state_.AttachInspect(node_, "state");
+}
+
+const char* CommandChannel::TransactionData::StateToString(State state) {
+  switch (state) {
+    case State::kQueued:
+      return "queued";
+    case State::kComplete:
+      return "complete";
+    case State::kPending:
+      return "pending";
+  }
+}
+
+CommandChannel::CommandChannel(
+    pw::bluetooth::Controller* hci,
+    pw::async::Dispatcher& dispatcher,
+    pw::bluetooth_sapphire::LeaseProvider& wake_lease_provider)
     : next_transaction_id_(1u),
       next_event_handler_id_(1u),
       hci_(hci),
       allowed_command_packets_(1u),
       dispatcher_(dispatcher),
+      wake_lease_provider_(wake_lease_provider),
       weak_ptr_factory_(this) {
-  hci_->SetEventFunction(fit::bind_member<&CommandChannel::OnEvent>(this));
+  hci_->SetEventFunction(
+      [this](pw::span<const std::byte> buffer) { OnEvent(buffer); });
 
   bt_log(DEBUG, "hci", "CommandChannel initialized");
 }
@@ -145,7 +190,7 @@ CommandChannel::~CommandChannel() {
   hci_->SetEventFunction(nullptr);
 }
 
-CommandChannel::TransactionId CommandChannel::SendCommand(
+pw::Result<CommandChannel::TransactionId> CommandChannel::SendCommand(
     CommandPacket command_packet,
     CommandCallback callback,
     const hci_spec::EventCode complete_event_code) {
@@ -153,7 +198,7 @@ CommandChannel::TransactionId CommandChannel::SendCommand(
       std::move(command_packet), std::move(callback), complete_event_code);
 }
 
-CommandChannel::TransactionId CommandChannel::SendLeAsyncCommand(
+pw::Result<CommandChannel::TransactionId> CommandChannel::SendLeAsyncCommand(
     CommandPacket command_packet,
     CommandCallback callback,
     hci_spec::EventCode le_meta_subevent_code) {
@@ -161,7 +206,7 @@ CommandChannel::TransactionId CommandChannel::SendLeAsyncCommand(
       std::move(command_packet), std::move(callback), le_meta_subevent_code);
 }
 
-CommandChannel::TransactionId CommandChannel::SendExclusiveCommand(
+pw::Result<CommandChannel::TransactionId> CommandChannel::SendExclusiveCommand(
     CommandPacket command_packet,
     CommandCallback callback,
     const hci_spec::EventCode complete_event_code,
@@ -173,7 +218,8 @@ CommandChannel::TransactionId CommandChannel::SendExclusiveCommand(
                                       std::move(exclusions));
 }
 
-CommandChannel::TransactionId CommandChannel::SendLeAsyncExclusiveCommand(
+pw::Result<CommandChannel::TransactionId>
+CommandChannel::SendLeAsyncExclusiveCommand(
     CommandPacket command_packet,
     CommandCallback callback,
     std::optional<hci_spec::EventCode> le_meta_subevent_code,
@@ -185,7 +231,8 @@ CommandChannel::TransactionId CommandChannel::SendLeAsyncExclusiveCommand(
                                       std::move(exclusions));
 }
 
-CommandChannel::TransactionId CommandChannel::SendExclusiveCommandInternal(
+pw::Result<CommandChannel::TransactionId>
+CommandChannel::SendExclusiveCommandInternal(
     CommandPacket command_packet,
     CommandCallback callback,
     hci_spec::EventCode complete_event_code,
@@ -193,7 +240,7 @@ CommandChannel::TransactionId CommandChannel::SendExclusiveCommandInternal(
     std::unordered_set<hci_spec::OpCode> exclusions) {
   if (!active_) {
     bt_log(INFO, "hci", "ignoring command (CommandChannel is inactive)");
-    return 0;
+    return PW_STATUS_FAILED_PRECONDITION;
   }
 
   PW_CHECK((complete_event_code == hci_spec::kLEMetaEventCode) ==
@@ -212,13 +259,17 @@ CommandChannel::TransactionId CommandChannel::SendExclusiveCommandInternal(
 
     if (handler && !handler->is_async()) {
       bt_log(DEBUG, "hci", "event handler already handling this event");
-      return 0u;
+      return PW_STATUS_FAILED_PRECONDITION;
     }
   }
 
   if (next_transaction_id_.value() == 0u) {
     next_transaction_id_.Set(1);
   }
+
+  pw::bluetooth_sapphire::Lease wake_lease =
+      PW_SAPPHIRE_ACQUIRE_LEASE(wake_lease_provider_, "CommandChannel")
+          .value_or(pw::bluetooth_sapphire::Lease());
 
   const hci_spec::OpCode opcode = command_packet.opcode();
   const TransactionId transaction_id = next_transaction_id_.value();
@@ -231,7 +282,9 @@ CommandChannel::TransactionId CommandChannel::SendExclusiveCommandInternal(
                                         complete_event_code,
                                         le_meta_subevent_code,
                                         std::move(exclusions),
-                                        std::move(callback));
+                                        std::move(callback),
+                                        std::move(wake_lease));
+  data->AttachInspect(transactions_node_);
 
   QueuedCommand command(std::move(command_packet), std::move(data));
 
@@ -293,8 +346,25 @@ CommandChannel::EventHandlerId CommandChannel::AddEventHandler(
   return handler_id;
 }
 
+std::optional<CommandChannel::OwnedEventHandle>
+CommandChannel::AddOwnedEventHandler(hci_spec::EventCode event_code,
+                                     EventCallback event_callback) {
+  EventHandlerId id = AddEventHandler(event_code, std::move(event_callback));
+  if (id != 0) {
+    return OwnedEventHandle(this, id);
+  } else {
+    return std::nullopt;
+  }
+}
+
 CommandChannel::EventHandlerId CommandChannel::AddLEMetaEventHandler(
-    hci_spec::EventCode le_meta_subevent_code, EventCallback event_callback) {
+    std::variant<hci_spec::EventCode, pw::bluetooth::emboss::LeSubEventCode>
+        le_meta_subevent_code_variant,
+    EventCallback event_callback) {
+  uint8_t le_meta_subevent_code =
+      std::visit([](auto&& code) { return static_cast<uint8_t>(code); },
+                 le_meta_subevent_code_variant);
+
   EventHandlerData* handler = FindLEMetaEventHandler(le_meta_subevent_code);
   if (handler && handler->is_async()) {
     bt_log(ERROR,
@@ -715,7 +785,23 @@ void CommandChannel::NotifyEventHandler(std::unique_ptr<EventPacket> event) {
   }
 }
 
+void CommandChannel::OnEvent(pw::multibuf::v2::MultiBuf::Instance&& buffer) {
+  std::unique_ptr<EventPacket> event =
+      std::make_unique<EventPacket>(EventPacket::New(std::move(buffer)));
+
+  OnEvent(std::move(event));
+}
+
 void CommandChannel::OnEvent(pw::span<const std::byte> buffer) {
+  std::unique_ptr<EventPacket> event =
+      std::make_unique<EventPacket>(EventPacket::New(buffer.size()));
+  event->mutable_data().Write(reinterpret_cast<const uint8_t*>(buffer.data()),
+                              buffer.size());
+
+  OnEvent(std::move(event));
+}
+
+void CommandChannel::OnEvent(std::unique_ptr<EventPacket> event) {
   if (!active_) {
     bt_log(INFO, "hci", "ignoring event (CommandChannel is inactive)");
     return;
@@ -723,27 +809,22 @@ void CommandChannel::OnEvent(pw::span<const std::byte> buffer) {
 
   constexpr size_t kEventHeaderSize =
       pw::bluetooth::emboss::EventHeader::IntrinsicSizeInBytes();
-  if (buffer.size() < kEventHeaderSize) {
+  if (event->size() < kEventHeaderSize) {
     // TODO(fxbug.dev/42179582): Handle these types of errors by signaling
     // Transport.
     bt_log(ERROR,
            "hci",
            "malformed packet - expected at least %zu bytes, got %zu",
            kEventHeaderSize,
-           buffer.size());
+           event->size());
     return;
   }
-
-  std::unique_ptr<EventPacket> event =
-      std::make_unique<EventPacket>(EventPacket::New(buffer.size()));
-  event->mutable_data().Write(reinterpret_cast<const uint8_t*>(buffer.data()),
-                              buffer.size());
 
   uint16_t header_payload_size =
       event->view<pw::bluetooth::emboss::EventHeaderView>()
           .parameter_total_size()
           .Read();
-  const size_t received_payload_size = buffer.size() - kEventHeaderSize;
+  const size_t received_payload_size = event->size() - kEventHeaderSize;
   if (header_payload_size != received_payload_size) {
     // TODO(fxbug.dev/42179582): Handle these types of errors by signaling
     // Transport.
@@ -783,6 +864,7 @@ void CommandChannel::OnCommandTimeout(TransactionId transaction_id) {
 void CommandChannel::AttachInspect(inspect::Node& parent,
                                    const std::string& name) {
   command_channel_node_ = parent.CreateChild(name);
+  transactions_node_ = command_channel_node_.CreateChild("transactions");
   next_event_handler_id_.AttachInspect(command_channel_node_,
                                        "next_event_handler_id");
   allowed_command_packets_.AttachInspect(command_channel_node_,

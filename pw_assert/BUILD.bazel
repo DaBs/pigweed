@@ -31,36 +31,11 @@ cc_library(
     ],
 )
 
-# A target exposing the interfaces of both "check" and "assert".  We re-expose
-# the headers here instead of just putting "check" and "assert" in the deps to
-# avoid a layering check violation.
-cc_library(
-    name = "pw_assert",
-    hdrs = [
-        "public/pw_assert/assert.h",
-        "public/pw_assert/check.h",
-        "public/pw_assert/internal/check_impl.h",
-        "public/pw_assert/short.h",
-    ],
-    deprecation = "This target will be removed soon; depend on //pw_assert:assert and/or //pw_assert:check instead.",
-    strip_include_prefix = "public",
-    tags = [
-        "manual",
-        "noclangtidy",
-    ],
-    deps = [
-        ":assert_backend",
-        ":check",
-        ":check_backend",
-        ":config",
-        "//pw_preprocessor",
-    ],
-)
-
 label_flag(
     name = "backend",
     build_setting_default = ":unspecified_backend",
     deprecation = "This label flag is no longer depended on by anything and will be removed soon.",
+    tags = ["manual"],
 )
 
 host_backend_alias(
@@ -87,6 +62,7 @@ pw_facade(
     tags = ["noclangtidy"],
     deps = [
         ":config",
+        "//pw_numeric:checked_arithmetic",
         "//pw_preprocessor",
     ],
 )
@@ -108,7 +84,7 @@ label_flag(
 
 host_backend_alias(
     name = "unspecified_check_backend_impl",
-    backend = "//pw_build:empty_cc_library",
+    backend = "@rules_cc//:empty_lib",
 )
 
 pw_facade(
@@ -139,7 +115,7 @@ alias(
 
 label_flag(
     name = "assert_backend_impl",
-    build_setting_default = "//pw_build:empty_cc_library",
+    build_setting_default = "@rules_cc//:empty_lib",
 )
 
 cc_library(
@@ -230,12 +206,13 @@ pw_cc_test(
         "public/pw_assert/internal/check_impl.h",
         "pw_assert_test/fake_backend.h",
     ],
+    features = ["-conversion_warnings"],
+    has_nc_test = True,
     tags = ["noclangtidy"],
     deps = [
         ":assert",
         ":config",
         ":facade",
-        "//pw_compilation_testing:negative_compilation_testing",
         "//pw_preprocessor",
         "//pw_result",
         "//pw_span",
@@ -257,13 +234,25 @@ pw_cc_test(
     ],
 )
 
+# DOCSTAG: [contributing-docs-examples]
+pw_cc_test(
+    name = "examples",
+    srcs = ["examples.cc"],
+    deps = [":check"],
+)
+
 sphinx_docs_library(
     name = "docs",
     srcs = [
+        "BUILD.bazel",
+        "BUILD.gn",
+        "CMakeLists.txt",
         "assert_test.cc",
         "backends.rst",
         "docs.rst",
+        "examples.cc",
     ],
     prefix = "pw_assert/",
     target_compatible_with = incompatible_with_mcu(),
 )
+# DOCSTAG: [contributing-docs-examples]

@@ -15,14 +15,19 @@
 load("@com_google_protobuf//bazel:java_lite_proto_library.bzl", "java_lite_proto_library")
 load("@com_google_protobuf//bazel:java_proto_library.bzl", "java_proto_library")
 load("@com_google_protobuf//bazel:proto_library.bzl", "proto_library")
+load("@com_google_protobuf//bazel:py_proto_library.bzl", "py_proto_library")
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
-load("@rules_python//python:proto.bzl", "py_proto_library")
 load("@rules_python//sphinxdocs:sphinx_docs_library.bzl", "sphinx_docs_library")
 load("//pw_build:compatibility.bzl", "incompatible_with_mcu")
 load("//pw_build:copy_to_bin.bzl", "copy_to_bin")
 load("//pw_fuzzer:fuzzer.bzl", "pw_cc_fuzz_test")
 load("//pw_perf_test:pw_cc_perf_test.bzl", "pw_cc_perf_test")
-load("//pw_protobuf_compiler:pw_proto_library.bzl", "pw_proto_filegroup", "pwpb_proto_library")
+load(
+    "//pw_protobuf_compiler:pw_proto_library.bzl",
+    "nanopb_proto_library",
+    "pw_proto_filegroup",
+    "pwpb_proto_library",
+)
 load("//pw_unit_test:pw_cc_test.bzl", "pw_cc_test")
 
 package(
@@ -75,14 +80,16 @@ cc_library(
         "//pw_bytes:bit",
         "//pw_containers:vector",
         "//pw_function",
+        "//pw_function:scope_guard",
+        "//pw_memory:sibling_cast",
         "//pw_preprocessor",
         "//pw_result",
         "//pw_span",
         "//pw_status",
         "//pw_stream",
         "//pw_stream:interval_reader",
+        "//pw_stream:limited_stream",
         "//pw_string:string",
-        "//pw_toolchain:sibling_cast",
         "//pw_varint",
         "//pw_varint:stream",
     ],
@@ -103,8 +110,13 @@ cc_library(
 pw_cc_test(
     name = "decoder_test",
     srcs = ["decoder_test.cc"],
+    features = [
+        "-ctad_warnings",
+    ],
     deps = [
         ":pw_protobuf",
+        "//pw_fuzzer:fuzztest",
+        "//pw_fuzzer:libfuzzer",
         "//pw_preprocessor",
     ],
 )
@@ -214,6 +226,11 @@ java_proto_library(
 
 java_lite_proto_library(
     name = "common_java_proto_lite",
+    deps = [":common_proto"],
+)
+
+nanopb_proto_library(
+    name = "common_nanopb",
     deps = [":common_proto"],
 )
 
@@ -383,7 +400,16 @@ filegroup(
 filegroup(
     name = "doxygen",
     srcs = [
+        "public/pw_protobuf/bytes_utils.h",
+        "public/pw_protobuf/config.h",
+        "public/pw_protobuf/decoder.h",
+        "public/pw_protobuf/encoder.h",
         "public/pw_protobuf/find.h",
+        "public/pw_protobuf/map_utils.h",
+        "public/pw_protobuf/message.h",
+        "public/pw_protobuf/serialized_size.h",
+        "public/pw_protobuf/stream_decoder.h",
+        "public/pw_protobuf/wire_format.h",
     ],
 )
 

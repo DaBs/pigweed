@@ -707,6 +707,41 @@ TEST_F(PeerTest, SettingBrEdrBondDataUpdatesLastUpdated) {
   EXPECT_GE(notify_count, 1);
 }
 
+TEST_F(PeerTest, BrEdrDataSetDeviceClassNotifiesListeners) {
+  // Initialize BrEdrData.
+  peer().MutBrEdr();
+  ASSERT_FALSE(peer().bredr()->device_class().has_value());
+  EXPECT_EQ(peer().last_updated(),
+            pw::chrono::SystemClock::time_point(std::chrono::nanoseconds(0)));
+
+  bool listener_notified = false;
+  set_notify_listeners_cb([&](auto&, Peer::NotifyListenersChange change) {
+    listener_notified = true;
+    EXPECT_EQ(Peer::NotifyListenersChange::kBondNotUpdated, change);
+    EXPECT_EQ(peer().last_updated(),
+              pw::chrono::SystemClock::time_point(std::chrono::nanoseconds(2)));
+  });
+
+  RunFor(pw::chrono::SystemClock::duration(2));
+  DeviceClass kDeviceClass(0x123456);
+  peer().MutBrEdr().SetDeviceClass(kDeviceClass);
+  EXPECT_TRUE(listener_notified);
+  ASSERT_TRUE(peer().bredr()->device_class().has_value());
+  EXPECT_EQ(kDeviceClass, *peer().bredr()->device_class());
+
+  // Subsequent setting of the same device class should not notify.
+  listener_notified = false;
+  peer().MutBrEdr().SetDeviceClass(kDeviceClass);
+  EXPECT_FALSE(listener_notified);
+
+  // Changing device class should notify.
+  listener_notified = false;
+  DeviceClass kNewDeviceClass(0x654321);
+  peer().MutBrEdr().SetDeviceClass(kNewDeviceClass);
+  EXPECT_TRUE(listener_notified);
+  EXPECT_EQ(kNewDeviceClass, *peer().bredr()->device_class());
+}
+
 TEST_F(PeerTest, SettingAddingBrEdrServiceUpdatesLastUpdated) {
   EXPECT_EQ(peer().last_updated(),
             pw::chrono::SystemClock::time_point(std::chrono::nanoseconds(0)));
@@ -1128,6 +1163,30 @@ TEST_F(PeerTest, SetInvalidAdvertisingData) {
 #endif  // NINSPECT
 
   EXPECT_EQ(peer().MutLe().advertising_data().size(), 0u);
+}
+
+TEST_F(PeerTest, SetExtendedAdvertisingCheckDefaultValues) {
+  peer().MutLe().SetAdvertisingData(
+      /*rssi=*/32, kInvalidAdvData, pw::chrono::SystemClock::time_point());
+  ASSERT_TRUE(peer().le().has_value());
+  EXPECT_EQ(peer().le()->advertising_sid(), hci_spec::kAdvertisingSidInvalid);
+  EXPECT_EQ(peer().le()->periodic_advertising_interval(),
+            hci_spec::kPeriodicAdvertisingIntervalInvalid);
+}
+
+TEST_F(PeerTest, SetExtendedAdvertisingData) {
+  const uint8_t kAdvertisingSid = 0x0c;
+  const uint16_t kPeriodicAdvertisingInterval = 0x1234;
+  peer().MutLe().SetAdvertisingData(
+      /*rssi=*/32,
+      kInvalidAdvData,
+      pw::chrono::SystemClock::time_point(),
+      kAdvertisingSid,
+      kPeriodicAdvertisingInterval);
+  ASSERT_TRUE(peer().le().has_value());
+  EXPECT_EQ(peer().le()->advertising_sid(), kAdvertisingSid);
+  EXPECT_EQ(peer().le()->periodic_advertising_interval(),
+            kPeriodicAdvertisingInterval);
 }
 
 TEST_F(PeerDeathTest, RegisterTwoBrEdrConnectionsAsserts) {
@@ -1642,6 +1701,46 @@ TEST_F(PeerTest, BrEdrPairingToken) {
   token.reset();
   EXPECT_EQ(count_1, 1);
   EXPECT_EQ(count_2, 1);
+}
+
+TEST_F(PeerTest, ClearBondDataDoesNotSetIdentityKnownToFalseIfAddressIsLEPublic) {
+  ASSERT_EQ(peer().address().type(), DeviceAddress::Type::kLEPublic);
+  EXPECT_TRUE(peer().identity_known());
+  sm::PairingData data;
+  data.peer_ltk = kLTK;
+  data.local_ltk = kLTK;
+  data.irk = sm::Key(sm::SecurityProperties(), UInt128{4});
+  peer().MutLe().SetBondData(data);
+  EXPECT_TRUE(peer().identity_known());
+  peer().MutLe().ClearBondData();
+  EXPECT_TRUE(peer().identity_known());
+}
+
+TEST_F(PeerTest, SetInquiryDataWithInvalidRssiIgnored) {
+  EXPECT_EQ(peer().rssi(), hci_spec::kRSSIInvalid);
+
+  const StaticByteBuffer kEirData(
+      0x05,  // Length
+      0x09,  // AD type: Complete Local Name
+      'T',
+      'e',
+      's',
+      't'
+  );
+  StaticPacket<pw::bluetooth::emboss::ExtendedInquiryResultEventWriter> eirep;
+  eirep.view().num_responses().Write(1);
+  eirep.view().bd_addr().CopyFrom(peer().address().value().view());
+  eirep.view().rssi().UncheckedWrite(hci_spec::kMaxRssi + 1);
+  eirep.view().extended_inquiry_response().BackingStorage().CopyFrom(
+      ::emboss::support::ReadOnlyContiguousBuffer(&kEirData), kEirData.size());
+  peer().MutBrEdr().SetInquiryData(eirep.view());
+  EXPECT_EQ(peer().rssi(), hci_spec::kRSSIInvalid);
+
+  StaticPacket<pw::bluetooth::emboss::InquiryResultWithRssiWriter> inquiry_result_rssi;
+  inquiry_result_rssi.view().bd_addr().CopyFrom(peer().address().value().view());
+  inquiry_result_rssi.view().rssi().UncheckedWrite(hci_spec::kMaxRssi + 1);
+  peer().MutBrEdr().SetInquiryData(inquiry_result_rssi.view());
+  EXPECT_EQ(peer().rssi(), hci_spec::kRSSIInvalid);
 }
 
 }  // namespace

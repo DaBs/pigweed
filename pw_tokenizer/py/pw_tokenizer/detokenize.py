@@ -69,7 +69,7 @@ _LOG = logging.getLogger('pw_tokenizer')
 
 ENCODED_TOKEN = struct.Struct('<I')
 _BASE64_CHARS = string.ascii_letters + string.digits + '+/-_='
-DEFAULT_RECURSION = 9
+DEFAULT_RECURSION = 5
 NESTED_TOKEN_BASE_PREFIX = encode.NESTED_TOKEN_BASE_PREFIX.encode()
 NESTED_DOMAIN_START_PREFIX = encode.NESTED_DOMAIN_START_PREFIX.encode()
 NESTED_DOMAIN_END_PREFIX = encode.NESTED_DOMAIN_END_PREFIX.encode()
@@ -275,6 +275,7 @@ class Detokenizer:
     def detokenize(
         self,
         encoded_message: bytes,
+        domain: str | None = None,
         recursion: int = DEFAULT_RECURSION,
     ) -> DetokenizedString:
         """Decodes and detokenizes a message as a DetokenizedString."""
@@ -296,9 +297,17 @@ class Detokenizer:
         if recursion > 0:
             recursive_detokenize = self._detokenize_nested_callback(recursion)
 
+        if domain is None:
+            entries = self.lookup(token)
+        else:
+            entries = [
+                _TokenizedFormatString(entry, decode.FormatString(str(entry)))
+                for entry in self.database.domains[domain][token]
+            ]
+
         return DetokenizedString(
             token,
-            self.lookup(token),
+            entries,
             encoded_message,
             self.show_errors,
             recursive_detokenize,
@@ -320,15 +329,6 @@ class Detokenizer:
         """
         return self._detokenize_nested_callback(recursion)(data)
 
-    # TODO(gschen): remove unnecessary function
-    def detokenize_base64(
-        self,
-        data: AnyStr,
-        recursion: int = DEFAULT_RECURSION,
-    ) -> AnyStr:
-        """Alias of detokenize_text for backwards compatibility."""
-        return self.detokenize_text(data, recursion)
-
     def detokenize_text_to_file(
         self,
         data: AnyStr,
@@ -337,16 +337,6 @@ class Detokenizer:
     ) -> None:
         """Decodes prefixed Base64 messages in data; decodes to output file."""
         output.write(self._detokenize_nested(data, recursion))
-
-    # TODO(gschen): remove unnecessary function
-    def detokenize_base64_to_file(
-        self,
-        data: AnyStr,
-        output: BinaryIO,
-        recursion: int = DEFAULT_RECURSION,
-    ) -> None:
-        """Alias of detokenize_text_to_file for backwards compatibility."""
-        self.detokenize_text_to_file(data, output, recursion)
 
     def detokenize_text_live(
         self,
@@ -367,16 +357,6 @@ class Detokenizer:
             # Flush each line to prevent delays when piping between processes.
             if b'\n' in message:
                 output.flush()
-
-    # TODO(gschen): remove unnecessary function
-    def detokenize_base64_live(
-        self,
-        input_file: io.RawIOBase | BinaryIO,
-        output: BinaryIO,
-        recursion: int = DEFAULT_RECURSION,
-    ) -> None:
-        """Alias of detokenize_text_live for backwards compatibility."""
-        self.detokenize_text_live(input_file, output, recursion)
 
     def _detokenize_nested_callback(
         self,
@@ -425,25 +405,28 @@ class Detokenizer:
             domain = tokens.DEFAULT_DOMAIN
         else:
             domain = domain.decode()
+
+        domain = ''.join(domain.split())
+
         if not basespec or (base == b'64'):
-            return self._detokenize_once_base64(match)
+            return self._detokenize_once_base64(
+                match.group(0), domain, match.group('base64')
+            )
 
         if not base:
             base = b'16'
 
-        domain = ''.join(domain.split())
-        return self._detokenize_once(match, base, domain)
-
-    def _detokenize_once(
-        self, match: Match[bytes], base: bytes, domain: str
-    ) -> bytes:
-        """Performs lookup on a plain token"""
-        original = match.group(0)
         token = match.group('base' + base.decode())
         if not token:
-            return original
+            return match.group(0)
 
-        token = int(token, int(base))
+        return self._detokenize_once_token(match.group(0), domain, token, base)
+
+    def _detokenize_once_token(
+        self, original: bytes, domain: str, token_str: bytes, base: bytes
+    ) -> bytes:
+        """Performs lookup on a plain token"""
+        token = int(token_str, int(base))
         entries = self.database.domains[domain][token]
 
         if len(entries) == 1:
@@ -455,18 +438,19 @@ class Detokenizer:
 
     def _detokenize_once_base64(
         self,
-        match: Match[bytes],
+        original: bytes,
+        domain: str,
+        base64_message: bytes,
     ) -> bytes:
         """Performs lookup on a Base64 token"""
-        original = match.group(0)
+        if not base64_message:
+            return original
 
         try:
-            encoded_token = match.group('base64')
-            if not encoded_token:
-                return original
-
             detokenized_string = self.detokenize(
-                base64.b64decode(encoded_token, validate=True), recursion=0
+                base64.b64decode(base64_message, validate=True),
+                domain=domain,
+                recursion=0,
             )
 
             if detokenized_string.matches():
@@ -525,21 +509,43 @@ class AutoUpdatingDetokenizer(Detokenizer):
         min_poll_period_s: float = 1.0,
         pool: Executor = ThreadPoolExecutor(max_workers=1),
         prefix: str | bytes = encode.NESTED_TOKEN_PREFIX,
+        extra_databases: Iterable = (),
     ) -> None:
+        """Constructs the AutoUpdatingDetokenizer.
+
+        Args:
+          *paths_or_files: a path or string to an ELF or CSV path with the token
+              database
+          min_poll_period_s: the minimum time between polls in seconds
+          pool: thread executor pool
+          prefix: a one-character byte string that signals the start of a
+              message
+          extra_databases: an optional tokens.Database list that is always
+              merged with the paths_or_files.
+              Note: adding or removing tokens form this database is not visible
+              to the underlying Detokenizer. However, these databases are
+              re-loaded when a path changes.
+        """
         self.paths = tuple(self._DatabasePath(path) for path in paths_or_files)
         self.min_poll_period_s = min_poll_period_s
         self._last_checked_time: float = time.time()
         # Thread pool to use for loading the databases. Limit to a single
         # worker since this is low volume and not time critical.
         self._pool = pool
-        super().__init__(*(path.load() for path in self.paths), prefix=prefix)
+        self._extra_databases = list(extra_databases)
+        super().__init__(
+            *([path.load() for path in self.paths] + self._extra_databases),
+            prefix=prefix,
+        )
 
     def __del__(self) -> None:
         if hasattr(self, '_pool'):
             self._pool.shutdown(wait=False)
 
     def _reload_paths(self) -> None:
-        self._initialize_database([path.load() for path in self.paths])
+        self._initialize_database(
+            [path.load() for path in self.paths] + self._extra_databases
+        )
 
     def _reload_if_changed(self) -> None:
         if time.time() - self._last_checked_time >= self.min_poll_period_s:
@@ -686,19 +692,6 @@ class NestedMessageParser:
         )
 
 
-# TODO(hepler): Remove this unnecessary function.
-def detokenize_base64(
-    detokenizer: Detokenizer,
-    data: bytes,
-    recursion: int = DEFAULT_RECURSION,
-) -> bytes:
-    """Alias for detokenizer.detokenize_base64 for backwards compatibility.
-
-    This function is deprecated; do not call it.
-    """
-    return detokenizer.detokenize_base64(data, recursion)
-
-
 def _follow_and_detokenize_file(
     detokenizer: Detokenizer,
     file: BinaryIO,
@@ -711,7 +704,7 @@ def _follow_and_detokenize_file(
         while True:
             data = file.read()
             if data:
-                detokenizer.detokenize_base64_to_file(data, output)
+                detokenizer.detokenize_text_to_file(data, output)
                 output.flush()
             else:
                 time.sleep(poll_period_s)
@@ -745,10 +738,10 @@ def _handle_base64(
         _follow_and_detokenize_file(detokenizer, input_file, output)
     elif input_file.seekable():
         # Process seekable files all at once, which is MUCH faster.
-        detokenizer.detokenize_base64_to_file(input_file.read(), output)
+        detokenizer.detokenize_text_to_file(input_file.read(), output)
     else:
         # For non-seekable inputs (e.g. pipes), read one character at a time.
-        detokenizer.detokenize_base64_live(input_file, output)
+        detokenizer.detokenize_text_live(input_file, output)
 
 
 def _parse_args() -> argparse.Namespace:

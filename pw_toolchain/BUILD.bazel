@@ -12,11 +12,11 @@
 # License for the specific language governing permissions and limitations under
 # the License.
 
+load("@bazel_skylib//rules:build_test.bzl", "build_test")
 load("@bazel_skylib//rules:common_settings.bzl", "string_flag")
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("@rules_python//sphinxdocs:sphinx_docs_library.bzl", "sphinx_docs_library")
 load("//pw_build:compatibility.bzl", "incompatible_with_mcu")
-load("//pw_unit_test:pw_cc_test.bzl", "pw_cc_test")
 
 package(default_visibility = ["//visibility:public"])
 
@@ -75,6 +75,15 @@ toolchain(
 )
 
 toolchain(
+    name = "cc_toolchain_cortex-m55",
+    target_compatible_with = [
+        "//pw_build/constraints/arm:cortex-m55",
+    ],
+    toolchain = ":cortex-m_cc_toolchain",
+    toolchain_type = "@bazel_tools//tools/cpp:toolchain_type",
+)
+
+toolchain(
     name = "cc_toolchain_cortex-m3",
     target_compatible_with = [
         "//pw_build/constraints/arm:cortex-m3",
@@ -93,68 +102,31 @@ cc_library(
     name = "no_destructor",
     hdrs = ["public/pw_toolchain/no_destructor.h"],
     strip_include_prefix = "public",
-    deps = ["//pw_polyfill"],
+    deps = ["//pw_memory:no_destructor"],
 )
 
 cc_library(
     name = "globals",
     hdrs = ["public/pw_toolchain/globals.h"],
     strip_include_prefix = "public",
+    deps = ["//pw_memory:globals"],
 )
 
 cc_library(
+    name = "busy_wait_forever",
+    hdrs = [
+        "public/pw_toolchain/busy_wait_forever.h",
+        "public/pw_toolchain/infinite_loop.h",
+    ],
+    strip_include_prefix = "public",
+    deps = ["//pw_memory:busy_wait_forever"],
+)
+
+alias(
     name = "infinite_loop",
-    hdrs = ["public/pw_toolchain/infinite_loop.h"],
-    strip_include_prefix = "public",
-    deps = ["//pw_preprocessor"],
-)
-
-pw_cc_test(
-    name = "no_destructor_test",
-    srcs = ["no_destructor_test.cc"],
-    deps = [
-        ":no_destructor",
-        "//pw_assert:check",
-        "//pw_polyfill",
-    ],
-)
-
-pw_cc_test(
-    name = "globals_test",
-    srcs = ["globals_test.cc"],
-    deps = [
-        ":globals",
-        "//pw_assert:check",
-        "//pw_polyfill",
-    ],
-)
-
-pw_cc_test(
-    name = "infinite_loop_test",
-    srcs = [
-        "infinite_loop_test.cc",
-        "infinite_loop_test_c.c",
-    ],
-    deps = [
-        ":infinite_loop",
-        "//pw_unit_test",
-    ],
-)
-
-cc_library(
-    name = "sibling_cast",
-    hdrs = ["public/pw_toolchain/internal/sibling_cast.h"],
-    strip_include_prefix = "public",
-    visibility = ["//:__subpackages__"],  # Restrict to Pigweed
-)
-
-pw_cc_test(
-    name = "sibling_cast_test",
-    srcs = ["sibling_cast_test.cc"],
-    deps = [
-        ":sibling_cast",
-        "//pw_compilation_testing:negative_compilation_testing",
-    ],
+    actual = ":busy_wait_forever",
+    deprecation = ":infinite_loop has been renamed to :busy_wait_forever",
+    tags = ["manual"],
 )
 
 cc_library(
@@ -165,14 +137,31 @@ cc_library(
     alwayslink = 1,
 )
 
+build_test(
+    name = "cpp_17_check",
+    tags = ["manual"],
+    target_compatible_with = select({
+        "//pw_toolchain/cc:c++17_enabled": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    targets = ["@rules_cc//:empty_lib"],
+)
+
+# This is a nop build test that only works when C++20 is enabled. This is useful
+# as a way to enforce the constraint is satisfied under a given configuration.
+build_test(
+    name = "cpp_20_check",
+    tags = ["manual"],
+    target_compatible_with = select({
+        "//pw_toolchain/cc:c++20_enabled": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    targets = ["@rules_cc//:empty_lib"],
+)
+
 filegroup(
     name = "doxygen",
-    srcs = [
-        "public/pw_toolchain/constexpr_tag.h",
-        "public/pw_toolchain/globals.h",
-        "public/pw_toolchain/infinite_loop.h",
-        "public/pw_toolchain/no_destructor.h",
-    ],
+    srcs = ["public/pw_toolchain/constexpr_tag.h"],
 )
 
 sphinx_docs_library(
@@ -180,7 +169,6 @@ sphinx_docs_library(
     srcs = [
         "bazel.rst",
         "docs.rst",
-        "globals_test.cc",
         "gn.rst",
     ],
     prefix = "pw_toolchain/",

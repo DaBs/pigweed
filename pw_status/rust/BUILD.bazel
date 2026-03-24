@@ -18,20 +18,14 @@ load("//pw_build:compatibility.bzl", "incompatible_with_mcu")
 rust_library(
     name = "pw_status",
     srcs = ["pw_status.rs"],
-    crate_features = select({
-        "@rust_crates//:std": ["std"],
-        "//conditions:default": [""],
-    }),
+    edition = "2024",
     visibility = ["//visibility:public"],
 )
 
 rust_test(
     name = "pw_status_test",
     crate = ":pw_status",
-    crate_features = select({
-        "@rust_crates//:std": ["std"],
-        "//conditions:default": [""],
-    }),
+    edition = "2024",
     # TODO: b/343726867 - support on-device rust tests
     target_compatible_with = incompatible_with_mcu(),
 )

@@ -64,7 +64,7 @@ const BASE64_PADDING: u8 = b!(=);
 /// Returns the size of the output buffer needed to encode an input buffer of
 /// size `input_size`.
 pub const fn encoded_size(input_size: usize) -> usize {
-    (input_size + 2) / 3 * 4 // +2 to round up to a 3-byte group
+    input_size.div_ceil(3) * 4 // round up to a 3-byte group
 }
 
 // Base 64 encoding represents every 3 bytes with 4 ascii characters.  Each
@@ -137,10 +137,12 @@ pub fn encode(input: &[u8], output: &mut [u8]) -> Result<usize> {
 pub fn encode_str<'a>(input: &[u8], output_buffer: &'a mut [u8]) -> Result<&'a str> {
     let encode_len = encode(input, output_buffer)?;
     // Safety: Since we are building the output buffer strictly from ASCII
-    // characters, it is guaranteed to be a valid string.
+    // characters, it is guaranteed to be valid UTF-8.
+    // encode_len has already been checked to be less than output_buffer
+    // in the encode() call.
     unsafe {
         Ok(core::str::from_utf8_unchecked(
-            &output_buffer[0..encode_len],
+            output_buffer.get(0..encode_len).unwrap_unchecked(),
         ))
     }
 }

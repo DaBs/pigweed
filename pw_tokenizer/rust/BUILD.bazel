@@ -20,6 +20,7 @@ rust_proc_macro(
     srcs = [
         "pw_tokenizer_macro.rs",
     ],
+    edition = "2024",
     visibility = ["//visibility:public"],
     deps = [
         ":pw_tokenizer_core",
@@ -34,6 +35,7 @@ rust_proc_macro(
 rust_test(
     name = "pw_tokenizer_macro_test",
     crate = ":pw_tokenizer_macro",
+    edition = "2024",
     # TODO: b/343726867 - support on-device rust tests
     target_compatible_with = incompatible_with_mcu(),
 )
@@ -45,9 +47,10 @@ rust_library(
         "pw_tokenizer_core_test_cases.rs",
     ],
     crate_features = select({
-        "@rust_crates//:std": ["std"],
+        "//pw_build/constraints/rust:std": ["std"],
         "//conditions:default": [""],
     }),
+    edition = "2024",
     visibility = ["//visibility:public"],
 )
 
@@ -55,9 +58,10 @@ rust_test(
     name = "pw_tokenizer_core_test",
     crate = ":pw_tokenizer_core",
     crate_features = select({
-        "@rust_crates//:std": ["std"],
+        "//pw_build/constraints/rust:std": ["std"],
         "//conditions:default": [],
     }),
+    edition = "2024",
     # TODO: b/343726867 - support on-device rust tests
     target_compatible_with = incompatible_with_mcu(),
 )
@@ -86,9 +90,10 @@ rust_library(
         "pw_tokenizer/lib.rs",
     ],
     crate_features = select({
-        "@rust_crates//:std": ["std"],
+        "//pw_build/constraints/rust:std": ["std"],
         "//conditions:default": [""],
     }),
+    edition = "2024",
     proc_macro_deps = [":pw_tokenizer_macro"],
     visibility = ["//visibility:public"],
     deps = [
@@ -99,7 +104,7 @@ rust_library(
         "//pw_stream/rust:pw_stream",
         "//pw_varint/rust:pw_varint",
     ] + select({
-        "@rust_crates//:std": [
+        "//pw_build/constraints/rust:std": [
             "//pw_format/rust:pw_format",  # Added for rustdoc linking support.
         ],
         "//conditions:default": [],
@@ -110,12 +115,10 @@ rust_test(
     name = "pw_tokenizer_test",
     crate = ":pw_tokenizer",
     crate_features = select({
-        "@rust_crates//:std": ["std"],
+        "//pw_build/constraints/rust:std": ["std"],
         "//conditions:default": [""],
-    }) + select({
-        "@rules_rust//rust/toolchain/channel:nightly": ["nightly"],
-        "//conditions:default": [],
     }),
+    edition = "2024",
     # TODO: b/343726867 - support on-device rust tests
     target_compatible_with = incompatible_with_mcu(),
 )

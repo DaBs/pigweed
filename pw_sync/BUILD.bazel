@@ -95,6 +95,13 @@ cc_library(
 )
 
 cc_library(
+    name = "no_lock",
+    hdrs = ["public/pw_sync/no_lock.h"],
+    strip_include_prefix = "public",
+    deps = [":lock_annotations"],
+)
+
+cc_library(
     name = "lock_traits",
     hdrs = [
         "public/pw_sync/lock_traits.h",
@@ -264,6 +271,18 @@ host_backend_alias(
     backend = "//pw_sync_stl:interrupt_spin_lock",
 )
 
+cc_library(
+    name = "scoped_locker",
+    hdrs = [
+        "public/pw_sync/scoped_locker.h",
+    ],
+    strip_include_prefix = "public",
+    deps = [
+        ":lock_annotations",
+        ":lock_traits",
+    ],
+)
+
 pw_facade(
     name = "thread_notification",
     hdrs = [
@@ -351,14 +370,6 @@ cc_library(
 )
 
 cc_library(
-    name = "yield_core",
-    hdrs = [
-        "public/pw_sync/yield_core.h",
-    ],
-    strip_include_prefix = "public",
-)
-
-cc_library(
     name = "condition_variable_facade",
     hdrs = [
         "public/pw_sync/condition_variable.h",
@@ -396,9 +407,35 @@ filegroup(
 )
 
 cc_library(
+    name = "threaded_testing",
+    testonly = True,
+    hdrs = ["public/pw_sync/test/threaded_testing.h"],
+    strip_include_prefix = "public",
+    deps = [
+        ":thread_notification",
+        ":virtual_basic_lockable",
+        "//pw_thread:test_thread_context",
+        "//pw_thread:thread",
+        "//pw_unit_test",
+    ],
+)
+
+cc_library(
+    name = "timed_threaded_testing",
+    testonly = True,
+    hdrs = ["public/pw_sync/test/timed_threaded_testing.h"],
+    strip_include_prefix = "public",
+    deps = [
+        ":threaded_testing",
+        "//pw_chrono:system_clock",
+        "//pw_thread:sleep",
+    ],
+)
+
+cc_library(
     name = "lock_testing",
     srcs = ["lock_testing.cc"],
-    hdrs = ["public/pw_sync/lock_testing.h"],
+    hdrs = ["public/pw_sync/test/lock_testing.h"],
     implementation_deps = ["//pw_assert:check"],
     strip_include_prefix = "public",
     deps = [
@@ -409,7 +446,7 @@ cc_library(
 
 cc_library(
     name = "borrow_testing",
-    hdrs = ["public/pw_sync/borrow_testing.h"],
+    hdrs = ["public/pw_sync/test/borrow_testing.h"],
     strip_include_prefix = "public",
     tags = ["noclangtidy"],
     deps = [
@@ -420,7 +457,7 @@ cc_library(
 
 cc_library(
     name = "timed_borrow_testing",
-    hdrs = ["public/pw_sync/timed_borrow_testing.h"],
+    hdrs = ["public/pw_sync/test/timed_borrow_testing.h"],
     strip_include_prefix = "public",
     tags = ["noclangtidy"],
     deps = [
@@ -544,11 +581,23 @@ pw_cc_test(
 )
 
 pw_cc_test(
+    name = "scoped_locker_test",
+    srcs = ["scoped_locker_test.cc"],
+    deps = [
+        ":lock_testing",
+        ":scoped_locker",
+    ],
+)
+
+pw_cc_test(
     name = "thread_notification_facade_test",
     srcs = [
         "thread_notification_facade_test.cc",
     ],
-    deps = [":thread_notification"],
+    deps = [
+        ":thread_notification",
+        ":threaded_testing",
+    ],
 )
 
 pw_cc_test(
@@ -558,7 +607,17 @@ pw_cc_test(
     ],
     deps = [
         ":timed_thread_notification",
+        ":timed_threaded_testing",
         "//pw_chrono:system_clock",
+    ],
+)
+
+pw_cc_test(
+    name = "no_lock_test",
+    srcs = ["no_lock_test.cc"],
+    deps = [
+        ":mutex",
+        ":no_lock",
     ],
 )
 
@@ -571,7 +630,10 @@ filegroup(
         "public/pw_sync/inline_borrowable.h",
         "public/pw_sync/interrupt_spin_lock.h",
         "public/pw_sync/lock_annotations.h",
+        "public/pw_sync/lock_traits.h",
         "public/pw_sync/mutex.h",
+        "public/pw_sync/no_lock.h",
+        "public/pw_sync/scoped_locker.h",
         "public/pw_sync/thread_notification.h",
         "public/pw_sync/timed_borrow.h",
         "public/pw_sync/timed_mutex.h",

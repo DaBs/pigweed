@@ -6,120 +6,99 @@ pw_multibuf
 .. pigweed-module::
    :name: pw_multibuf
 
-Sending or receiving messages via RPC, transfer, or sockets often requires a
-series of intermediate buffers, each requiring their own copy of the data.
-``pw_multibuf`` allows data to be written *once*, eliminating the memory, CPU
-and latency overhead of copying.
+Many forms of device I/O, including sending or receiving messages via RPC,
+transfer, or sockets, need to deal with multiple buffers or a series of
+intermediate buffers, each requiring their own copy of the data. ``pw_multibuf``
+allows data to be written *once*, eliminating the memory, CPU and latency
+overhead of copying, and aggregates the memory regions in a manner
+that is:
 
------------------
-How does it work?
------------------
-``pw_multibuf`` uses several techniques to minimize copying of data:
+- **Flexible**: Memory regions can be discontiguous and have different ownership
+  semantics. Memory regions can be added and removed with few restrictions.
+- **Copy-averse**: Users can pass around and mutate MultiBuf instances without
+  copying or moving data in-memory.
+- **Compact**: The sequence of memory regions and details about them are stored
+  in only a few words of additional metadata.
 
-- **Header and Footer Reservation**: Lower-level components can reserve space
-  within a buffer for headers and/or footers. This allows headers and footers
-  to be added to user-provided data without moving users' data.
-- **Native Scatter/Gather and Fragmentation Support**: Buffers can refer to
-  multiple separate chunks of memory. Messages can be built up from
-  discontiguous allocations, and users' data can be fragmented across multiple
-  packets.
-- **Divisible Memory Regions**: Incoming buffers can be divided without a copy,
-  allowing incoming data to be freely demultiplexed.
+
+.. literalinclude:: examples/basic.cc
+   :language: cpp
+   :linenos:
+   :start-after: [pw_multibuf-examples-basic]
+   :end-before: [pw_multibuf-examples-basic]
+
+For the complete example, see :cs:`pw_multibuf/examples/basic.cc`.
 
 -------------------------------
 What kinds of data is this for?
 -------------------------------
 ``pw_multibuf`` is best used in code that wants to read, write, or pass along
-data which are one of the following:
+data which are one or more of the following:
 
-- **Large**: ``pw_multibuf`` is designed to allow breaking up data into
-  multiple chunks. It also supports asynchronous allocation for when there may
-  not be sufficient space for incoming data.
-- **Communications-Oriented**: Data which is being received or sent across
+- **Large**: The MultiBuf type allows breaking up data into multiple chunks.
+- **Heterogeneous**: MultiBuf instances allow combining data that is uniquely
+  owned, shared, or externally managed, and encapsulates the details of
+  deallocating the memory it owns.
+- **Latency-sensitive**: Since they are copy-averse, MultiBuf instances are
+  useful when working in systems that need to pass large amounts of data, or
+  when memory usage is constrained.
+- **Discontiguous**: MultiBuf instances provide an interface to accessing and
+  modifying memory regions that encapsulates where the memory actually resides.
+- **Communications-oriented**: Data which is being received or sent across
   sockets, various packets, or shared-memory protocols can benefit from the
-  fragmentation, multiplexing, and header/footer-reservation properties of
-  ``pw_multibuf``.
-- **Copy-Averse**: ``pw_multibuf`` is structured to allow users to pass around
-  and mutate buffers without copying or moving data in-memory. This can be
-  especially useful when working in systems that are latency-sensitive,
-  need to pass large amounts of data, or when memory usage is constrained.
+  fragmentation, multiplexing, and layering features of the MultiBuf type.
 
--------------
-API Reference
--------------
-Most users of ``pw_multibuf`` will start by allocating a ``MultiBuf`` using
-a ``MultiBufAllocator`` class, such as the ``SimpleAllocator``.
+.. toctree::
+   :hidden:
+   :maxdepth: 1
 
-``MultiBuf`` s consist of a number of ``Chunk`` s of contiguous memory regions.
-``Chunk`` s can be grown or shrunk which allows ``MultiBuf`` s to be grown or
-shrunk. This allows, for example, lower layers to reserve part of a
-``MultiBuf`` for a header or footer (see ``Chunk`` for more details).
+   guide
+   concepts
+   design
+   code_size
 
-``MultiBuf`` exposes an ``std::byte`` iterator interface as well as a ``Chunk``
-iterator available through the ``Chunks()`` method. It allows extracting a
-``Chunk`` as an RAII-style ``OwnedChunk`` which manages its own lifetime.
+.. grid:: 3
 
-.. doxygenclass:: pw::multibuf::Chunk
-   :members:
+   .. grid-item-card:: :octicon:`rocket` Examples
+      :link: module-pw_multibuf-guide
+      :link-type: ref
+      :class-item: sales-pitch-cta-primary
 
-.. doxygenclass:: pw::multibuf::OwnedChunk
-   :members:
+      Learn how to use pw_multibuf through a series of examples
 
-.. doxygenclass:: pw::multibuf::MultiBuf
-   :members:
+   .. grid-item-card:: :octicon:`light-bulb` Concepts
+      :link: module-pw_multibuf-concepts
+      :link-type: ref
+      :class-item: sales-pitch-cta-secondary
 
-.. doxygenfunction:: pw::multibuf::FromSpan
+      Explore the ideas behind pw_multibuf
 
-.. doxygenclass:: pw::multibuf::MultiBufChunks
-   :members:
+   .. grid-item-card:: :octicon:`pencil` Design
+      :link: module-pw_multibuf-design
+      :link-type: ref
+      :class-item: sales-pitch-cta-secondary
 
-.. doxygenclass:: pw::multibuf::MultiBufAllocator
-   :members:
+      Learn why pw_multibuf is designed the way it is
 
-.. doxygenclass:: pw::multibuf::MultiBufAllocatorAsync
-   :members:
+.. grid:: 3
 
-.. doxygenclass:: pw::multibuf::MultiBufAllocationFuture
-   :members:
+   .. grid-item-card:: :octicon:`code` API reference
+      :link: ../api/cc/group__pw__multibuf__v2.html
+      :link-type: url
+      :class-item: sales-pitch-cta-secondary
 
-.. doxygenclass:: pw::multibuf::SimpleAllocator
-   :members:
+      Detailed description of pw_multibuf's current API
 
-.. doxygenclass:: pw::multibuf::Stream
-   :members:
+   .. grid-item-card:: :octicon:`code-square` Legacy API
+      :link: ../api/cc/group__pw__multibuf__v1.html
+      :link-type: url
+      :class-item: sales-pitch-cta-secondary
 
-Test-only features
-==================
-.. doxygenclass:: pw::multibuf::test::SimpleAllocatorForTest
-   :members:
+      Detailed description of pw_multibuf's legacy API
 
----------------------------
-Allocator Implementors' API
----------------------------
-Some users will need to directly implement the ``MultiBufAllocator`` interface
-in order to provide allocation out of a particular region, provide particular
-allocation policy, fix Chunks to some size (such as MTU size - header for
-socket implementations), or specify other custom behavior.
+   .. grid-item-card:: :octicon:`beaker` Code size analysis
+      :link: module-pw_multibuf-size-reports
+      :link-type: ref
+      :class-item: sales-pitch-cta-secondary
 
-These users will also need to understand and implement the following APIs:
-
-.. doxygenclass:: pw::multibuf::ChunkRegionTracker
-   :members:
-
-A simple implementation of a ``ChunkRegionTracker`` is provided, called
-``HeaderChunkRegionTracker``. It stores its ``Chunk`` and region metadata in a
-``Allocator`` allocation alongside the data. The allocation process is
-synchronous, making this class suitable for testing. The allocated region or
-``Chunk`` must not outlive the provided allocator.
-
-.. doxygenclass:: pw::multibuf::HeaderChunkRegionTracker
-   :members:
-
-Another ``ChunkRegionTracker`` specialization is the lightweight
-``SingleChunkRegionTracker``, which does not rely on ``Allocator`` and uses the
-provided memory view to create a single chunk. This is useful when a single
-``Chunk`` is sufficient at no extra overhead. However, the user needs to own
-the provided memory and know when a new ``Chunk`` can be requested.
-
-.. doxygenclass:: pw::multibuf::SingleChunkRegionTracker
-   :members:
+      Understand pw_multibuf's code and memory footprint

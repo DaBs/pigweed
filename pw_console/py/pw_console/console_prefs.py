@@ -16,8 +16,10 @@
 from __future__ import annotations
 
 import dataclasses
+from functools import cached_property
 import os
 from pathlib import Path
+import sys
 from typing import Callable
 
 from prompt_toolkit.key_binding import KeyBindings
@@ -25,7 +27,7 @@ import yaml
 
 from pw_config_loader.yaml_config_loader_mixin import YamlConfigLoaderMixin
 
-from pw_console.style import get_theme_colors, generate_styles
+from pw_console.style import generate_styles
 from pw_console.key_bindings import DEFAULT_KEY_BINDINGS
 
 _DEFAULT_REPL_HISTORY: Path = Path.home() / '.pw_console_history'
@@ -42,6 +44,8 @@ _DEFAULT_CONFIG = {
     'spaces_between_columns': 2,
     'column_order_omit_unspecified_columns': False,
     'column_order': [],
+    'column_visibility': {},
+    'column_width': {},
     'column_colors': {},
     'show_python_file': False,
     'show_python_logger': False,
@@ -64,14 +68,6 @@ _DEFAULT_CONFIG = {
 _DEFAULT_PROJECT_FILE = Path('$PW_PROJECT_ROOT/.pw_console.yaml')
 _DEFAULT_PROJECT_USER_FILE = Path('$PW_PROJECT_ROOT/.pw_console.user.yaml')
 _DEFAULT_USER_FILE = Path('$HOME/.pw_console.yaml')
-
-
-class UnknownWindowTitle(Exception):
-    """Exception for window titles not present in the window manager layout."""
-
-
-class EmptyWindowList(Exception):
-    """Exception for window lists with no content."""
 
 
 class EmptyPreviousPreviousDescription(Exception):
@@ -105,7 +101,7 @@ class CodeSnippet:
 
         assert isinstance(value, dict)
 
-        code = value.get('code', None)
+        code = value.get('code', '')
         description = value.get('description', None)
         if description == 'USE_PREVIOUS':
             if not previous_description:
@@ -118,40 +114,49 @@ class CodeSnippet:
         return CodeSnippet(title=title, code=code, description=description)
 
 
-def error_unknown_window(
+def warn_unknown_window(
     window_title: str, existing_pane_titles: list[str]
 ) -> None:
-    """Raise an error when the window config has an unknown title.
+    """Print a warning when a window config has an unknown title.
 
     If a window title does not already exist on startup it must have a loggers:
-    or duplicate_of: option set."""
+    command: or duplicate_of: option set."""
 
     pane_title_text = '  ' + '\n  '.join(existing_pane_titles)
     existing_pane_title_example = 'Window Title'
     if existing_pane_titles:
         existing_pane_title_example = existing_pane_titles[0]
-    raise UnknownWindowTitle(
-        f'\n\n"{window_title}" does not exist.\n'
+
+    print(
+        f'WARNING: The window "{window_title}" '
+        'specified in a pw_console.yaml file does not exist.\n'
         'Existing windows include:\n'
         f'{pane_title_text}\n'
-        'If this window should be a duplicate of one of the above,\n'
-        f'add "duplicate_of: {existing_pane_title_example}" to your config.\n'
-        'If this is a brand new window, include a "loggers:" section.\n'
-        'See also: '
-        'https://pigweed.dev/pw_console/docs/user_guide.html#example-config'
+        'If this window should be a duplicate of one of the above:\n'
+        f'  Add "duplicate_of: {existing_pane_title_example}" to your config.\n'
+        'If this is a brand new window:\n'
+        '  Add a "loggers:" or "command:" section to the window spec.\n'
+        'For examples see: \n'
+        'https://pigweed.dev/pw_console/py/pw_console/docs/user_guide.html'
+        '#example-config\n',
+        end=None,
+        file=sys.stderr,
     )
 
 
-def error_empty_window_list(
+def warn_empty_window_list(
     window_list_title: str,
 ) -> None:
-    """Raise an error if a window list is empty."""
-
-    raise EmptyWindowList(
-        f'\n\nError: The window layout heading "{window_list_title}" contains '
-        'no windows.\n'
-        'See also: '
-        'https://pigweed.dev/pw_console/docs/user_guide.html#example-config'
+    """Print a warning if a window list is empty."""
+    print(
+        f'WARNING: The window layout heading "{window_list_title}" '
+        'specified in a pw_console.yaml file '
+        'contains no windows.\n'
+        'For examples see: \n'
+        'https://pigweed.dev/pw_console/py/pw_console/docs/user_guide.html'
+        '#example-config\n',
+        end=None,
+        file=sys.stderr,
     )
 
 
@@ -183,18 +188,20 @@ class ConsolePrefs(YamlConfigLoaderMixin):
     def ui_theme(self) -> str:
         return self._config.get('ui_theme', '')
 
-    def set_ui_theme(self, theme_name: str):
+    @ui_theme.setter
+    def ui_theme(self, theme_name: str) -> None:
         self._config['ui_theme'] = theme_name
 
     @property
-    def theme_colors(self):
-        return get_theme_colors(self.ui_theme)
+    def ui_themes(self) -> dict:
+        return self._config.get('ui_themes', {})
 
     @property
     def code_theme(self) -> str:
         return self._config.get('code_theme', '')
 
-    def set_code_theme(self, theme_name: str):
+    @code_theme.setter
+    def code_theme(self, theme_name: str) -> None:
         self._config['code_theme'] = theme_name
 
     @property
@@ -252,6 +259,24 @@ class ConsolePrefs(YamlConfigLoaderMixin):
     def column_order(self) -> list:
         return self._config.get('column_order', [])
 
+    @cached_property
+    def column_width(self) -> dict[str, int]:
+        return {
+            name: int(width)
+            for name, width in self._config.get('column_width', {}).items()
+            if name.lower() != 'message'
+        }
+
+    @cached_property
+    def column_visibility(self) -> dict[str, bool]:
+        return {
+            name: is_visible
+            for name, is_visible in self._config.get(
+                'column_visibility', {}
+            ).items()
+            if name.lower() != 'message'
+        }
+
     def column_style(
         self, column_name: str, column_value: str, default=''
     ) -> str:
@@ -282,7 +307,12 @@ class ConsolePrefs(YamlConfigLoaderMixin):
 
     @property
     def window_column_split_method(self) -> str:
-        return self._config.get('window_column_split_method', 'vertical')
+        default_value = 'vertical'
+        legacy_value = self._config.get(
+            'window_column_split_method', default_value
+        )
+        value = self._config.get('window_group_split_method', legacy_value)
+        return value
 
     @property
     def windows(self) -> dict:
@@ -338,7 +368,8 @@ class ConsolePrefs(YamlConfigLoaderMixin):
         titles = []
         for window_list_title, column in self.windows.items():
             if not column:
-                error_empty_window_list(window_list_title)
+                warn_empty_window_list(window_list_title)
+                continue
 
             for window_key_title, window_dict in column.items():
                 window_options = window_dict if window_dict else {}

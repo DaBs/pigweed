@@ -14,11 +14,14 @@
 
 #include "pw_rpc_transport/local_rpc_egress.h"
 
+#include "pw_allocator/testing.h"
+#include "pw_assert/check.h"
 #include "pw_chrono/system_clock.h"
-#include "pw_log/log.h"
+#include "pw_containers/dynamic_vector.h"
 #include "pw_rpc/client_server.h"
 #include "pw_rpc/packet_meta.h"
 #include "pw_rpc_transport/internal/test.rpc.pwpb.h"
+#include "pw_rpc_transport/local_rpc_egress_logging_metric_tracker.h"
 #include "pw_rpc_transport/rpc_transport.h"
 #include "pw_rpc_transport/service_registry.h"
 #include "pw_status/status.h"
@@ -92,9 +95,10 @@ void LocalRpcEgressTest(
           .CreateClient<pw_rpc_transport::testing::pw_rpc::pwpb::TestService>(
               kChannelId);
 
-  std::vector<rpc::PwpbUnaryReceiver<
+  pw::allocator::test::AllocatorForTest<4096> allocator;
+  pw::DynamicVector<rpc::PwpbUnaryReceiver<
       pw_rpc_transport::testing::pwpb::EchoMessage::Message>>
-      receivers;
+      receivers(allocator);
 
   struct State {
     // Stash the receivers to keep the calls alive.
@@ -177,7 +181,8 @@ TEST(LocalRpcEgressTest, PacketQueueExhausted) {
   constexpr size_t kPacketQueueSize = 1;
   constexpr uint32_t kChannelId = 1;
 
-  LocalRpcEgress<kPacketQueueSize, kMaxPacketSize> egress;
+  LocalRpcEgressLoggingMetricTracker tracker;
+  LocalRpcEgress<kPacketQueueSize, kMaxPacketSize> egress(&tracker);
   std::array channels = {rpc::Channel::Create<kChannelId>(&egress)};
   ServiceRegistry registry(channels);
 
@@ -215,6 +220,8 @@ TEST(LocalRpcEgressTest, PacketQueueExhausted) {
   }
 
   EXPECT_TRUE(egress_ok);
+
+  EXPECT_GT(tracker.no_packet_available(), 0U);
 
   egress.Stop();
   egress_thread.join();

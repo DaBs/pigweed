@@ -14,16 +14,13 @@
 
 use proc_macro::TokenStream;
 use proc_macro2::Ident;
-use quote::quote;
-use syn::{
-    parse::{Parse, ParseStream},
-    parse_macro_input, Expr, Token,
-};
-
 use pw_format::macros::{
-    generate_core_fmt, Arg, CoreFmtFormatMacroGenerator, CoreFmtFormatStringParser,
-    FormatAndArgsFlavor, FormatStringParser, PrintfFormatStringParser, Result,
+    Arg, CoreFmtFormatMacroGenerator, CoreFmtFormatStringParser, FormatAndArgsFlavor,
+    FormatStringParser, PrintfFormatStringParser, Result, generate_core_fmt,
 };
+use quote::quote;
+use syn::parse::{Parse, ParseStream};
+use syn::{Expr, Token, parse_macro_input};
 
 type TokenStream2 = proc_macro2::TokenStream;
 
@@ -73,6 +70,7 @@ impl CoreFmtFormatMacroGenerator for LogfGenerator<'_> {
         let format_string = format!("[{{}}] {format_string}");
         Ok(quote! {
           {
+            extern crate std;
             use std::println;
             println!(#format_string, __pw_log_backend_crate::log_level_tag(#log_level), #(#args),*);
           }

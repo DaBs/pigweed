@@ -17,7 +17,10 @@ load("//pw_unit_test:pw_cc_test.bzl", "pw_cc_test")
 
 package(
     default_visibility = ["//visibility:public"],
-    features = ["-layering_check"],
+    features = [
+        "-layering_check",
+        "-ctad_warnings",
+    ],
 )
 
 # Basic target with protocol definitions and no logic, suitable for test
@@ -30,6 +33,7 @@ cc_library(
     hdrs = [
         "public/pw_bluetooth_sapphire/internal/host/gatt/gatt_defs.h",
     ],
+    features = ["-conversion_warnings"],
     strip_include_prefix = "public",
     tags = ["noclangtidy"],
     deps = [
@@ -44,6 +48,7 @@ cc_library(
     hdrs = [
         "public/pw_bluetooth_sapphire/internal/host/gatt/persisted_data.h",
     ],
+    features = ["-conversion_warnings"],
     strip_include_prefix = "public",
     deps = [
         ":definitions",
@@ -78,6 +83,7 @@ cc_library(
         "public/pw_bluetooth_sapphire/internal/host/gatt/server.h",
         "public/pw_bluetooth_sapphire/internal/host/gatt/types.h",
     ],
+    features = ["-conversion_warnings"],
     strip_include_prefix = "public",
     tags = ["noclangtidy"],
     deps = [
@@ -100,6 +106,11 @@ cc_library(
         "public/pw_bluetooth_sapphire/internal/host/gatt/fake_layer.h",
         "public/pw_bluetooth_sapphire/internal/host/gatt/mock_server.h",
     ],
+    copts = [
+        # TODO: https://pwbug.dev/464024322 - Fix warnings.
+        "-Wno-shadow",
+    ],
+    features = ["-conversion_warnings"],
     implementation_deps = [
         "//pw_bluetooth_sapphire/host/common",
         "//pw_unit_test:googletest",
@@ -124,8 +135,11 @@ pw_cc_test(
         "remote_service_manager_test.cc",
         "server_test.cc",
     ],
-    # TODO: https://pwbug.dev/393957973 - Fix this test.
-    tags = ["noubsan"],
+    copts = [
+        # TODO: https://pwbug.dev/464024322 - Fix warnings.
+        "-Wno-shadow",
+    ],
+    features = ["-conversion_warnings"],
     test_main = "//pw_bluetooth_sapphire/host/testing:gtest_main",
     deps = [
         ":gatt",
@@ -133,6 +147,7 @@ pw_cc_test(
         "//pw_bluetooth_sapphire/host/att",
         "//pw_bluetooth_sapphire/host/common:uuid_string_util",
         "//pw_bluetooth_sapphire/host/l2cap:testing",
+        "//pw_bluetooth_sapphire/host/testing",
         "//pw_bluetooth_sapphire/host/testing:gtest_helpers",
         "//pw_bluetooth_sapphire/host/testing:test_helpers",
     ],

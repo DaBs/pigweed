@@ -1,0 +1,56 @@
+// Copyright 2025 The Pigweed Authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License"); you may not
+// use this file except in compliance with the License. You may obtain a copy of
+// the License at
+//
+//     https://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+// WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+// License for the specific language governing permissions and limitations under
+// the License.
+{
+    use kernel::__private::foreign_box::{static_foreign_rc, upcast_foreign_rc};
+    use kernel::interrupt_controller::InterruptController;
+    use kernel::object::{KernelObject, InterruptObject};
+
+    type AtomicUsize = <K as kernel::Arch>::AtomicUsize;
+
+    fn ack_irqs(signal_mask: Signals) {
+        // Depending on the optimizer, it may make sense to investigate
+        // if adding a helper function which takes the signal_mask_table as an
+        // argument reduces code size.
+        let signal_mask_table: [u32; {{ object.irqs | length }}] = [
+        {%- for irq in object.irqs %}
+            {{irq.number}}{% if not loop.last %},{% endif %}
+        {%- endfor %}
+        ];
+
+        // Depending on the number of IRQs an object is handling a find first set
+        // loop may be more performant, but the FFS approach has a negative impact
+        // on code size, especially on RISC-V without the ZBB extension.
+        for (index, irq) in signal_mask_table.iter().enumerate() {
+            // IRQ signals start at bit 16.
+            let interrupt_bit = 1 << (16 + index);
+            if signal_mask.contains(Signals::from_bits_retain(interrupt_bit)) {
+                <K as kernel::Arch>::InterruptController::userspace_interrupt_ack(*irq);
+            }
+        }
+    }
+
+    // Create the interrupt object.
+    let interrupt =
+        unsafe { static_foreign_rc!(AtomicUsize, InterruptObject<K>, InterruptObject::new(ack_irqs)) };
+
+    unsafe { {{object.object_ref_name}}.set(interrupt.clone()) };
+
+    // Enable the interrupts for all interrupts handled by interrupt objects.
+    {%- for irq in object.irqs %}
+    <arch::Arch as kernel::Arch>::InterruptController::enable_interrupt({{irq.number}});
+    {%- endfor %}
+
+    // Upcast the concrete object into a dynamic one.
+    upcast_foreign_rc!(interrupt => dyn KernelObject<K>)
+}

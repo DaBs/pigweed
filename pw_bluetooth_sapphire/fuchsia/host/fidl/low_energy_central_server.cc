@@ -23,6 +23,7 @@
 #include "pw_bluetooth_sapphire/fuchsia/host/fidl/gatt_client_server.h"
 #include "pw_bluetooth_sapphire/fuchsia/host/fidl/helpers.h"
 #include "pw_bluetooth_sapphire/fuchsia/host/fidl/measure_tape/hlcpp_measure_tape_for_peer.h"
+#include "pw_bluetooth_sapphire/fuchsia/host/fidl/periodic_advertising_sync_server.h"
 #include "pw_bluetooth_sapphire/internal/host/common/error.h"
 #include "pw_bluetooth_sapphire/internal/host/common/log.h"
 #include "pw_bluetooth_sapphire/internal/host/hci-spec/constants.h"
@@ -63,10 +64,14 @@ bt::gap::LowEnergyConnectionOptions ConnectionOptionsFromFidl(
 LowEnergyCentralServer::LowEnergyCentralServer(
     bt::gap::Adapter::WeakPtr adapter,
     fidl::InterfaceRequest<Central> request,
-    bt::gatt::GATT::WeakPtr gatt)
+    bt::gatt::GATT::WeakPtr gatt,
+    pw::bluetooth_sapphire::LeaseProvider& wake_lease_provider,
+    async_dispatcher_t* dispatcher)
     : AdapterServerBase(std::move(adapter), this, std::move(request)),
       gatt_(std::move(gatt)),
+      wake_lease_provider_(wake_lease_provider),
       requesting_scan_deprecated_(false),
+      dispatcher_(dispatcher),
       weak_self_(this) {
   PW_CHECK(gatt_.is_alive());
 }
@@ -288,9 +293,9 @@ void LowEnergyCentralServer::ScanInstance::FilterAndAddPeers(
       // TODO(fxbug.dev/42111894): Match peer names that are not in advertising
       // data. This might require implementing a new peer filtering class, as
       // DiscoveryFilter only filters advertising data.
-      if (filter.MatchLowEnergyResult(peer->le()->parsed_advertising_data(),
-                                      peer->connectable(),
-                                      peer->rssi())) {
+      if (filter.Matches(peer->le()->parsed_advertising_data(),
+                         peer->connectable(),
+                         peer->rssi())) {
         matches_any = true;
         break;
       }
@@ -385,12 +390,13 @@ void LowEnergyCentralServer::Connect(
             self->connections_.erase(peer_id);
           }
         };
-        auto server =
-            std::make_unique<LowEnergyConnectionServer>(self->adapter(),
-                                                        self->gatt_,
-                                                        std::move(conn_ref),
-                                                        request.TakeChannel(),
-                                                        std::move(closed_cb));
+        auto server = std::make_unique<LowEnergyConnectionServer>(
+            self->adapter(),
+            self->gatt_,
+            self->wake_lease_provider_,
+            std::move(conn_ref),
+            request.TakeChannel(),
+            std::move(closed_cb));
 
         PW_CHECK(!conn_iter->second);
         conn_iter->second = std::move(server);
@@ -663,6 +669,64 @@ void LowEnergyCentralServer::DisconnectPeripheral(
   }
 
   callback(Status());
+}
+
+void LowEnergyCentralServer::SyncToPeriodicAdvertising(
+    fble::CentralSyncToPeriodicAdvertisingRequest request) {
+  if (!request.has_sync()) {
+    bt_log(WARN, "fidl", "%s: request missing sync field", __FUNCTION__);
+    return;
+  }
+  fidl::InterfaceRequest<fble::PeriodicAdvertisingSync> sync =
+      std::move(*request.mutable_sync());
+
+  if (!request.has_peer_id()) {
+    bt_log(WARN, "fidl", "%s: request missing peer_id field", __FUNCTION__);
+    sync.Close(ZX_ERR_INVALID_ARGS);
+    return;
+  }
+  bt::PeerId peer_id(request.peer_id().value);
+
+  if (!request.has_advertising_sid()) {
+    bt_log(WARN,
+           "fidl",
+           "%s: request missing advertising_sid field",
+           __FUNCTION__);
+    sync.Close(ZX_ERR_INVALID_ARGS);
+    return;
+  }
+  uint8_t advertising_sid = request.advertising_sid();
+
+  bt::gap::Adapter::LowEnergy::SyncOptions options{.filter_duplicates = true};
+  if (request.has_config() && request.config().has_filter_duplicates()) {
+    options.filter_duplicates = request.config().filter_duplicates();
+  }
+
+  // Convert the legacy FIDL binding fidl::InterfaceRequest into a new FIDL
+  // binding fidl::ServerEnd by converting it into a raw channel.
+  fidl::ServerEnd<::fuchsia_bluetooth_le::PeriodicAdvertisingSync> server_end(
+      sync.TakeChannel());
+
+  size_t server_id = next_server_id_++;
+  auto closed_cb = [this, server_id]() {
+    periodic_advertising_sync_servers_.erase(server_id);
+  };
+  std::unique_ptr<PeriodicAdvertisingSyncServer> server =
+      PeriodicAdvertisingSyncServer::Create(dispatcher_,
+                                            std::move(server_end),
+                                            adapter()->AsWeakPtr(),
+                                            peer_id,
+                                            advertising_sid,
+                                            options,
+                                            closed_cb);
+  if (!server) {
+    // The PeriodicAdvertisingSyncServer will have already notified the client.
+    return;
+  }
+
+  auto [_, inserted] = periodic_advertising_sync_servers_.try_emplace(
+      server_id, std::move(server));
+  PW_CHECK(inserted);
 }
 
 void LowEnergyCentralServer::ListenL2cap(

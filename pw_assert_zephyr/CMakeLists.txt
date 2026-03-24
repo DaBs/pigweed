@@ -24,7 +24,8 @@ pw_add_library(pw_assert_zephyr.check INTERFACE
   PUBLIC_DEPS
     pw_preprocessor
 )
-pw_zephyrize_libraries_ifdef(CONFIG_PIGWEED_ASSERT pw_assert_zephyr.check)
+pw_zephyrize_libraries_ifdef(
+  CONFIG_PIGWEED_ASSERT_ZEPHYR pw_assert_zephyr.check)
 
 pw_add_library(pw_assert_zephyr.assert INTERFACE
   HEADERS
@@ -34,4 +35,17 @@ pw_add_library(pw_assert_zephyr.assert INTERFACE
     public
     public_overrides
 )
-pw_zephyrize_libraries_ifdef(CONFIG_PIGWEED_ASSERT pw_assert_zephyr.assert)
+pw_zephyrize_libraries_ifdef(
+  CONFIG_PIGWEED_ASSERT_ZEPHYR pw_assert_zephyr.assert)
+
+pw_add_library(pw_assert_zephyr.pigweed_overrides INTERFACE
+  HEADERS
+    zephyr_public_overrides/zephyr_custom_assert.h
+  PUBLIC_INCLUDES
+    zephyr_public_overrides
+  PUBLIC_DEPS
+    pw_assert
+)
+pw_zephyrize_libraries_ifdef(CONFIG_PIGWEED_ASSERT_PIGWEED_OVERRIDES
+    pw_assert_zephyr.pigweed_overrides
+)

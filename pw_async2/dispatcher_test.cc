@@ -12,10 +12,10 @@
 // License for the specific language governing permissions and limitations under
 // the License.
 
-#include "pw_async2/dispatcher.h"
-
-#include "gtest/gtest.h"
+#include "pw_async2/dispatcher_for_test.h"
+#include "pw_async2/value_future.h"
 #include "pw_containers/vector.h"
+#include "pw_unit_test/framework.h"
 
 namespace pw::async2 {
 namespace {
@@ -23,81 +23,82 @@ namespace {
 class MockTask : public Task {
  public:
   bool should_complete = false;
+  bool unschedule = false;
   int polled = 0;
-  int destroyed = 0;
   Waker last_waker;
+
+  MockTask() : Task(PW_ASYNC_TASK_NAME("MockTask")) {}
 
  private:
   Poll<> DoPend(Context& cx) override {
     ++polled;
+    if (unschedule) {
+      return cx.Unschedule();
+    }
     PW_ASYNC_STORE_WAKER(cx, last_waker, "MockTask is waiting for last_waker");
     if (should_complete) {
       return Ready();
-    } else {
-      return Pending();
     }
+    return Pending();
   }
-  void DoDestroy() override { ++destroyed; }
 };
 
-class MockPendable {
- public:
-  MockPendable(Poll<int> value) : value_(value) {}
-  Poll<int> Pend(Context&) { return value_; }
-
- private:
-  Poll<int> value_;
-};
-
-TEST(Dispatcher, RunUntilStalledPendsPostedTask) {
+TEST(DispatcherForTest, RunUntilStalledPendsPostedTask) {
   MockTask task;
   task.should_complete = true;
-  Dispatcher dispatcher;
+  DispatcherForTest dispatcher;
   dispatcher.Post(task);
   EXPECT_TRUE(task.IsRegistered());
-  EXPECT_TRUE(dispatcher.RunUntilStalled(task).IsReady());
+  dispatcher.RunToCompletion();
   EXPECT_EQ(task.polled, 1);
-  EXPECT_EQ(task.destroyed, 1);
   EXPECT_FALSE(task.IsRegistered());
+  EXPECT_EQ(dispatcher.tasks_polled(), 1u);
+  EXPECT_EQ(dispatcher.tasks_completed(), 1u);
 }
 
-TEST(Dispatcher, RunUntilStalledReturnsOnNotReady) {
+TEST(DispatcherForTest, RunUntilStalledReturnsOnNotReady) {
   MockTask task;
   task.should_complete = false;
-  Dispatcher dispatcher;
+  DispatcherForTest dispatcher;
   dispatcher.Post(task);
-  EXPECT_FALSE(dispatcher.RunUntilStalled(task).IsReady());
+  EXPECT_TRUE(dispatcher.RunUntilStalled());
   EXPECT_EQ(task.polled, 1);
-  EXPECT_EQ(task.destroyed, 0);
+  EXPECT_EQ(dispatcher.tasks_polled(), 1u);
+  EXPECT_EQ(dispatcher.tasks_completed(), 0u);
 }
 
-TEST(Dispatcher, RunUntilStalledDoesNotPendSleepingTask) {
+TEST(DispatcherForTest, RunUntilStalledDoesNotPendSleepingTask) {
   MockTask task;
   task.should_complete = false;
-  Dispatcher dispatcher;
+  DispatcherForTest dispatcher;
   dispatcher.Post(task);
 
-  EXPECT_FALSE(dispatcher.RunUntilStalled(task).IsReady());
+  EXPECT_TRUE(dispatcher.RunUntilStalled());
   EXPECT_EQ(task.polled, 1);
-  EXPECT_EQ(task.destroyed, 0);
+  EXPECT_EQ(dispatcher.tasks_polled(), 1u);
+  EXPECT_EQ(dispatcher.tasks_completed(), 0u);
 
   task.should_complete = true;
-  EXPECT_FALSE(dispatcher.RunUntilStalled(task).IsReady());
+  EXPECT_TRUE(dispatcher.RunUntilStalled());
   EXPECT_EQ(task.polled, 1);
-  EXPECT_EQ(task.destroyed, 0);
+  EXPECT_EQ(dispatcher.tasks_polled(), 1u);
+  EXPECT_EQ(dispatcher.tasks_completed(), 0u);
 
-  std::move(task.last_waker).Wake();
-  EXPECT_TRUE(dispatcher.RunUntilStalled(task).IsReady());
+  task.last_waker.Wake();
+  dispatcher.RunToCompletion();
   EXPECT_EQ(task.polled, 2);
-  EXPECT_EQ(task.destroyed, 1);
+  EXPECT_EQ(dispatcher.tasks_polled(), 2u);
+  EXPECT_EQ(dispatcher.tasks_completed(), 1u);
 }
 
-TEST(Dispatcher, RunUntilStalledWithNoTasksReturnsReady) {
-  Dispatcher dispatcher;
-  EXPECT_TRUE(dispatcher.RunUntilStalled().IsReady());
+TEST(DispatcherForTest, RunUntilStalledWithNoTasksReturnsReady) {
+  DispatcherForTest dispatcher;
+  dispatcher.RunToCompletion();
+  EXPECT_EQ(dispatcher.tasks_polled(), 0u);
+  EXPECT_EQ(dispatcher.tasks_completed(), 0u);
 }
 
-TEST(Dispatcher, RunToCompletionPendsMultipleTasks) {
+TEST(DispatcherForTest, RunToCompletionPendsMultipleTasks) {
   class CounterTask : public Task {
    public:
     CounterTask(pw::span<Waker> wakers,
@@ -118,7 +119,7 @@ TEST(Dispatcher, RunToCompletionPendsMultipleTasks) {
       ++(*counter_);
       if (*counter_ >= until_) {
         for (auto& waker : wakers_) {
-          std::move(waker).Wake();
+          waker.Wake();
         }
         return Ready();
       } else {
@@ -136,76 +137,74 @@ TEST(Dispatcher, RunToCompletionPendsMultipleTasks) {
   CounterTask task_one(wakers, 0, &counter, kNumTasks);
   CounterTask task_two(wakers, 1, &counter, kNumTasks);
   CounterTask task_three(wakers, 2, &counter, kNumTasks);
-  Dispatcher dispatcher;
+  DispatcherForTest dispatcher;
   dispatcher.Post(task_one);
   dispatcher.Post(task_two);
   dispatcher.Post(task_three);
-  EXPECT_TRUE(dispatcher.RunUntilStalled().IsReady());
+  dispatcher.RunToCompletion();
   // We expect to see 5 total calls to `Pend`:
   // - two which increment counter and return pending
   // - one which increments the counter, returns complete, and wakes the
   //   others
   // - two which have woken back up and complete
   EXPECT_EQ(counter, 5);
+  EXPECT_EQ(dispatcher.tasks_polled(), 5u);
 }
 
-TEST(Dispatcher, RunPendableUntilStalledReturnsOutputOnReady) {
-  MockPendable pollable(Ready(5));
-  Dispatcher dispatcher;
-  Poll<int> result = dispatcher.RunPendableUntilStalled(pollable);
+TEST(DispatcherForTest, RunInTaskUntilStalledReturnsOutputOnReady) {
+  auto future = pw::async2::ValueFuture<int>::Resolved(5);
+
+  DispatcherForTest dispatcher_for_test;
+  Poll<int> result = dispatcher_for_test.RunInTaskUntilStalled(future);
   EXPECT_EQ(result, Ready(5));
 }
 
-TEST(Dispatcher, RunPendableUntilStalledReturnsPending) {
-  MockPendable pollable(Pending());
-  Dispatcher dispatcher;
-  Poll<int> result = dispatcher.RunPendableUntilStalled(pollable);
+TEST(DispatcherForTest, RunInTaskUntilStalledReturnsPending) {
+  pw::async2::ValueProvider<int> provider;
+  pw::async2::ValueFuture<int> future = provider.Get();
+
+  DispatcherForTest dispatcher_for_test;
+  Poll<int> result = dispatcher_for_test.RunInTaskUntilStalled(future);
   EXPECT_EQ(result, Pending());
 }
 
-TEST(Dispathcer, RunPendableToCompletionReturnsOutput) {
-  MockPendable pollable(Ready(5));
-  Dispatcher dispatcher;
-  int result = dispatcher.RunPendableToCompletion(pollable);
-  EXPECT_EQ(result, 5);
-}
-
-TEST(Dispatcher, PostToDispatcherFromInsidePendSucceeds) {
+TEST(DispatcherForTest, PostToDispatcherFromInsidePendSucceeds) {
   class TaskPoster : public Task {
    public:
-    TaskPoster(Task& task_to_post) : task_to_post_(&task_to_post) {}
+    TaskPoster(Dispatcher& dispatcher, Task& task_to_post)
+        : dispatcher_(&dispatcher), task_to_post_(&task_to_post) {}
 
    private:
-    Poll<> DoPend(Context& cx) override {
-      cx.dispatcher().Post(*task_to_post_);
+    Poll<> DoPend(Context&) override {
+      dispatcher_->Post(*task_to_post_);
       return Ready();
     }
+    Dispatcher* dispatcher_;
     Task* task_to_post_;
   };
 
   MockTask posted_task;
   posted_task.should_complete = true;
-  TaskPoster task_poster(posted_task);
-
-  Dispatcher dispatcher;
+  DispatcherForTest dispatcher;
+  TaskPoster task_poster(dispatcher, posted_task);
   dispatcher.Post(task_poster);
-  EXPECT_TRUE(dispatcher.RunUntilStalled().IsReady());
+  dispatcher.RunToCompletion();
   EXPECT_EQ(posted_task.polled, 1);
-  EXPECT_EQ(posted_task.destroyed, 1);
+  EXPECT_EQ(dispatcher.tasks_polled(), 2u);
 }
 
-TEST(Dispatcher, RunToCompletionPendsPostedTask) {
+TEST(DispatcherForTest, RunToCompletionPendsPostedTask) {
   MockTask task;
   task.should_complete = true;
-  Dispatcher dispatcher;
+  DispatcherForTest dispatcher;
   dispatcher.Post(task);
-  dispatcher.RunToCompletion(task);
+  dispatcher.RunToCompletion();
   EXPECT_EQ(task.polled, 1);
-  EXPECT_EQ(task.destroyed, 1);
+  EXPECT_EQ(dispatcher.tasks_polled(), 1u);
 }
 
-TEST(Dispatcher, RunToCompletionIgnoresDeregisteredTask) {
-  Dispatcher dispatcher;
+TEST(DispatcherForTest, RunToCompletionIgnoresDeregisteredTask) {
+  DispatcherForTest dispatcher;
   MockTask task;
   task.should_complete = false;
   dispatcher.Post(task);
@@ -214,7 +213,96 @@ TEST(Dispatcher, RunToCompletionIgnoresDeregisteredTask) {
   EXPECT_FALSE(task.IsRegistered());
   dispatcher.RunToCompletion();
   EXPECT_EQ(task.polled, 0);
-  EXPECT_EQ(task.destroyed, 0);
+  EXPECT_EQ(dispatcher.tasks_polled(), 0u);
+}
+
+TEST(DispatcherForTest, UnscheduleAllowsRepost) {
+  DispatcherForTest dispatcher;
+  MockTask task;
+  task.should_complete = false;
+  task.unschedule = true;
+  dispatcher.Post(task);
+  EXPECT_TRUE(task.IsRegistered());
+
+  // The dispatcher returns Ready() since the task has opted out of being woken,
+  // so it no longer exists in the dispatcher queues.
+  dispatcher.RunToCompletion();
+  EXPECT_EQ(task.polled, 1);
+  EXPECT_EQ(dispatcher.tasks_polled(), 1u);
+
+  dispatcher.RunToCompletion();
+  EXPECT_EQ(task.polled, 1);
+  EXPECT_EQ(dispatcher.tasks_polled(), 1u);
+
+  // The task must be re-posted to run again.
+  task.should_complete = true;
+  dispatcher.Post(task);
+  dispatcher.RunToCompletion();
+  EXPECT_EQ(task.polled, 2);
+  EXPECT_EQ(dispatcher.tasks_polled(), 2u);
+}
+
+class WakeCounter final : public pw::async2::Dispatcher {
+ public:
+  ~WakeCounter() override { Terminate(); }
+
+  int wake_count() const { return wake_count_; }
+
+  using pw::async2::Dispatcher::PopAndRunAllReadyTasks;
+
+ private:
+  void DoWake() override { wake_count_ += 1; }
+
+  int wake_count_ = 0;
+};
+
+TEST(Dispatcher, PostOnlyWakesOnce) {
+  MockTask task1, task2, task3;
+  WakeCounter dispatcher;
+  dispatcher.Post(task1);
+  dispatcher.Post(task2);
+  dispatcher.Post(task3);
+
+  EXPECT_EQ(dispatcher.wake_count(), 1);
+}
+
+TEST(Dispatcher, WakingMultipleTasksOnlyWakesOnce) {
+  MockTask task1, task2, task3;
+  WakeCounter dispatcher;
+  dispatcher.Post(task1);
+  dispatcher.Post(task2);
+  dispatcher.Post(task3);
+
+  dispatcher.PopAndRunAllReadyTasks();
+
+  EXPECT_EQ(dispatcher.wake_count(), 1);
+
+  task1.last_waker.Wake();
+  EXPECT_EQ(dispatcher.wake_count(), 2);
+
+  task2.last_waker.Wake();
+  EXPECT_EQ(dispatcher.wake_count(), 2);
+
+  task3.last_waker.Wake();
+  EXPECT_EQ(dispatcher.wake_count(), 2);
+}
+
+TEST(Dispatcher, WakingMultipleTasksAndPostingOnlyWakesOnce) {
+  MockTask task1, task2, task3;
+  WakeCounter dispatcher;
+  dispatcher.Post(task1);
+  dispatcher.Post(task2);
+
+  dispatcher.PopAndRunAllReadyTasks();
+
+  EXPECT_EQ(dispatcher.wake_count(), 1);
+
+  task1.last_waker.Wake();
+  EXPECT_EQ(dispatcher.wake_count(), 2);
+
+  task2.last_waker.Wake();
+  dispatcher.Post(task3);
+  EXPECT_EQ(dispatcher.wake_count(), 2);
 }
 
 }  // namespace

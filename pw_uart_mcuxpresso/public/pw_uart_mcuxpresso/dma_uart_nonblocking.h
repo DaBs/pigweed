@@ -40,7 +40,6 @@ class DmaUartMcuxpressoNonBlocking final : public UartNonBlocking {
     inputmux_signal_t rx_input_mux_dmac_ch_request_en;  // Rx input mux signal
     inputmux_signal_t tx_input_mux_dmac_ch_request_en;  // Tx input mux signal
     ByteSpan buffer;                                    // Receive ring buffer
-    pw::clock_tree::ClockTree* clock_tree{};            // Optional clock Tree
     pw::clock_tree::Element*
         clock_tree_element{};  // Optional clock tree element
   };
@@ -48,8 +47,7 @@ class DmaUartMcuxpressoNonBlocking final : public UartNonBlocking {
   DmaUartMcuxpressoNonBlocking(const Config& config)
       : rx_data_{.ring_buffer = config.buffer},
         config_(config),
-        clock_tree_element_controller_(config.clock_tree,
-                                       config.clock_tree_element) {}
+        clock_tree_element_(config.clock_tree_element) {}
 
   ~DmaUartMcuxpressoNonBlocking();
 
@@ -88,6 +86,7 @@ class DmaUartMcuxpressoNonBlocking final : public UartNonBlocking {
     size_t ring_buffer_write_idx{};  // Ring buffer writer index
     size_t data_received{};       // Increments when data enters the ring buffer
     size_t data_copied{};         // Increments when data exits the ring buffer
+    bool data_loss{};             // Set when the ring buffer overflows
     usart_transfer_t transfer{};  // USART RX transfer structure
 
     // User read request data
@@ -106,28 +105,38 @@ class DmaUartMcuxpressoNonBlocking final : public UartNonBlocking {
   static constexpr size_t kUsartDmaMaxTransferCount =
       DMA_MAX_TRANSFER_COUNT - 1;
 
-  Status DoEnable(bool enable) override;
+  Status DoEnable(bool enable) override PW_LOCKS_EXCLUDED(interrupt_lock_);
   Status DoSetBaudRate(uint32_t baud_rate) override;
   Status DoSetFlowControl(bool enable) override;
 
-  Status DoRead(
-      ByteSpan rx_buffer,
-      size_t min_bytes,
-      Function<void(Status status, ConstByteSpan buffer)>&& callback) override;
-  bool DoCancelRead() override;
+  Status DoRead(ByteSpan rx_buffer,
+                size_t min_bytes,
+                Function<void(Status status, ConstByteSpan buffer)>&& callback)
+      override PW_LOCKS_EXCLUDED(interrupt_lock_);
+  bool DoCancelRead() override PW_LOCKS_EXCLUDED(interrupt_lock_);
 
   Status DoWrite(ConstByteSpan tx_buffer,
-                 Function<void(StatusWithSize status)>&& callback) override;
-  bool DoCancelWrite() override;
+                 Function<void(StatusWithSize status)>&& callback) override
+      PW_LOCKS_EXCLUDED(interrupt_lock_);
+  bool DoCancelWrite() override PW_LOCKS_EXCLUDED(interrupt_lock_);
   Status DoFlushOutput(Function<void(Status status)>&& callback) override;
-  bool DoCancelFlushOutput() override;
-  size_t DoConservativeReadAvailable() override;
-  Status DoClearPendingReceiveBytes() override;
+  bool DoCancelFlushOutput() override PW_LOCKS_EXCLUDED(interrupt_lock_);
+  size_t DoConservativeReadAvailable() override
+      PW_LOCKS_EXCLUDED(interrupt_lock_);
+  Status DoClearPendingReceiveBytes() override
+      PW_LOCKS_EXCLUDED(interrupt_lock_);
 
   // Helper functions
 
-  void Deinit();
-  Status Init();
+  void Deinit() PW_LOCKS_EXCLUDED(interrupt_lock_);
+  Status Init() PW_LOCKS_EXCLUDED(interrupt_lock_);
+
+  bool DoCancelReadLockHeld() PW_EXCLUSIVE_LOCKS_REQUIRED(interrupt_lock_);
+  bool DoCancelWriteLockHeld() PW_EXCLUSIVE_LOCKS_REQUIRED(interrupt_lock_);
+  bool DoCancelFlushOutputLockHeld()
+      PW_EXCLUSIVE_LOCKS_REQUIRED(interrupt_lock_);
+  Status DoClearPendingReceiveBytesLockHeld()
+      PW_EXCLUSIVE_LOCKS_REQUIRED(interrupt_lock_);
 
   void HandleCompletedRxIntoRingBuffer()
       PW_EXCLUSIVE_LOCKS_REQUIRED(interrupt_lock_);
@@ -160,9 +169,7 @@ class DmaUartMcuxpressoNonBlocking final : public UartNonBlocking {
   struct UsartDmaRxData rx_data_ PW_GUARDED_BY(interrupt_lock_);
 
   Config config_;  // USART DMA configuration
-  pw::clock_tree::ElementController
-      clock_tree_element_controller_;  // Element controller encapsulating
-                                       // optional clock tree information
+  pw::clock_tree::OptionalElement clock_tree_element_;
   bool
       initialized_;  // Whether the USART and DMA channels have been initialized
   uint32_t flexcomm_clock_freq_{};

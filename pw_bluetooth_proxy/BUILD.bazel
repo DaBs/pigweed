@@ -14,157 +14,123 @@
 
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("@rules_python//sphinxdocs:sphinx_docs_library.bzl", "sphinx_docs_library")
+load("//pw_bloat:pw_size_diff.bzl", "pw_size_diff")
+load("//pw_bloat:pw_size_table.bzl", "pw_size_table")
+load("//pw_bluetooth_proxy:bt-proxy.bzl", "pw_bluetooth_proxy_library", "pw_bluetooth_proxy_test", "pw_bluetooth_proxy_test_utils")
 load("//pw_build:compatibility.bzl", "incompatible_with_mcu")
-load("//pw_unit_test:pw_cc_test.bzl", "pw_cc_test")
 
 package(
     default_visibility = ["//visibility:public"],
-    features = ["-layering_check"],
+    features = [
+        "-layering_check",
+        "-ctad_warnings",
+    ],
 )
 
 licenses(["notice"])
 
+# Module configuration
+
 cc_library(
-    name = "pw_bluetooth_proxy",
-
-    # LINT.IfChange
-    srcs = [
-        "acl_data_channel.cc",
-        "basic_l2cap_channel.cc",
-        "gatt_notify_channel.cc",
-        "h4_storage.cc",
-        "l2cap_aclu_signaling_channel.cc",
-        "l2cap_channel.cc",
-        "l2cap_channel_manager.cc",
-        "l2cap_coc.cc",
-        "l2cap_leu_signaling_channel.cc",
-        "l2cap_signaling_channel.cc",
-        "l2cap_status_tracker.cc",
-        "multibuf_writer.cc",
-        "proxy_host.cc",
-        "rfcomm_channel.cc",
-        "rfcomm_fcs.cc",
-    ],
-    # LINT.ThenChange(Android.bp, BUILD.gn, CMakeLists.txt)
-
-    # LINT.IfChange
-    hdrs = [
-        "public/pw_bluetooth_proxy/basic_l2cap_channel.h",
-        "public/pw_bluetooth_proxy/gatt_notify_channel.h",
-        "public/pw_bluetooth_proxy/h4_packet.h",
-        "public/pw_bluetooth_proxy/internal/acl_data_channel.h",
-        "public/pw_bluetooth_proxy/internal/gatt_notify_channel_internal.h",
-        "public/pw_bluetooth_proxy/internal/h4_storage.h",
-        "public/pw_bluetooth_proxy/internal/hci_transport.h",
-        "public/pw_bluetooth_proxy/internal/l2cap_aclu_signaling_channel.h",
-        "public/pw_bluetooth_proxy/internal/l2cap_channel.h",
-        "public/pw_bluetooth_proxy/internal/l2cap_channel_manager.h",
-        "public/pw_bluetooth_proxy/internal/l2cap_coc_internal.h",
-        "public/pw_bluetooth_proxy/internal/l2cap_leu_signaling_channel.h",
-        "public/pw_bluetooth_proxy/internal/l2cap_signaling_channel.h",
-        "public/pw_bluetooth_proxy/internal/l2cap_status_tracker.h",
-        "public/pw_bluetooth_proxy/internal/logical_transport.h",
-        "public/pw_bluetooth_proxy/internal/multibuf_writer.h",
-        "public/pw_bluetooth_proxy/internal/rfcomm_fcs.h",
-        "public/pw_bluetooth_proxy/l2cap_channel_common.h",
-        "public/pw_bluetooth_proxy/l2cap_coc.h",
-        "public/pw_bluetooth_proxy/l2cap_status_delegate.h",
-        "public/pw_bluetooth_proxy/proxy_host.h",
-        "public/pw_bluetooth_proxy/rfcomm_channel.h",
-    ],
-    # LINT.ThenChange(BUILD.gn, CMakeLists.txt)
-    implementation_deps = ["//pw_containers:algorithm"],
+    name = "config",
+    hdrs = ["public/pw_bluetooth_proxy/config.h"],
     strip_include_prefix = "public",
-
-    # LINT.IfChange
-    deps = [
-        "//pw_allocator:best_fit",
-        "//pw_allocator:synchronized_allocator",
-        "//pw_assert:check",
-        "//pw_bluetooth:emboss_att",
-        "//pw_bluetooth:emboss_hci_commands",
-        "//pw_bluetooth:emboss_hci_common",
-        "//pw_bluetooth:emboss_hci_data",
-        "//pw_bluetooth:emboss_hci_events",
-        "//pw_bluetooth:emboss_hci_h4",
-        "//pw_bluetooth:emboss_l2cap_frames",
-        "//pw_bluetooth:emboss_rfcomm_frames",
-        "//pw_bluetooth:emboss_util",
-        "//pw_containers:flat_map",
-        "//pw_containers:inline_queue",
-        "//pw_containers:vector",
-        "//pw_function",
-        "//pw_log",
-        "//pw_multibuf",
-        "//pw_multibuf:simple_allocator",
-        "//pw_result",
-        "//pw_span",
-        "//pw_span:cast",
-        "//pw_status",
-        "//pw_sync:lock_annotations",
-        "//pw_sync:mutex",
-    ],
-    # LINT.ThenChange(Android.bp, BUILD.gn, CMakeLists.txt)
+    deps = [":config_override"],
 )
 
-cc_library(
-    name = "test_utils",
+label_flag(
+    name = "config_override",
+    build_setting_default = "//pw_build:default_module_config",
+)
+
+# Libraries
+
+# LINT.IfChange
+
+pw_bluetooth_proxy_library(
+    name = "pw_bluetooth_proxy",
+)
+
+pw_bluetooth_proxy_library(
+    name = "pw_bluetooth_proxy_sync",
     testonly = True,
-
-    # LINT.IfChange
-    srcs = ["test_utils.cc"],
-    hdrs = ["pw_bluetooth_proxy_private/test_utils.h"],
-    deps = [
-        ":pw_bluetooth_proxy",
-        "//pw_assert:check",
-        "//pw_bluetooth:emboss_att",
-        "//pw_bluetooth:emboss_hci_commands",
-        "//pw_bluetooth:emboss_hci_common",
-        "//pw_bluetooth:emboss_hci_events",
-        "//pw_bluetooth:emboss_hci_h4",
-        "//pw_bluetooth:emboss_util",
-        "//pw_containers:flat_map",
-        "//pw_multibuf:testing",
-        "//pw_unit_test",
-    ],
-    # LINT.ThenChange(BUILD.gn, CMakeLists.txt)
+    defines = ["PW_BLUETOOTH_PROXY_ASYNC=0"],
+    visibility = ["//pw_bluetooth_proxy:__subpackages__"],
 )
 
-pw_cc_test(
-    name = "pw_bluetooth_proxy_test",
-
-    # LINT.IfChange
-    srcs = [
-        "gatt_notify_test.cc",
-        "h4_packet_test.cc",
-        "l2cap_coc_test.cc",
-        "multibuf_writer_test.cc",
-        "proxy_host_test.cc",
-        "rfcomm_fcs_test.cc",
-        "rfcomm_test.cc",
-        "utils_test.cc",
-    ],
-    deps = [
-        ":pw_bluetooth_proxy",
-        ":test_utils",
-        "//pw_assert:check",
-        "//pw_bluetooth:emboss_att",
-        "//pw_bluetooth:emboss_hci_commands",
-        "//pw_bluetooth:emboss_hci_common",
-        "//pw_bluetooth:emboss_hci_events",
-        "//pw_bluetooth:emboss_hci_h4",
-        "//pw_bluetooth:emboss_util",
-        "//pw_containers:flat_map",
-        "//pw_multibuf",
-    ],
-    # LINT.ThenChange(BUILD.gn, CMakeLists.txt)
+pw_bluetooth_proxy_library(
+    name = "pw_bluetooth_proxy_async",
+    testonly = True,
+    defines = ["PW_BLUETOOTH_PROXY_ASYNC=1"],
+    visibility = ["//pw_bluetooth_proxy:__subpackages__"],
 )
+
+alias(
+    name = "gatt",
+    actual = "//pw_bluetooth_proxy/gatt",
+)
+
+alias(
+    name = "rfcomm",
+    actual = "//pw_bluetooth_proxy/rfcomm",
+)
+
+# Tests
+
+pw_bluetooth_proxy_test_utils(
+    name = "test_utils_sync",
+    defines = ["PW_BLUETOOTH_PROXY_ASYNC=0"],
+    versioned_deps = [":pw_bluetooth_proxy_sync"],
+    visibility = ["//pw_bluetooth_proxy:__subpackages__"],
+)
+
+pw_bluetooth_proxy_test_utils(
+    name = "test_utils_async",
+    defines = ["PW_BLUETOOTH_PROXY_ASYNC=1"],
+    versioned_deps = [":pw_bluetooth_proxy_async"],
+    visibility = ["//pw_bluetooth_proxy:__subpackages__"],
+)
+
+pw_bluetooth_proxy_test(
+    name = "pw_bluetooth_proxy_sync_test",
+    defines = ["PW_BLUETOOTH_PROXY_ASYNC=0"],
+    versioned_deps = [
+        ":pw_bluetooth_proxy_sync",
+        ":test_utils_sync",
+    ],
+)
+
+pw_bluetooth_proxy_test(
+    name = "pw_bluetooth_proxy_async_test",
+    defines = ["PW_BLUETOOTH_PROXY_ASYNC=1"],
+    versioned_deps = [
+        ":pw_bluetooth_proxy_async",
+        ":test_utils_async",
+    ],
+)
+
+# LINT.ThenChange(BUILD.gn, CMakeLists.txt)
 
 filegroup(
     name = "doxygen",
     srcs = [
+        "public/pw_bluetooth_proxy/config.h",
         "public/pw_bluetooth_proxy/h4_packet.h",
         "public/pw_bluetooth_proxy/proxy_host.h",
+    ],
+)
+
+pw_size_diff(
+    name = "use_passthrough_proxy_size_diff",
+    base = "//pw_bloat:bloat_base",
+    label = "Create and use proxy as a simple passthrough",
+    target = "//pw_bluetooth_proxy/size_report:use_passthrough_proxy",
+)
+
+pw_size_table(
+    name = "use_passthrough_proxy_size_report",
+    reports = [
+        ":use_passthrough_proxy_size_diff",
     ],
 )
 
@@ -173,6 +139,7 @@ sphinx_docs_library(
     srcs = [
         "docs.rst",
         "proxy_host_test.cc",
+        ":use_passthrough_proxy_size_report",
     ],
     prefix = "pw_bluetooth_proxy/",
     target_compatible_with = incompatible_with_mcu(),

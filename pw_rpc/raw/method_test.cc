@@ -114,7 +114,9 @@ class FakeService : public FakeServiceBase<FakeService> {
 
     std::array<std::byte, 32> response;
     TestResponse::MemoryEncoder test_response(response);
-    EXPECT_EQ(OkStatus(), test_response.WriteValue(last_request.integer + 5));
+    EXPECT_EQ(OkStatus(),
+              test_response.WriteValue(
+                  static_cast<int32_t>(last_request.integer + 5)));
     ConstByteSpan payload(test_response);
 
     ASSERT_EQ(OkStatus(),

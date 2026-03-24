@@ -16,6 +16,8 @@
 
 #include <fidl/fuchsia.power.system/cpp/fidl.h>
 
+#include "pw_bluetooth_sapphire/internal/host/common/inspect.h"
+#include "pw_bluetooth_sapphire/internal/host/common/inspectable.h"
 #include "pw_bluetooth_sapphire/internal/host/common/macros.h"
 #include "pw_bluetooth_sapphire/internal/host/common/weak_self.h"
 #include "pw_bluetooth_sapphire/lease.h"
@@ -26,21 +28,52 @@ namespace bthost {
 // Leases vended by ActivityGovernorLeaseProvider will only be valid as long as
 // ActivityGovernorLeaseProvider is alive.
 class ActivityGovernorLeaseProvider final
-    : public pw::bluetooth_sapphire::LeaseProvider {
+    : public pw::bluetooth_sapphire::LeaseProvider,
+      public fidl::Server<::fuchsia_power_system::SuspendBlocker> {
  public:
+  static std::unique_ptr<ActivityGovernorLeaseProvider> Create(
+      fidl::ClientEnd<::fuchsia_power_system::ActivityGovernor>
+          activity_governor_client,
+      async_dispatcher_t* dispatcher);
+
   ActivityGovernorLeaseProvider(
-      fidl::ClientEnd<::fuchsia_power_system::ActivityGovernor> client_end);
+      fidl::ClientEnd<::fuchsia_power_system::ActivityGovernor>
+          activity_governor_client,
+      fidl::ServerEnd<::fuchsia_power_system::SuspendBlocker>
+          suspend_blocker_server,
+      async_dispatcher_t* dispatcher);
   BT_DISALLOW_COPY_ASSIGN_AND_MOVE(ActivityGovernorLeaseProvider);
 
   ~ActivityGovernorLeaseProvider() override = default;
   pw::Result<pw::bluetooth_sapphire::Lease> Acquire(const char* name) override;
 
- private:
-  void OnLeaseDropped();
+  void AttachInspect(inspect::Node& parent, const char* name);
 
+ private:
+  enum class State {
+    kResumed,
+    kSuspending,
+  };
+
+  void OnLeaseDropped();
+  void AcquireWakeLease();
+
+  // fidl::Server<::fuchsia_power_system::SuspendBlocker> overrides:
+  void BeforeSuspend(BeforeSuspendCompleter::Sync& completer) override;
+  void AfterResume(AfterResumeCompleter::Sync& completer) override;
+  void handle_unknown_method(
+      fidl::UnknownMethodMetadata<::fuchsia_power_system::SuspendBlocker>
+          metadata,
+      fidl::UnknownMethodCompleter::Sync& completer) override {}
+
+  inspect::Node node_;
+  inspect::Node leases_node_;
+  State state_ = State::kResumed;
   fidl::SyncClient<fuchsia_power_system::ActivityGovernor> governor_;
-  std::optional<::fuchsia_power_system::LeaseToken> token_;
+  bt::BoolInspectable<std::optional<::fuchsia_power_system::LeaseToken>> token_;
   uint16_t ref_count_ = 0;
+  std::optional<fidl::ServerBindingRef<::fuchsia_power_system::SuspendBlocker>>
+      binding_ref_;
   WeakSelf<ActivityGovernorLeaseProvider> weak_ptr_factory_{this};
 };
 

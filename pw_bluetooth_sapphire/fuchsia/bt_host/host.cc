@@ -29,9 +29,11 @@ using namespace bt;
 
 namespace bthost {
 
-BtHostComponent::BtHostComponent(async_dispatcher_t* dispatcher,
-                                 const std::string& device_path,
-                                 bool initialize_rng)
+BtHostComponent::BtHostComponent(
+    async_dispatcher_t* dispatcher,
+    const std::string& device_path,
+    bool initialize_rng,
+    std::unique_ptr<ActivityGovernorLeaseProvider> activity_governor)
     : pw_dispatcher_(dispatcher),
       device_path_(device_path),
       initialize_rng_(initialize_rng),
@@ -40,6 +42,12 @@ BtHostComponent::BtHostComponent(async_dispatcher_t* dispatcher,
     set_random_generator(&random_generator_);
   }
   inspector_.root().RecordString("name", device_path_);
+
+  if (activity_governor) {
+    activity_governor->AttachInspect(inspector_.root(), "lease_provider");
+    lease_provider_.emplace<std::unique_ptr<ActivityGovernorLeaseProvider>>(
+        std::move(activity_governor));
+  }
 }
 
 BtHostComponent::~BtHostComponent() {
@@ -50,9 +58,14 @@ BtHostComponent::~BtHostComponent() {
 
 // static
 std::unique_ptr<BtHostComponent> BtHostComponent::Create(
-    async_dispatcher_t* dispatcher, const std::string& device_path) {
+    async_dispatcher_t* dispatcher,
+    const std::string& device_path,
+    std::unique_ptr<ActivityGovernorLeaseProvider> activity_governor) {
   std::unique_ptr<BtHostComponent> host(
-      new BtHostComponent(dispatcher, device_path, /*initialize_rng=*/true));
+      new BtHostComponent(dispatcher,
+                          device_path,
+                          /*initialize_rng=*/true,
+                          std::move(activity_governor)));
   return host;
 }
 
@@ -60,7 +73,10 @@ std::unique_ptr<BtHostComponent> BtHostComponent::Create(
 std::unique_ptr<BtHostComponent> BtHostComponent::CreateForTesting(
     async_dispatcher_t* dispatcher, const std::string& device_path) {
   std::unique_ptr<BtHostComponent> host(
-      new BtHostComponent(dispatcher, device_path, /*initialize_rng=*/false));
+      new BtHostComponent(dispatcher,
+                          device_path,
+                          /*initialize_rng=*/false,
+                          /*activity_governor=*/nullptr));
   return host;
 }
 
@@ -68,22 +84,28 @@ bool BtHostComponent::Initialize(
     fidl::ClientEnd<fuchsia_hardware_bluetooth::Vendor> vendor_client_end,
     InitCallback init_cb,
     ErrorCallback error_cb,
-    bool legacy_pairing_enabled) {
+    bool legacy_pairing_enabled,
+    uint16_t override_vendor_capabilites_version) {
   std::unique_ptr<bt::controllers::FidlController> controller =
       std::make_unique<bt::controllers::FidlController>(
           std::move(vendor_client_end), async_get_default_dispatcher());
 
   bt_log(INFO, "bt-host", "Create HCI transport layer");
-  hci_ =
-      std::make_unique<hci::Transport>(std::move(controller), pw_dispatcher_);
+  hci_ = std::make_unique<hci::Transport>(
+      std::move(controller), pw_dispatcher_, lease_provider());
 
   bt_log(INFO, "bt-host", "Create GATT layer");
   gatt_ = gatt::GATT::Create();
   gap::Adapter::Config config = {
       .legacy_pairing_enabled = legacy_pairing_enabled,
+      .override_vendor_capabilites_version =
+          override_vendor_capabilites_version,
   };
-  gap_ = gap::Adapter::Create(
-      pw_dispatcher_, hci_->GetWeakPtr(), gatt_->GetWeakPtr(), config);
+  gap_ = gap::Adapter::Create(pw_dispatcher_,
+                              hci_->GetWeakPtr(),
+                              gatt_->GetWeakPtr(),
+                              config,
+                              lease_provider());
   if (!gap_) {
     bt_log(WARN, "bt-host", "GAP could not be created");
     return false;
@@ -137,7 +159,8 @@ void BtHostComponent::ShutDown() {
 }
 
 void BtHostComponent::BindToHostInterface(
-    fidl::ServerEnd<fuchsia_bluetooth_host::Host> host_client) {
+    fidl::ServerEnd<fuchsia_bluetooth_host::Host> host_client,
+    uint8_t sco_offload_index) {
   if (host_server_) {
     bt_log(WARN, "bt-host", "Host interface channel already open");
     return;
@@ -148,13 +171,39 @@ void BtHostComponent::BindToHostInterface(
 
   zx::channel channel = host_client.TakeChannel();
 
-  host_server_ = std::make_unique<HostServer>(
-      std::move(channel), gap_->AsWeakPtr(), gatt_->GetWeakPtr());
+  host_server_ = std::make_unique<HostServer>(std::move(channel),
+                                              gap_->AsWeakPtr(),
+                                              gatt_->GetWeakPtr(),
+                                              lease_provider(),
+                                              sco_offload_index,
+                                              pw_dispatcher_.native());
   host_server_->set_error_handler([this](zx_status_t status) {
     PW_DCHECK(host_server_);
     bt_log(WARN, "bt-host", "Host interface disconnected");
     host_server_ = nullptr;
   });
+}
+
+pw::bluetooth_sapphire::LeaseProvider& BtHostComponent::lease_provider() {
+  pw::bluetooth_sapphire::LeaseProvider* lease_provider = nullptr;
+  std::visit(
+      [&](auto&& p) {
+        using T = std::decay_t<decltype(p)>;
+        if constexpr (std::is_same_v<
+                          T,
+                          pw::bluetooth_sapphire::NullLeaseProvider>) {
+          lease_provider = &p;
+        } else if constexpr (std::is_same_v<
+                                 T,
+                                 std::unique_ptr<
+                                     bthost::ActivityGovernorLeaseProvider>>) {
+          lease_provider = p.get();
+        } else {
+          static_assert(false, "non-exhaustive visitor!");
+        }
+      },
+      lease_provider_);
+  return *lease_provider;
 }
 
 }  // namespace bthost

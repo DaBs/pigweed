@@ -6,7 +6,7 @@ pw_json
 .. pigweed-module::
    :name: pw_json
 
-   Use :cpp:class:`pw::JsonBuilder` to serialize JSON to a buffer. It's simple,
+   Use :cc:`pw::JsonBuilder` to serialize JSON to a buffer. It's simple,
    safe, and efficient.
 
    .. literalinclude:: builder_test.cc
@@ -29,8 +29,9 @@ pw_json
 -----------
 JsonBuilder
 -----------
-.. doxygenfile:: pw_json/builder.h
-   :sections: detaileddescription
+:cc:`pw::JsonBuilder` is used to create arbitrary JSON. It contains a
+JSON value, which may be an object or array. Arrays and objects may contain
+other values, objects, or arrays.
 
 **Example**
 
@@ -41,6 +42,4 @@ JsonBuilder
 
 API Reference
 =============
-.. doxygengroup:: pw_json_builder_api
-   :content-only:
-   :members:
+Moved: :cc:`pw_json`

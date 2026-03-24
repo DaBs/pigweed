@@ -14,6 +14,7 @@
 #include "pw_stream_uart_mcuxpresso/interrupt_safe_writer.h"
 
 #include "fsl_clock.h"
+#include "pw_function/scope_guard.h"
 
 namespace pw::stream {
 
@@ -23,12 +24,17 @@ pw::Status InterruptSafeUartWriterMcuxpresso::Enable() {
   usart_config.baudRate_Bps = baudrate_;
   usart_config.enableRx = false;
   usart_config.enableTx = true;
+  usart_config.enableHardwareFlowControl = flow_control_;
 
-  PW_TRY(element_controller_.Acquire());
+  // Acquire the clock_tree element. Note that this function only requires the
+  // IP clock and not the functional clock. However, ClockMcuxpressoClockIp
+  // only provides the combined element, so that's what we use here.
+  // Make sure it's released on any function exits through a scoped guard.
+  PW_TRY(clock_tree_element_.Acquire());
+  pw::ScopeGuard guard([this] { clock_tree_element_.Release().IgnoreError(); });
 
   if (USART_Init(base(), &usart_config, CLOCK_GetFreq(clock_name_)) !=
       kStatus_Success) {
-    element_controller_.Release().IgnoreError();
     return pw::Status::Internal();
   }
 
@@ -36,6 +42,17 @@ pw::Status InterruptSafeUartWriterMcuxpresso::Enable() {
 }
 
 pw::Status InterruptSafeUartWriterMcuxpresso::DoWrite(pw::ConstByteSpan data) {
+  if (data.empty()) {
+    // USART_WriteBlocking() will abort if its data argument is null, even if
+    // length is zero.
+    return pw::OkStatus();
+  }
+
+  // Acquire the clock_tree_element. Use a scoped guard so it's released when
+  // this function returns.
+  PW_TRY(clock_tree_element_.Acquire());
+  pw::ScopeGuard guard([this] { clock_tree_element_.Release().IgnoreError(); });
+
   const status_t hal_status = USART_WriteBlocking(
       base(), reinterpret_cast<const uint8_t*>(data.data()), data.size_bytes());
   return hal_status == kStatus_Success ? pw::OkStatus()

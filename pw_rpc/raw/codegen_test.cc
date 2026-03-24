@@ -16,6 +16,7 @@
 
 #include "pw_protobuf/decoder.h"
 #include "pw_rpc/internal/hash.h"
+#include "pw_rpc/internal/test_utils.h"
 #include "pw_rpc/raw/client_testing.h"
 #include "pw_rpc/raw/test_method_context.h"
 #include "pw_rpc_test_protos/no_package.raw_rpc.pb.h"
@@ -42,7 +43,7 @@ Vector<std::byte, 64> EncodeRequest(int integer, Status status) {
   return buffer;
 }
 
-Vector<std::byte, 64> EncodeResponse(int number) {
+Vector<std::byte, 64> EncodeResponse(uint32_t number) {
   Vector<std::byte, 64> buffer(64);
   TestStreamResponse::MemoryEncoder test_response(buffer);
 
@@ -72,7 +73,8 @@ class TestService final
 
     std::byte response[64] = {};
     TestResponse::MemoryEncoder test_response(response);
-    EXPECT_EQ(OkStatus(), test_response.WriteValue(integer + 1));
+    EXPECT_EQ(OkStatus(),
+              test_response.WriteValue(static_cast<int32_t>(integer + 1)));
 
     ASSERT_EQ(
         OkStatus(),
@@ -96,7 +98,8 @@ class TestService final
     for (int i = 0; i < integer; ++i) {
       std::byte buffer[32] = {};
       TestStreamResponse::MemoryEncoder test_stream_response(buffer);
-      EXPECT_EQ(OkStatus(), test_stream_response.WriteNumber(i));
+      EXPECT_EQ(OkStatus(),
+                test_stream_response.WriteNumber(static_cast<uint32_t>(i)));
       EXPECT_EQ(OkStatus(), writer.Write(test_stream_response));
     }
 
@@ -648,6 +651,172 @@ TEST_F(RawCodegenClientTest, InvokeBidirectionalStreamRpc_Error) {
   EXPECT_FALSE(status_.has_value());
   EXPECT_EQ(error_, Status::Internal());
 }
+
+#if PW_RPC_DYNAMIC_ALLOCATION
+
+TEST_F(RawCodegenClientTest, DynamicClient_InvokeUnaryRpc_Ok) {
+  constexpr uint32_t kServiceId = internal::Hash("pw.rpc.test.TestService");
+  constexpr uint32_t kMethodId = internal::Hash("TestUnaryRpc");
+
+  test::pw_rpc::raw::TestService::DynamicClient test_client(
+      context_.client(), context_.channel().id());
+
+  struct {
+    Status last_status = Status::Unknown();
+    std::array<char, 64> response_payload = {};
+    size_t response_size = 0;
+  } result;
+
+  auto call = test_client.TestUnaryRpc(
+      as_bytes(span("This is the request")),
+      [&result](ConstByteSpan payload, Status status) {
+        result.last_status = status;
+        result.response_size = payload.size();
+        std::memcpy(
+            result.response_payload.data(), payload.data(), payload.size());
+      },
+      [](Status) { ADD_FAILURE(); });
+
+  EXPECT_TRUE(call->active());
+
+  EXPECT_EQ(context_.output().total_packets(), 1u);
+  auto packet =
+      static_cast<const internal::test::FakeChannelOutput&>(context_.output())
+          .last_packet();
+  EXPECT_EQ(packet.channel_id(), context_.channel().id());
+  EXPECT_EQ(packet.service_id(), kServiceId);
+  EXPECT_EQ(packet.method_id(), kMethodId);
+  EXPECT_STREQ(reinterpret_cast<const char*>(packet.payload().data()),
+               "This is the request");
+
+  context_.server().SendResponse<test::pw_rpc::raw::TestService::TestUnaryRpc>(
+      as_bytes(span("(ㆆ_ㆆ)")), OkStatus());
+
+  EXPECT_EQ(result.last_status, OkStatus());
+  EXPECT_STREQ(result.response_payload.data(), "(ㆆ_ㆆ)");
+  EXPECT_EQ(result.response_size, span("(ㆆ_ㆆ)").size());
+
+  EXPECT_FALSE(call->active());
+}
+
+TEST_F(RawCodegenClientTest, DynamicClient_InvokeServerStreamRpc_Ok) {
+  test::pw_rpc::raw::TestService::DynamicClient test_client(
+      context_.client(), context_.channel().id());
+
+  struct {
+    Status last_status = Status::Unknown();
+    std::array<char, 64> response_payload = {};
+    size_t response_size = 0;
+    int next_count = 0;
+  } result;
+
+  auto call = test_client.TestServerStreamRpc(
+      as_bytes(span("This is the request")),
+      [&result](ConstByteSpan payload) {
+        result.response_size = payload.size();
+        std::memcpy(
+            result.response_payload.data(), payload.data(), payload.size());
+        result.next_count++;
+      },
+      [&result](Status status) { result.last_status = status; },
+      [](Status) { ADD_FAILURE(); });
+
+  EXPECT_TRUE(call->active());
+
+  context_.server()
+      .SendServerStream<test::pw_rpc::raw::TestService::TestServerStreamRpc>(
+          as_bytes(span("(⌐□_□)")));
+
+  EXPECT_EQ(result.next_count, 1);
+  EXPECT_STREQ(result.response_payload.data(), "(⌐□_□)");
+
+  context_.server()
+      .SendServerStream<test::pw_rpc::raw::TestService::TestServerStreamRpc>(
+          as_bytes(span("(o_O)")));
+
+  EXPECT_EQ(result.next_count, 2);
+  EXPECT_STREQ(result.response_payload.data(), "(o_O)");
+
+  context_.server()
+      .SendResponse<test::pw_rpc::raw::TestService::TestServerStreamRpc>(
+          Status::InvalidArgument());
+
+  EXPECT_EQ(result.last_status, Status::InvalidArgument());
+  EXPECT_FALSE(call->active());
+}
+
+TEST_F(RawCodegenClientTest, DynamicClient_InvokeClientStreamRpc_Ok) {
+  test::pw_rpc::raw::TestService::DynamicClient test_client(
+      context_.client(), context_.channel().id());
+
+  struct {
+    Status last_status = Status::Unknown();
+    std::array<char, 64> response_payload = {};
+    size_t response_size = 0;
+  } result;
+
+  auto call = test_client.TestClientStreamRpc(
+      [&result](ConstByteSpan payload, Status status) {
+        result.last_status = status;
+        result.response_size = payload.size();
+        std::memcpy(
+            result.response_payload.data(), payload.data(), payload.size());
+      },
+      [](Status) { ADD_FAILURE(); });
+
+  EXPECT_TRUE(call->active());
+  EXPECT_EQ(OkStatus(), call->Write(as_bytes(span("(•‿•)"))));
+
+  context_.server()
+      .SendResponse<test::pw_rpc::raw::TestService::TestClientStreamRpc>(
+          as_bytes(span("(⌐□_□)")), Status::InvalidArgument());
+
+  EXPECT_EQ(result.last_status, Status::InvalidArgument());
+  EXPECT_STREQ(result.response_payload.data(), "(⌐□_□)");
+  EXPECT_FALSE(call->active());
+}
+
+TEST_F(RawCodegenClientTest, DynamicClient_InvokeBidirectionalStreamRpc_Ok) {
+  test::pw_rpc::raw::TestService::DynamicClient test_client(
+      context_.client(), context_.channel().id());
+
+  struct {
+    Status last_status = Status::Unknown();
+    std::array<char, 64> response_payload = {};
+    size_t response_size = 0;
+    int next_count = 0;
+  } result;
+
+  auto call = test_client.TestBidirectionalStreamRpc(
+      [&result](ConstByteSpan payload) {
+        result.response_size = payload.size();
+        std::memcpy(
+            result.response_payload.data(), payload.data(), payload.size());
+        result.next_count++;
+      },
+      [&result](Status status) { result.last_status = status; },
+      [](Status) { ADD_FAILURE(); });
+
+  EXPECT_TRUE(call->active());
+  EXPECT_EQ(OkStatus(), call->Write(as_bytes(span("(•‿•)"))));
+
+  context_.server()
+      .SendServerStream<
+          test::pw_rpc::raw::TestService::TestBidirectionalStreamRpc>(
+          as_bytes(span("(⌐□_□)")));
+
+  EXPECT_EQ(result.next_count, 1);
+  EXPECT_STREQ(result.response_payload.data(), "(⌐□_□)");
+
+  context_.server()
+      .SendResponse<test::pw_rpc::raw::TestService::TestBidirectionalStreamRpc>(
+          Status::InvalidArgument());
+
+  EXPECT_EQ(result.last_status, Status::InvalidArgument());
+  EXPECT_FALSE(call->active());
+}
+
+#endif  // PW_RPC_DYNAMIC_ALLOCATION
 
 }  // namespace
 }  // namespace pw::rpc

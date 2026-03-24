@@ -14,8 +14,8 @@
 
 load("@com_google_protobuf//bazel:java_lite_proto_library.bzl", "java_lite_proto_library")
 load("@com_google_protobuf//bazel:proto_library.bzl", "proto_library")
+load("@com_google_protobuf//bazel:py_proto_library.bzl", "py_proto_library")
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
-load("@rules_python//python:proto.bzl", "py_proto_library")
 load("@rules_python//sphinxdocs:sphinx_docs_library.bzl", "sphinx_docs_library")
 load("//pw_build:compatibility.bzl", "host_backend_alias", "incompatible_with_mcu")
 load("//pw_build:copy_to_bin.bzl", "copy_to_bin")
@@ -65,6 +65,7 @@ cc_library(
     hdrs = [
         "public/pw_log/rate_limited.h",
     ],
+    features = ["-conversion_warnings"],
     strip_include_prefix = "public",
     deps = [
         ":config_override",
@@ -141,6 +142,7 @@ cc_library(
     hdrs = [
         "public/pw_log/proto_utils.h",
     ],
+    features = ["-conversion_warnings"],
     strip_include_prefix = "public",
     deps = [
         ":log_proto_pwpb",
@@ -205,6 +207,7 @@ pw_cc_test(
         "basic_log_test.cc",
         "basic_log_test_plain_c.c",
     ],
+    features = ["-conversion_warnings"],
     deps = [
         ":pw_log",
         ":pw_log.facade",
@@ -226,6 +229,7 @@ pw_cc_test(
     srcs = [
         "proto_utils_test.cc",
     ],
+    features = ["-conversion_warnings"],
     deps = [
         ":log_proto_pwpb",
         ":proto_utils",
@@ -254,6 +258,16 @@ pw_cc_test(
 filegroup(
     name = "doxygen",
     srcs = [
+        "public/pw_log/config.h",
+        "public/pw_log/glog_adapter.h",
+        "public/pw_log/glog_adapter_config.h",
+        "public/pw_log/levels.h",
+        "public/pw_log/log.h",
+        "public/pw_log/options.h",
+        "public/pw_log/proto_utils.h",
+        "public/pw_log/rate_limited.h",
+        "public/pw_log/short.h",
+        "public/pw_log/shorter.h",
         "public/pw_log/tokenized_args.h",
     ],
 )

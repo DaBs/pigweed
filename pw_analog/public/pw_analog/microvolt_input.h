@@ -12,12 +12,17 @@
 // License for the specific language governing permissions and limitations under
 // the License.
 #pragma once
+
+#include <cstdlib>
+
 #include "pw_analog/analog_input.h"
 #include "pw_chrono/system_clock.h"
 #include "pw_result/result.h"
 #include "pw_status/try.h"
 
 namespace pw::analog {
+
+/// @module{pw_analog}
 
 /// The common interface for obtaining voltage samples in microvolts. This
 /// interface represents a single voltage input or channel. Users will need to
@@ -45,19 +50,10 @@ class MicrovoltInput : public AnalogInput {
   ///
   /// This method is thread-safe.
   ///
-  /// @returns @rst
-  ///
-  /// .. pw-status-codes::
-  ///
-  ///    OK: Returns a voltage sample in microvolts (uV) on success.
-  ///
-  ///    RESOURCE_EXHAUSTED: ADC peripheral in use.
-  ///
-  ///    DEADLINE_EXCEEDED: Timed out waiting for a sample.
-  ///
-  /// Other statuses left up to the implementer.
-  ///
-  /// @endrst
+  /// @returns @Result{a voltage sample in microvolts (uV)}
+  /// * @RESOURCE_EXHAUSTED: ADC peripheral in use.
+  /// * @DEADLINE_EXCEEDED: Timed out waiting for a sample.
+  /// * Other statuses left up to the implementer.
   Result<int32_t> TryReadMicrovoltsFor(chrono::SystemClock::duration timeout) {
     return TryReadMicrovoltsUntil(
         chrono::SystemClock::TimePointAfterAtLeast(timeout));
@@ -68,19 +64,11 @@ class MicrovoltInput : public AnalogInput {
   ///
   /// This method is thread-safe.
   ///
-  /// @returns @rst
-  ///
-  /// .. pw-status-codes::
-  ///
-  ///    OK: Returns a voltage sample in microvolts (uV) on success.
-  ///
-  ///    RESOURCE_EXHAUSTED: ADC peripheral in use.
-  ///
-  ///    DEADLINE_EXCEEDED: Timed out waiting for a sample.
-  ///
-  /// Other statuses left up to the implementer.
-  ///
-  /// @endrst
+  /// @returns @Result{a voltage sample in microvolts (uV)}
+  /// * @OK: Returns a voltage sample in microvolts (uV) on success.
+  /// * @RESOURCE_EXHAUSTED: ADC peripheral in use.
+  /// * @DEADLINE_EXCEEDED: Timed out waiting for a sample.
+  /// * Other statuses left up to the implementer.
   Result<int32_t> TryReadMicrovoltsUntil(
       chrono::SystemClock::time_point deadline) {
     PW_TRY_ASSIGN(const int32_t sample, TryReadUntil(deadline));

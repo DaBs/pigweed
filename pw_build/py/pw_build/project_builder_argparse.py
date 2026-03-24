@@ -81,9 +81,9 @@ def add_project_builder_arguments(
         '--source-path',
         type=Path,
         help=(
-            'Path to the root of the source files. Defaults to the'
-            'current working directory. If running under bazel this'
-            'will be set to the $BUILD_WORKSPACE_DIRECTORY'
+            'Path to the root of the source files. Defaults to the '
+            'current working directory. If running under bazel this '
+            'will be set to the $BUILD_WORKSPACE_DIRECTORY '
             'environment variable.'
         ),
     )
@@ -96,6 +96,13 @@ def add_project_builder_arguments(
         ),
     )
 
+    return add_project_builder_option_arguments(parser)
+
+
+def add_project_builder_option_arguments(
+    parser: argparse.ArgumentParser,
+) -> argparse.ArgumentParser:
+    """Add ProjectBuilder optional arguments."""
     build_options_group = parser.add_argument_group(
         title='Build Execution Options'
     )
@@ -130,6 +137,11 @@ def add_project_builder_arguments(
             'How many builds may run at the same time when --parallel is '
             'enabled. Default: 0 meaning run all in parallel.'
         ),
+    )
+    build_options_group.add_argument(
+        '--dry-run',
+        action='store_true',
+        help='Print build commands without running them.',
     )
 
     logfile_group = parser.add_argument_group(title='Log File Options')

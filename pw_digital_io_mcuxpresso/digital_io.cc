@@ -20,6 +20,7 @@
 #include "fsl_clock.h"
 #include "fsl_gpio.h"
 #include "fsl_reset.h"
+#include "pw_assert/assert.h"
 #include "pw_assert/check.h"
 #include "pw_digital_io_mcuxpresso/digital_io.h"
 #include "pw_status/status.h"
@@ -262,16 +263,21 @@ pw::Status McuxpressoDigitalInOutInterrupt::DoSetInterruptHandler(
     return pw::Status::FailedPrecondition();
   }
 
-  trigger_ = trigger;
-
   std::lock_guard lock(port_interrupts_lock);
-  interrupt_handler_ = std::move(handler);
+  PW_CHECK(unlisted());  // Checked interrupt_handler_ == nullptr above
 
-  if (unlisted()) {
-    auto& list = port_interrupts[port_];
-    list.push_front(*this);
+  // Check that no other handler is registered for this port and pin
+  auto& list = port_interrupts[port_];
+  for (const auto& line : list) {
+    if (line.pin_ == pin_) {
+      return pw::Status::AlreadyExists();
+    }
   }
 
+  // Add this line to interrupt handlers list
+  list.push_front(*this);
+  interrupt_handler_ = std::move(handler);
+  trigger_ = trigger;
   return pw::OkStatus();
 }
 
@@ -327,20 +333,29 @@ PW_EXTERN_C void GPIO_INTA_DriverIRQHandler() PW_NO_LOCK_SAFETY_ANALYSIS {
   // For each port
   for (uint32_t port = 0; port < kNumGpioPorts; port++) {
     const auto& list = port_interrupts[port];
-    const uint32_t port_int_flags =
-        GPIO_PortGetInterruptEnable(base, port, kGpioInterruptBankIndex) &
+    const uint32_t port_int_enable =
+        GPIO_PortGetInterruptEnable(base, port, kGpioInterruptBankIndex);
+    const uint32_t port_int_status =
         GPIO_PortGetInterruptStatus(base, port, kGpioInterruptBankIndex);
+    const uint32_t port_int_pending = port_int_enable & port_int_status;
 
-    if (port_int_flags == 0) {
-      // If no flags are set, there is nothing to do. Skip traversing the linked
-      // list
+    if (port_int_status == 0) {
+      // If there are no interrupts fired, there is nothing to do.
+      // Skip traversing the linked list.
       continue;
     }
+
+    // Keep track of pins that have been processed and cleared
+    uint32_t processed_pins = 0;
 
     // For each line registered on that port's interrupt list
     for (const auto& line : list) {
       const uint32_t pin_mask = 1UL << line.pin_;
-      if ((port_int_flags & pin_mask) != 0) {
+      if ((port_int_pending & pin_mask) != 0) {
+        // Only process an interrupt pin once
+        PW_ASSERT((processed_pins & pin_mask) == 0);
+
+        // Check trigger condition and call handler if necessary
         const auto trigger = line.trigger_;
         const auto polarity =
             GPIO_PinGetInterruptPolarity(base, port, line.pin_);
@@ -377,10 +392,25 @@ PW_EXTERN_C void GPIO_INTA_DriverIRQHandler() PW_NO_LOCK_SAFETY_ANALYSIS {
                 ? kGPIO_PinIntEnableLowOrFall
                 : kGPIO_PinIntEnableHighOrRise;
         GPIO_PinSetInterruptPolarity(base, port, line.pin_, new_polarity);
-        GPIO_PinClearInterruptFlag(
-            base, port, line.pin_, kGpioInterruptBankIndex);
+        // The interrupt is cleared after the loop, below.
+        processed_pins |= pin_mask;
       }
     }
+
+    // Clear all of the pending status bits we observed upon entry.
+    // This clears all interrupts we handled in the loop above, whose polarities
+    // have already been inverted.
+    //
+    // It also clears any status bits for interrupts that are pending but not
+    // enabled (and thus not handled above). If these aren't cleared, they will
+    // fire again immediately upon exiting this ISR.
+    GPIO_PortClearInterruptFlags(
+        base, port, kGpioInterruptBankIndex, port_int_status);
+
+    // Check that all pending pins have been processed. Otherwise, we're in an
+    // inconsistent state, where the enabled interrupt register contains
+    // bits set for lines that we don't have a handler for.
+    PW_ASSERT(processed_pins == port_int_pending);
   }
 
   SDK_ISR_EXIT_BARRIER;

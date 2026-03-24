@@ -14,6 +14,8 @@
 
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("@rules_python//sphinxdocs:sphinx_docs_library.bzl", "sphinx_docs_library")
+load("//pw_bloat:pw_size_diff.bzl", "pw_size_diff")
+load("//pw_bloat:pw_size_table.bzl", "pw_size_table")
 load("//pw_build:compatibility.bzl", "incompatible_with_mcu")
 load("//pw_unit_test:pw_cc_test.bzl", "pw_cc_test")
 
@@ -30,6 +32,7 @@ cc_library(
     strip_include_prefix = "public",
     deps = [
         "//pw_assert:assert",
+        "//pw_containers:optional",
         "//pw_preprocessor",
         "//pw_status",
     ],
@@ -56,15 +59,82 @@ pw_cc_test(
 pw_cc_test(
     name = "expected_test",
     srcs = ["expected_test.cc"],
-    deps = [":expected"],
+    deps = [
+        ":expected",
+        "//pw_status",
+        "//pw_string:builder",
+        "//pw_string:string",
+    ],
 )
 
 pw_cc_test(
     name = "statusor_test",
     srcs = ["statusor_test.cc"],
+    features = ["-conversion_warnings"],
     deps = [
         ":pw_result",
         "//pw_status",
+    ],
+)
+
+pw_size_diff(
+    name = "result_simple_size_diff",
+    base = "//pw_result/size_report:pointer_simple",
+    label = "Simple function",
+    target = "//pw_result/size_report:result_simple",
+)
+
+pw_size_diff(
+    name = "result_noinline_size_diff",
+    base = "//pw_result/size_report:pointer_noinline",
+    label = "Simple function without inlining",
+    target = "//pw_result/size_report:result_noinline",
+)
+
+pw_size_diff(
+    name = "result_read_size_diff",
+    base = "//pw_result/size_report:pointer_read",
+    label = "Returning a larger object (std::span)",
+    target = "//pw_result/size_report:result_read",
+)
+
+pw_size_diff(
+    name = "monadic_and_then_size_diff",
+    base = "//pw_result/size_report:ladder_and_then",
+    label = "Using and_then instead of if ladder",
+    target = "//pw_result/size_report:monadic_and_then",
+)
+
+pw_size_diff(
+    name = "monadic_or_else_size_diff",
+    base = "//pw_result/size_report:ladder_or_else",
+    label = "Using or_else instead of if ladder",
+    target = "//pw_result/size_report:monadic_or_else",
+)
+
+pw_size_diff(
+    name = "monadic_transform_size_diff",
+    base = "//pw_result/size_report:ladder_transform",
+    label = "Using transform instead of if ladder",
+    target = "//pw_result/size_report:monadic_transform",
+)
+
+pw_size_table(
+    name = "result_size",
+    reports = [
+        ":result_simple_size_diff",
+        ":result_noinline_size_diff",
+        ":result_read_size_diff",
+        ":monadic_and_then_size_diff",
+        ":monadic_or_else_size_diff",
+        ":monadic_transform_size_diff",
+    ],
+)
+
+filegroup(
+    name = "doxygen",
+    srcs = [
+        "public/pw_result/result.h",
     ],
 )
 
@@ -73,6 +143,7 @@ sphinx_docs_library(
     srcs = [
         "Kconfig",
         "docs.rst",
+        ":result_size",
     ],
     prefix = "pw_result/",
     target_compatible_with = incompatible_with_mcu(),

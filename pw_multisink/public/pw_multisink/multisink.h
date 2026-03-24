@@ -26,6 +26,7 @@
 #include "pw_sync/lock_annotations.h"
 
 namespace pw {
+/// Message forwarding to multiple sinks
 namespace multisink {
 
 // An asynchronous single-writer multi-reader queue that ensures readers can
@@ -430,6 +431,11 @@ class MultiSink {
   //   DATA_LOSS - Corruption detected, some entries may have been lost.
   Status UnsafeForEachEntryFromEnd(
       const Function<void(ConstByteSpan)>& callback, size_t max_size_bytes);
+
+  // Returns the total size of the underlying buffer in bytes.
+  size_t TotalSizeBytes() const PW_NO_LOCK_SAFETY_ANALYSIS {
+    return ring_buffer_.TotalSizeBytes();
+  }
 
  protected:
   friend Drain;

@@ -19,6 +19,7 @@ from tempfile import TemporaryDirectory
 import unittest
 
 from format_testing_utils import CapturingToolRunner
+from pw_build.runfiles_manager import RunfilesManager
 from pw_presubmit.format.bazel import BuildifierFormatter
 
 
@@ -37,11 +38,28 @@ _WARNINGS = (
 class TestBuildifierFormatter(unittest.TestCase):
     """Tests for the BuildifierFormatter."""
 
+    def setUp(self):
+        self.runfiles = RunfilesManager()
+        self.runfiles.add_bazel_tool(
+            'buildifier',
+            'pw_presubmit.py.buildifier_runfiles',
+        )
+        self.runfiles.add_bootstrapped_tool(
+            'buildifier',
+            'buildifier',
+            from_shell_path=True,
+        )
+        self.tool_runner = CapturingToolRunner(
+            {'buildifier': self.runfiles['buildifier']}
+        )
+
+    def _buildifier_path(self) -> str:
+        return str(self.runfiles['buildifier'])
+
     def test_check_file(self):
         """Tests that a formatting check produces the formatted result."""
-        tool_runner = CapturingToolRunner()
         formatter = BuildifierFormatter()
-        formatter.run_tool = tool_runner
+        formatter.run_tool = self.tool_runner
 
         result = formatter.format_file_in_memory(
             _TEST_SRC_FILE, _TEST_SRC_FILE.read_bytes()
@@ -53,10 +71,10 @@ class TestBuildifierFormatter(unittest.TestCase):
         )
 
         self.assertEqual(
-            tool_runner.command_history.pop(0),
+            self.tool_runner.command_history.pop(0),
             ' '.join(
                 (
-                    'buildifier',
+                    self._buildifier_path(),
                     '--type=build',
                     '--lint=fix',
                     f'--warnings={",".join(_WARNINGS)}',
@@ -67,9 +85,8 @@ class TestBuildifierFormatter(unittest.TestCase):
     def test_check_file_error(self):
         """Tests that a malformed build file propagates an error."""
 
-        tool_runner = CapturingToolRunner()
         formatter = BuildifierFormatter()
-        formatter.run_tool = tool_runner
+        formatter.run_tool = self.tool_runner
 
         result = formatter.format_file_in_memory(
             _TEST_MALFORMED, _TEST_MALFORMED.read_bytes()
@@ -83,10 +100,10 @@ class TestBuildifierFormatter(unittest.TestCase):
         self.assertIn('syntax error', result.error_message)
 
         self.assertEqual(
-            tool_runner.command_history.pop(0),
+            self.tool_runner.command_history.pop(0),
             ' '.join(
                 (
-                    'buildifier',
+                    self._buildifier_path(),
                     '--type=default',
                     '--lint=fix',
                     f'--warnings={",".join(_WARNINGS)}',
@@ -97,9 +114,8 @@ class TestBuildifierFormatter(unittest.TestCase):
     def test_fix_file(self):
         """Tests that formatting is properly applied to files."""
 
-        tool_runner = CapturingToolRunner()
         formatter = BuildifierFormatter()
-        formatter.run_tool = tool_runner
+        formatter.run_tool = self.tool_runner
 
         with TemporaryDirectory() as temp_dir:
             file_to_fix = Path(temp_dir) / _TEST_SRC_FILE.name
@@ -114,10 +130,10 @@ class TestBuildifierFormatter(unittest.TestCase):
             # the *.bazel files together, and two where we try to format the
             # .txt file (which is considered an unknown type).
             self.assertEqual(
-                tool_runner.command_history.pop(0),
+                self.tool_runner.command_history.pop(0),
                 ' '.join(
                     (
-                        'buildifier',
+                        self._buildifier_path(),
                         '--type=build',
                         '--lint=fix',
                         '--warnings=' + ','.join(_WARNINGS),
@@ -127,10 +143,10 @@ class TestBuildifierFormatter(unittest.TestCase):
             )
 
             self.assertEqual(
-                tool_runner.command_history.pop(0),
+                self.tool_runner.command_history.pop(0),
                 ' '.join(
                     (
-                        'buildifier',
+                        self._buildifier_path(),
                         '--type=default',
                         '--lint=fix',
                         '--warnings=' + ','.join(_WARNINGS),
@@ -140,10 +156,10 @@ class TestBuildifierFormatter(unittest.TestCase):
             )
 
             self.assertEqual(
-                tool_runner.command_history.pop(0),
+                self.tool_runner.command_history.pop(0),
                 ' '.join(
                     (
-                        'buildifier',
+                        self._buildifier_path(),
                         '--type=default',
                         '--lint=fix',
                         '--warnings=' + ','.join(_WARNINGS),

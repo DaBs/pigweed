@@ -11,24 +11,30 @@
 # WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
 # License for the specific language governing permissions and limitations under
 # the License.
-"""
-pw_rust_crates_extension allows the pigweed modules "rust_crates" repo to
-be overridden using https://bazel.build/rules/lib/globals/module#override_repo
+"""A crates_io hub that allows projects to redirect Pigweed's crates.io deps.
 
-Downstream projects needing to provide a local `rust_crates` repo can
-do so by adding the following to their root MODULE.bazel
-
-
-local_repository(name = "rust_crates", path = "build/crates_io")
-
-pw_rust_crates = use_extension("@pigweed//pw_build:pw_rust_crates_extension.bzl", "pw_rust_crates_extension")
-override_repo(pw_rust_crates, rust_crates = "rust_crates")
+See the documentation at https://pigweed.dev/third_party/crates_io/ for more
+information.
 """
 
-load("@bazel_tools//tools/build_defs/repo:local.bzl", "local_repository")
+def _crates_io_hub_impl(ctx):
+    build_file_path = ctx.path(ctx.attr._pigweed_hub_build_file)
+    ctx.watch(build_file_path)
+    build_file_contents = ctx.read(build_file_path)
+    ctx.file("BUILD.bazel", content = build_file_contents)
+
+_crates_io_hub = repository_rule(
+    implementation = _crates_io_hub_impl,
+    attrs = {
+        "_pigweed_hub_build_file": attr.label(
+            allow_single_file = True,
+            default = "//third_party/crates_io/rust_crates:alias_hub.BUILD",
+        ),
+    },
+)
 
 def _pw_rust_crates_extension_impl(_ctx):
-    local_repository(name = "rust_crates", path = "third_party/crates_io/rust_crates")
+    _crates_io_hub(name = "rust_crates")
 
 pw_rust_crates_extension = module_extension(
     implementation = _pw_rust_crates_extension_impl,

@@ -12,7 +12,7 @@
 # License for the specific language governing permissions and limitations under
 # the License.
 load("@com_google_protobuf//bazel:proto_library.bzl", "proto_library")
-load("@rules_python//python:proto.bzl", "py_proto_library")
+load("@com_google_protobuf//bazel:py_proto_library.bzl", "py_proto_library")
 load("@rules_python//sphinxdocs:sphinx_docs_library.bzl", "sphinx_docs_library")
 load("//pw_build:compatibility.bzl", "incompatible_with_mcu")
 load("//pw_build:copy_to_bin.bzl", "copy_to_bin")
@@ -34,14 +34,13 @@ licenses(["notice"])
 pw_cc_test(
     name = "nanopb_test",
     srcs = ["nanopb_test.cc"],
-    # TODO: https://pwbug.dev/328311416 - Fix this test.
-    tags = ["manual"],
     deps = [":pw_protobuf_compiler_nanopb_protos_nanopb"],
 )
 
 pw_cc_test(
     name = "pwpb_test",
     srcs = ["pwpb_test.cc"],
+    features = ["-conversion_warnings"],
     deps = [
         "//pw_protobuf_compiler/pwpb_test_protos:pwpb_test_pw_proto",
         "//pw_string",
@@ -67,6 +66,7 @@ pwpb_proto_library(
 pw_cc_test(
     name = "pwpb_test_no_prefix",
     srcs = ["pwpb_test_no_prefix.cc"],
+    features = ["-conversion_warnings"],
     deps = [
         ":pwpb_test_pw_proto_no_prefix",
         "//pw_string",
@@ -90,7 +90,7 @@ proto_library(
 proto_library(
     name = "pw_protobuf_compiler_nanopb_protos",
     srcs = ["nanopb_test_protos/nanopb_test.proto"],
-    deps = ["@com_github_nanopb_nanopb//:nanopb_proto"],
+    deps = ["@nanopb//:nanopb_proto"],
 )
 
 nanopb_proto_library(
@@ -106,6 +106,7 @@ py_proto_library(
 pw_cc_test(
     name = "nested_packages_test",
     srcs = ["nested_packages_test.cc"],
+    features = ["-conversion_warnings"],
     deps = [
         "//pw_protobuf_compiler/pw_nested_packages:aggregate_pwpb",
         "//pw_protobuf_compiler/pw_nested_packages:aggregate_wrapper_pwpb",

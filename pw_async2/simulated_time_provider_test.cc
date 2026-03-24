@@ -14,13 +14,14 @@
 
 #include "pw_async2/simulated_time_provider.h"
 
+#include "pw_async2/dispatcher_for_test.h"
 #include "pw_chrono/system_clock.h"
 #include "pw_unit_test/framework.h"
 
 namespace {
 
 using ::pw::async2::Context;
-using ::pw::async2::Dispatcher;
+using ::pw::async2::DispatcherForTest;
 using ::pw::async2::Pending;
 using ::pw::async2::Poll;
 using ::pw::async2::Ready;
@@ -30,6 +31,8 @@ using ::pw::async2::TimeFuture;
 using ::pw::chrono::SystemClock;
 using ::std::chrono_literals::operator""min;
 using ::std::chrono_literals::operator""h;
+
+static_assert(pw::async2::Future<TimeFuture<SystemClock>>);
 
 // We can't control the SystemClock's period configuration, so just in case
 // 42 hours cannot be accurately expressed in integer ticks, round the
@@ -79,21 +82,21 @@ struct WaitTask : public Task {
 TEST(SimulatedTimeProvider, AdvanceTimeRunsPastTimers) {
   SimulatedTimeProvider<SystemClock> tp;
   WaitTask task(tp.WaitFor(1h));
-  Dispatcher dispatcher;
+  DispatcherForTest dispatcher;
   dispatcher.Post(task);
   tp.AdvanceTime(30min);
-  EXPECT_EQ(dispatcher.RunUntilStalled(), Pending());
+  EXPECT_TRUE(dispatcher.RunUntilStalled());
   tp.AdvanceTime(40min);
-  EXPECT_EQ(dispatcher.RunUntilStalled(), Ready());
+  dispatcher.RunToCompletion();
 }
 
 TEST(SimulatedTimeProvider, AdvanceUntilNextExpirationRunsPastTimers) {
   SimulatedTimeProvider<SystemClock> tp;
   WaitTask task(tp.WaitFor(1h));
-  Dispatcher dispatcher;
+  DispatcherForTest dispatcher;
   dispatcher.Post(task);
   EXPECT_TRUE(tp.AdvanceUntilNextExpiration());
-  EXPECT_EQ(dispatcher.RunUntilStalled(), Ready());
+  dispatcher.RunToCompletion();
   EXPECT_FALSE(tp.AdvanceUntilNextExpiration());
 }
 
@@ -120,27 +123,13 @@ TEST(SimulatedTimeProvider, TimeUntilNextExpirationAfterDestroyReturnsNullopt) {
   EXPECT_FALSE(tp.TimeUntilNextExpiration().has_value());
 }
 
-TEST(SimulatedTimeProvider, ResetSetsTimerBackToPendingAndFiresAgain) {
-  SimulatedTimeProvider<SystemClock> tp;
-  Dispatcher dispatcher;
-
-  auto timer = tp.WaitFor(1h);
-  EXPECT_TRUE(dispatcher.RunPendableUntilStalled(timer).IsPending());
-  tp.AdvanceTime(90min);
-  EXPECT_TRUE(dispatcher.RunPendableUntilStalled(timer).IsReady());
-  timer.Reset(timer.expiration() + 40min);
-  EXPECT_TRUE(dispatcher.RunPendableUntilStalled(timer).IsPending());
-  tp.AdvanceTime(90min);
-  EXPECT_TRUE(dispatcher.RunPendableUntilStalled(timer).IsReady());
-}
-
 TEST(SimulatedTimeProvider, TimerWithPastExpirationExpiresImmediately) {
   SimulatedTimeProvider<SystemClock> tp;
   auto start = tp.now();
   tp.AdvanceTime(90min);
   auto timer = tp.WaitUntil(start + 30min);
-  Dispatcher dispatcher;
-  EXPECT_TRUE(dispatcher.RunPendableUntilStalled(timer).IsReady());
+  DispatcherForTest dispatcher;
+  EXPECT_TRUE(dispatcher.RunInTaskUntilStalled(timer).IsReady());
 }
 
 TEST(SimulatedTimeProvider, MultipleMovedTimersExpireInOrder) {
@@ -154,33 +143,33 @@ TEST(SimulatedTimeProvider, MultipleMovedTimersExpireInOrder) {
   WaitTask t1(std::move(t1_init));
   WaitTask t3(std::move(t3_init));
 
-  Dispatcher dispatcher;
+  DispatcherForTest dispatcher;
   dispatcher.Post(t1);
   dispatcher.Post(t2);
   dispatcher.Post(t3);
 
-  EXPECT_TRUE(dispatcher.RunUntilStalled().IsPending());
+  EXPECT_TRUE(dispatcher.RunUntilStalled());
   EXPECT_FALSE(t1.completed_);
   EXPECT_FALSE(t2.completed_);
   EXPECT_FALSE(t3.completed_);
 
   // t1 should expire first.
   EXPECT_TRUE(tp.AdvanceUntilNextExpiration());
-  EXPECT_TRUE(dispatcher.RunUntilStalled().IsPending());
+  EXPECT_TRUE(dispatcher.RunUntilStalled());
   EXPECT_TRUE(t1.completed_);
   EXPECT_FALSE(t2.completed_);
   EXPECT_FALSE(t3.completed_);
 
   // Then t2.
   EXPECT_TRUE(tp.AdvanceUntilNextExpiration());
-  EXPECT_TRUE(dispatcher.RunUntilStalled().IsPending());
+  EXPECT_TRUE(dispatcher.RunUntilStalled());
   EXPECT_TRUE(t1.completed_);
   EXPECT_TRUE(t2.completed_);
   EXPECT_FALSE(t3.completed_);
 
   // Then t3.
   EXPECT_TRUE(tp.AdvanceUntilNextExpiration());
-  EXPECT_TRUE(dispatcher.RunUntilStalled().IsReady());
+  dispatcher.RunToCompletion();
   EXPECT_TRUE(t1.completed_);
   EXPECT_TRUE(t2.completed_);
   EXPECT_TRUE(t3.completed_);

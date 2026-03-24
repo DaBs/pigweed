@@ -70,12 +70,14 @@ def run_bloaty(
         from python.runfiles import runfiles  # type: ignore
 
         r = runfiles.Create()
+        assert r is not None
         bloaty_path = r.Rlocation("bloaty/bloaty", r.CurrentRepository())
     except ImportError:
         # Outside of Bazel, use Bloaty from the system path.
         default_bloaty = 'bloaty'
         bloaty_path = os.getenv('BLOATY_PATH', default_bloaty)
 
+    assert bloaty_path is not None
     cmd = [
         bloaty_path,
         '-c',
@@ -152,9 +154,10 @@ def memory_regions_size_report(
         NoMemoryRegions: The ELF does not define memory region symbols.
     """
     with tempfile.NamedTemporaryFile() as bloaty_config:
-        with open(elf.resolve(), "rb") as infile, open(
-            bloaty_config.name, "w"
-        ) as outfile:
+        with (
+            open(elf.resolve(), "rb") as infile,
+            open(bloaty_config.name, "w") as outfile,
+        ):
             result = generate_bloaty_config(
                 infile,
                 enable_memoryregions=True,

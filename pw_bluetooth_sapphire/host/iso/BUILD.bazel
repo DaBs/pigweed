@@ -17,22 +17,28 @@ load("//pw_unit_test:pw_cc_test.bzl", "pw_cc_test")
 
 package(
     default_visibility = ["//visibility:public"],
-    features = ["-layering_check"],
+    features = [
+        "-layering_check",
+        "-ctad_warnings",
+    ],
 )
 
 cc_library(
     name = "iso",
     srcs = [
+        "iso_group.cc",
         "iso_inbound_packet_assembler.cc",
         "iso_stream.cc",
         "iso_stream_manager.cc",
     ],
     hdrs = [
         "public/pw_bluetooth_sapphire/internal/host/iso/iso_common.h",
+        "public/pw_bluetooth_sapphire/internal/host/iso/iso_group.h",
         "public/pw_bluetooth_sapphire/internal/host/iso/iso_inbound_packet_assembler.h",
         "public/pw_bluetooth_sapphire/internal/host/iso/iso_stream.h",
         "public/pw_bluetooth_sapphire/internal/host/iso/iso_stream_manager.h",
     ],
+    features = ["-conversion_warnings"],
     implementation_deps = [
         "//pw_bluetooth_sapphire/host/hci",
     ],
@@ -55,6 +61,7 @@ cc_library(
     hdrs = [
         "public/pw_bluetooth_sapphire/internal/host/iso/fake_iso_stream.h",
     ],
+    features = ["-conversion_warnings"],
     strip_include_prefix = "public",
     tags = ["noclangtidy"],
     deps = [
@@ -66,19 +73,22 @@ pw_cc_test(
     name = "iso_test",
     srcs = [
         "iso_common_test.cc",
+        "iso_group_test.cc",
         "iso_inbound_packet_assembler_test.cc",
         "iso_stream_manager_test.cc",
         "iso_stream_test.cc",
     ],
-    # TODO: https://pwbug.dev/393957973 - Fix this test.
-    tags = [
-        "noasan",
-        "notsan",
+    copts = [
+        # TODO: https://pwbug.dev/464024322 - Fix warnings.
+        "-Wno-shadow",
     ],
+    features = ["-conversion_warnings"],
     test_main = "//pw_bluetooth_sapphire/host/testing:gtest_main",
     deps = [
         ":iso",
+        ":testing",
         "//pw_bluetooth_sapphire/host/testing",
         "//pw_bluetooth_sapphire/host/testing:mock_controller",
+        "//pw_chrono:simulated_system_clock",
     ],
 )

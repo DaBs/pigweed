@@ -51,13 +51,20 @@ pw_source_set("transport") {
   ]
   public_configs = [ ":public_include_path" ]
   public_deps = [
+    "$dir_pw_allocator:libc_allocator",
     "$dir_pw_async:dispatcher",
     "$dir_pw_async:task",
     "$dir_pw_bluetooth:emboss_hci_group",
+    "$dir_pw_bluetooth_sapphire:lease",
     "$dir_pw_bluetooth_sapphire/host/common",
     "$dir_pw_bluetooth_sapphire/host/hci-spec",
-    "$dir_pw_third_party/fuchsia:fit",
+    "$dir_pw_result",
+    "$dir_pw_status",
+    "$pw_external_fuchsia:fit",
+    dir_pw_allocator,
     dir_pw_bluetooth,
+    dir_pw_bytes,
+    dir_pw_multibuf,
   ]
 }
 
@@ -77,7 +84,6 @@ pw_source_set("testing") {
 }
 
 pw_test("transport_test") {
-  enable_if = pw_unit_test_BACKEND == "$dir_pw_unit_test:googletest"
   sources = [
     "acl_data_channel_test.cc",
     "command_channel_test.cc",
@@ -93,10 +99,12 @@ pw_test("transport_test") {
   deps = [
     ":testing",
     ":transport",
+    "$dir_pw_allocator:testing",
     "$dir_pw_bluetooth:emboss_hci_test",
     "$dir_pw_bluetooth_sapphire/host/testing",
     "$dir_pw_bluetooth_sapphire/host/testing:mock_controller",
     "$dir_pw_bluetooth_sapphire/host/testing:test_helpers",
+    dir_pw_multibuf,
   ]
 }
 

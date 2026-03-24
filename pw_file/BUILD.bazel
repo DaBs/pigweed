@@ -13,8 +13,8 @@
 # the License.
 
 load("@com_google_protobuf//bazel:proto_library.bzl", "proto_library")
+load("@com_google_protobuf//bazel:py_proto_library.bzl", "py_proto_library")
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
-load("@rules_python//python:proto.bzl", "py_proto_library")
 load("@rules_python//sphinxdocs:sphinx_docs_library.bzl", "sphinx_docs_library")
 load("//pw_build:compatibility.bzl", "incompatible_with_mcu")
 load(
@@ -68,6 +68,7 @@ cc_library(
     hdrs = [
         "public/pw_file/flat_file_system.h",
     ],
+    features = ["-conversion_warnings"],
     implementation_deps = ["//pw_assert:check"],
     strip_include_prefix = "public",
     deps = [
@@ -85,6 +86,7 @@ pw_cc_test(
     srcs = [
         "flat_file_system_test.cc",
     ],
+    features = ["-conversion_warnings"],
     deps = [
         ":file_proto_pwpb",
         ":flat_file_system",

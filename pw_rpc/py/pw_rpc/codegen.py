@@ -229,7 +229,7 @@ def _generate_service_and_client(
         _generate_client(gen, service)
 
         # DynamicClient is only generated for pwpb for now.
-        if gen.name() == 'pwpb':
+        if gen.name() in ('pwpb', 'raw'):
             gen.line('#if PW_RPC_DYNAMIC_ALLOCATION')
             _generate_client(gen, service, dynamic=True)
             gen.line('#endif  // PW_RPC_DYNAMIC_ALLOCATION')

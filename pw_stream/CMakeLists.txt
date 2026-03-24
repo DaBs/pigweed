@@ -27,11 +27,11 @@ pw_add_library(pw_stream STATIC
   PUBLIC_DEPS
     pw_assert
     pw_bytes
+    pw_memory._sibling_cast
     pw_polyfill
     pw_result
     pw_span
     pw_status
-    pw_toolchain._sibling_cast
 )
 
 pw_add_library(pw_stream.socket_stream STATIC
@@ -55,6 +55,7 @@ pw_add_library(pw_stream.sys_io_stream INTERFACE
   PUBLIC_INCLUDES
     public
   PUBLIC_DEPS
+    pw_bytes
     pw_stream
     pw_sys_io
 )
@@ -83,6 +84,16 @@ pw_add_library(pw_stream.interval_reader STATIC
     interval_reader.cc
 )
 
+pw_add_library(pw_stream.limited_stream INTERFACE
+  HEADERS
+    public/pw_stream/limited_stream.h
+  PUBLIC_INCLUDES
+    public
+  PUBLIC_DEPS
+    pw_status
+    pw_stream
+)
+
 pw_add_library(pw_stream.mpsc_stream STATIC
   HEADERS
     public/pw_stream/mpsc_stream.h
@@ -101,6 +112,16 @@ pw_add_library(pw_stream.mpsc_stream STATIC
     pw_sync.timed_thread_notification
   SOURCES
     mpsc_stream.cc
+)
+
+pw_add_test(pw_stream.limited_stream_test
+  SOURCES
+    limited_stream_test.cc
+  PRIVATE_DEPS
+    pw_stream
+  GROUPS
+    modules
+    pw_stream
 )
 
 pw_add_test(pw_stream.memory_stream_test

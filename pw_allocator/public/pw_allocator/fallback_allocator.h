@@ -22,6 +22,8 @@
 
 namespace pw::allocator {
 
+/// @submodule{pw_allocator,forwarding}
+
 /// This class simply dispatches between a primary and secondary allocator. Any
 /// attempt to allocate memory will first be handled by the primary allocator.
 /// If it cannot allocate memory, e.g. because it is out of memory, the
@@ -53,8 +55,18 @@ class FallbackAllocator : public Allocator {
   /// @copydoc Deallocator::GetInfo
   Result<Layout> DoGetInfo(InfoType info_type, const void* ptr) const override;
 
+ protected:
+  /// @copydoc Allocator::DoMeasureFragmentation
+  std::optional<allocator::Fragmentation> DoMeasureFragmentation()
+      const override {
+    return primary_.MeasureFragmentation();
+  }
+
+ private:
   Allocator& primary_;
   Allocator& secondary_;
 };
+
+/// @}
 
 }  // namespace pw::allocator

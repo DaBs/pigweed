@@ -112,8 +112,8 @@ following reasons:
      // Helper constructor to create the address at run time.
      // Returns std::nullopt if provided type and address does not fit address
      // rules.
-     static constexpr std::optional<Address> Create(
-         DeviceType device_type, uint8_t address) {
+     static constexpr std::optional<Address> Create(DeviceType device_type,
+                                                    uint8_t address) {
        if (IsOutOfRange(device_type, address)) {
          return std::nullopt;
        }
@@ -155,7 +155,7 @@ eliminate extra CCC type check in initiator CCC API.
      kEnc = 0x00,
      kDisec = 0x01,
      kEntdas0 = 0x02,
-     ...
+     // ...
      kSetxtime = 0x28,
      kSetaasa = 0x29,
    }
@@ -164,7 +164,7 @@ eliminate extra CCC type check in initiator CCC API.
      kEnc = 0x80,
      kDisec = 0x81,
      kEntas0 = 0x82,
-     ...
+     // ...
      kSetxtime = 0x98,
      kGetxtime = 0x99,
    };
@@ -221,20 +221,19 @@ design.
               (lhs.instance_id != rhs.instance_id);
      }
 
-    // Concat manuf_id, part_id and instance_id to a pid in 64-bit.
-    constexpr uint64_t AsUint64(Pid const pid) {
-      return (static_cast<uint64_t>(pid.manuf_id) << 33) |
-             (static_cast<uint64_t>(pid.part_id) << 16) |
-             (static_cast<uint64_t>(pid.instance_id) << 12);
-    }
+     // Concat manuf_id, part_id and instance_id to a pid in 64-bit.
+     constexpr uint64_t AsUint64(Pid const pid) {
+       return (static_cast<uint64_t>(pid.manuf_id) << 33) |
+              (static_cast<uint64_t>(pid.part_id) << 16) |
+              (static_cast<uint64_t>(pid.instance_id) << 12);
+     }
 
-    // Split a 64-bit pid into manuf_id, part_id and instance_id (struct Pid).
-    static constexpr Pid FromUint64(const uint64_t pid) {
-      return Pid{
-          .manuf_id = ExtractBits<uint16_t, 47, 33>(pid),
-          .part_id = ExtractBits<uint16_t, 31, 16>(pid),
-          .instance_id = ExtractBits<uint16_t, 15, 12>(pid)};
-    }
+     // Split a 64-bit pid into manuf_id, part_id and instance_id (struct Pid).
+     static constexpr Pid FromUint64(const uint64_t pid) {
+       return Pid{.manuf_id = ExtractBits<uint16_t, 47, 33>(pid),
+                  .part_id = ExtractBits<uint16_t, 31, 16>(pid),
+                  .instance_id = ExtractBits<uint16_t, 15, 12>(pid)};
+     }
 
   };
 
@@ -481,15 +480,12 @@ an active ``Address``. Application should initiate or be notified the
      // unknown, users could get it through initiator:
      // pw::i3c::Initiator::RetrieveDynamicAddressByPid();
      constexpr Device(Initiator& initiator, Address device_address, Pid pid)
-        : initiator_(initiator),
-          device_address_(device_address),
-          pid_(pid) {}
+         : initiator_(initiator), device_address_(device_address), pid_(pid) {}
 
      // For I2C devices connected to I3C bus, pid_ is default-initialized to be
      // std::nullopt.
      constexpr Device(Initiator& initiator, Address device_address)
-        : initiator_(initiator),
-          device_address_(device_address) {}
+         : initiator_(initiator), device_address_(device_address) {}
 
      Device(const Device&) = delete;
      Device(Device&&) = default;
@@ -523,9 +519,7 @@ an active ``Address``. Application should initiate or be notified the
      //   device with the provided device_address or it is busy now.
      // Other status codes as defined by backend.
      Status ReadDirectCcc(CccDirect ccc_id, ByteSpan buffer);
-     Status ReadDirectCcc(CccDirect ccc_id,
-                          const void* buffer,
-                          size_t size_bytes);
+     Status ReadDirectCcc(CccDirect ccc_id, const void* buffer, size_t size_bytes);
 
      // Write bytes and read bytes (this is normally executed in two independent
      // transactions).

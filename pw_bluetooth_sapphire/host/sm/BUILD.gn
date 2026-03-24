@@ -38,7 +38,7 @@ pw_source_set("definitions") {
     "$dir_pw_bluetooth_sapphire/host/common",
     "$dir_pw_bluetooth_sapphire/host/hci-spec",  # hci_spec::LinkKey
     "$dir_pw_chrono:system_clock",
-    "$dir_pw_third_party/fuchsia:fit",
+    "$pw_external_fuchsia:fit",
   ]
   deps = [
     "$dir_pw_bluetooth_sapphire/lib/cpp-string",
@@ -85,8 +85,10 @@ pw_source_set("sm") {
     "$dir_pw_bluetooth_sapphire/host/gap:peer",
     "$dir_pw_bluetooth_sapphire/host/hci",
     "$dir_pw_bluetooth_sapphire/host/l2cap",
-    "$dir_pw_third_party/boringssl",
-    "$dir_pw_third_party/fuchsia:fit",
+    "$dir_pw_crypto:aes",
+    "$dir_pw_crypto:aes_cmac",
+    "$dir_pw_crypto:ecdh",
+    "$pw_external_fuchsia:fit",
     dir_pw_string,
   ]
 }
@@ -110,7 +112,6 @@ pw_source_set("testing") {
 }
 
 pw_test("sm_tests") {
-  enable_if = pw_unit_test_BACKEND == "$dir_pw_unit_test:googletest"
   sources = [
     "ecdh_key_test.cc",
     "error_test.cc",
@@ -132,6 +133,7 @@ pw_test("sm_tests") {
   deps = [
     ":sm",
     ":testing",
+    "$dir_pw_bluetooth_sapphire:fake_lease_provider",
     "$dir_pw_bluetooth_sapphire/host/hci:testing",
     "$dir_pw_bluetooth_sapphire/host/l2cap:testing",
     "$dir_pw_bluetooth_sapphire/host/testing",

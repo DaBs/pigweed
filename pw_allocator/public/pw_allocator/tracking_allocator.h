@@ -29,6 +29,8 @@
 
 namespace pw::allocator {
 
+/// @submodule{pw_allocator,forwarding}
+
 /// This tag type is used to explicitly select the constructor which adds
 /// the tracking allocator's metrics group as a child of the info
 /// allocator it is wrapping.
@@ -43,6 +45,12 @@ static constexpr struct AddTrackingAllocatorAsChild {
 /// template parameter type, such as `TrackingAllocator` which uses the
 /// default metrics implementation, or `TrackingAllocatorForTest` which
 /// always uses the real metrics implementation.
+///
+/// If the underlying allocator does not have the
+/// `kImplementsGetAllocatedLayout` capability, the peak allocation metric may
+/// be lower than the actual peak allocation value. This is because the
+/// tracking allocator cannot account for the overlap in memory usage during
+/// reallocation when it occurs as a "move-and-copy" operation.
 template <typename MetricsType>
 class TrackingAllocator : public Allocator {
  public:
@@ -87,6 +95,12 @@ class TrackingAllocator : public Allocator {
 
   /// @copydoc Allocator::GetAllocated
   size_t DoGetAllocated() const override { return allocator_.GetAllocated(); }
+
+  /// @copydoc Allocator::DoMeasureFragmentation
+  std::optional<allocator::Fragmentation> DoMeasureFragmentation()
+      const override {
+    return allocator_.MeasureFragmentation();
+  }
 
   /// @copydoc Deallocator::GetInfo
   Result<Layout> DoGetInfo(InfoType info_type, const void* ptr) const override {
@@ -165,30 +179,29 @@ void* TrackingAllocator<MetricsType>::DoReallocate(void* ptr,
       return ptr;
     }
 
-    // Need to move data to a brand new allocation.
-    // In order to properly record the peak allocation, this method needs to
-    // perform the steps of allocating, copying, and deallocating memory, and
-    // recording metrics in the interim steps.
-    Result<Layout> old_layout = GetUsableLayout(ptr);
-    if (!old_layout.ok()) {
-      metrics_.RecordFailure(new_size);
-      return nullptr;
-    }
-    void* new_ptr = allocator_.Allocate(new_layout);
+    // Retrieve the allocated layout of the old pointer to calculate the peak
+    // memory usage during reallocation if a move occurs. Note that if the
+    // underlying allocator does not have the `kImplementsGetAllocatedLayout`
+    // capability, this will return an error and the peak metric may be lower
+    // than the actual peak allocation value.
+    Result<Layout> old_allocated_layout = GetAllocatedLayout(ptr);
+
+    void* new_ptr = allocator_.Reallocate(ptr, new_layout);
     if (new_ptr == nullptr) {
       metrics_.RecordFailure(new_size);
       return nullptr;
     }
-    // Update with transient allocation to ensure peak metrics are correct.
-    size_t transient_allocated = allocator_.GetAllocated();
-    metrics_.ModifyAllocated(transient_allocated, allocated);
-    if (ptr != nullptr) {
-      std::memcpy(new_ptr, ptr, std::min(new_size, old_layout->size()));
-      allocator_.Deallocate(ptr);
-    }
     metrics_.IncrementReallocations();
     metrics_.ModifyRequested(new_size, requested.size());
-    metrics_.ModifyAllocated(allocator_.GetAllocated(), transient_allocated);
+
+    size_t current_allocated = allocator_.GetAllocated();
+    if (new_ptr != ptr && old_allocated_layout.ok()) {
+      size_t peak_allocated = current_allocated + old_allocated_layout->size();
+      metrics_.ModifyAllocated(peak_allocated, allocated);
+      metrics_.ModifyAllocated(current_allocated, peak_allocated);
+    } else {
+      metrics_.ModifyAllocated(current_allocated, allocated);
+    }
     return new_ptr;
   } else {
     return allocator_.Reallocate(ptr, new_layout);
@@ -209,5 +222,7 @@ void* TrackingAllocator<MetricsType>::DoReallocate(void* ptr,
 // 5. The `TrackingAllocatorImpl<...>` alias will be removed.
 template <typename MetricsType>
 using TrackingAllocatorImpl = TrackingAllocator<MetricsType>;
+
+/// @}
 
 }  // namespace pw::allocator

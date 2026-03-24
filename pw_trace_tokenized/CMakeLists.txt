@@ -15,6 +15,7 @@
 include($ENV{PW_ROOT}/pw_build/pigweed.cmake)
 include($ENV{PW_ROOT}/pw_protobuf_compiler/proto.cmake)
 include($ENV{PW_ROOT}/pw_trace_tokenized/backend.cmake)
+include($ENV{PW_ROOT}/pw_trace_tokenized/lock.cmake)
 
 pw_add_module_config(pw_trace_tokenized_CONFIG)
 
@@ -25,6 +26,7 @@ pw_add_library(pw_trace_tokenized.config INTERFACE
     public
   PUBLIC_DEPS
     ${pw_trace_CONFIG}
+    pw_varint
 )
 
 pw_add_library(pw_trace_tokenized.fake_trace_time STATIC
@@ -41,6 +43,53 @@ pw_add_library(pw_trace_tokenized.host_trace_time STATIC
     host_trace_time.cc
 )
 
+if(CONFIG_ZEPHYR_PIGWEED_MODULE)
+  pw_add_library(pw_trace_tokenized.zephyr_trace_time STATIC
+    PRIVATE_DEPS
+      pw_trace_tokenized.config
+    PUBLIC_DEPS
+      zephyr_interface
+    SOURCES
+      zephyr_trace_time.cc
+  )
+  if(CONFIG_PIGWEED_TRACE_TOKENIZED_TIME)
+    set(pw_trace_tokenizer_time pw_trace_tokenized.zephyr_trace_time CACHE STRING "Tokenizer trace time implementation" FORCE)
+  endif()
+endif()
+
+set(pw_trace_tokenized_LOCK_BACKEND pw_trace_tokenized.interrupt_spin_lock)
+
+pw_add_library(pw_trace_tokenized.interrupt_spin_lock INTERFACE
+  HEADERS
+    public/pw_trace_tokenized/internal/interrupt_spin_lock_native.h
+    interrupt_spin_lock_public_overrides/pw_trace_tokenized_backend/lock_native.h
+  PUBLIC_INCLUDES
+    public
+    interrupt_spin_lock_public_overrides
+  PUBLIC_DEPS
+    pw_sync.interrupt_spin_lock
+)
+
+pw_add_library(pw_trace_tokenized.no_lock INTERFACE
+  HEADERS
+    public/pw_trace_tokenized/internal/no_lock_native.h
+    no_lock_public_overrides/pw_trace_tokenized_backend/lock_native.h
+  PUBLIC_INCLUDES
+    public
+    no_lock_public_overrides
+  PUBLIC_DEPS
+    pw_sync.no_lock
+)
+
+pw_add_facade(pw_trace_tokenized.lock INTERFACE
+  BACKEND
+    pw_trace_tokenized_LOCK_BACKEND
+  HEADERS
+    public/pw_trace_tokenized/internal/lock.h
+  PUBLIC_INCLUDES
+    public
+)
+
 pw_add_library(pw_trace_tokenized.core STATIC
   HEADERS
     public/pw_trace_tokenized/internal/trace_tokenized_internal.h
@@ -51,16 +100,14 @@ pw_add_library(pw_trace_tokenized.core STATIC
     public
     public_overrides
   PUBLIC_DEPS
-    pw_log
+    pw_trace_tokenized.config
     pw_span
     pw_status
     pw_tokenizer
   SOURCES
     trace.cc
   PRIVATE_DEPS
-    pw_trace_tokenized.config
-    pw_assert
-    pw_ring_buffer
+    pw_trace_tokenized.lock
     pw_trace.facade
     pw_varint
     ${pw_trace_tokenizer_time}
@@ -69,12 +116,6 @@ pw_add_library(pw_trace_tokenized.core STATIC
 pw_add_library(pw_trace_tokenized INTERFACE
   PUBLIC_DEPS
     pw_trace_tokenized.core
-    pw_trace_tokenized.config
-  PUBLIC_INCLUDES
-    public
-    public_overrides
-  PRIVATE_DEPS
-    ${pw_trace_tokenizer_time}
 )
 
 if(("${pw_trace_BACKEND}" STREQUAL "pw_trace_tokenized") AND
@@ -83,6 +124,7 @@ pw_add_test(pw_trace_tokenized.trace_tokenized_test
   SOURCES
     trace_test.cc
   PRIVATE_DEPS
+    pw_thread.sleep
     pw_trace_tokenized.core
     pw_trace
     ${pw_trace_tokenizer_time}
@@ -100,17 +142,30 @@ pw_add_library(pw_trace_tokenized.trace_buffer STATIC
   SOURCES
     trace_buffer.cc
   PRIVATE_DEPS
+    pw_span
     pw_trace_tokenized.core
   PUBLIC_DEPS
     pw_bytes
-    pw_ring_buffer
-    pw_tokenizer
+    pw_containers.algorithm
+    pw_containers.inline_var_len_entry_queue
+    pw_status
     pw_trace_tokenized.config
-    pw_varint
-    pw_span
   PUBLIC_DEFINES
     PW_TRACE_BUFFER_SIZE_BYTES=${pw_trace_tokenized_BUFFER_SIZE}
 )
+
+if("${pw_trace_BACKEND}" STREQUAL "pw_trace_tokenized")
+pw_add_test(pw_trace_tokenized.trace_buffer_test
+  SOURCES
+    trace_buffer_test.cc
+  PRIVATE_DEPS
+    pw_trace
+    pw_trace_tokenized.trace_buffer
+  GROUPS
+    modules
+    pw_trace_tokenized
+)
+endif()
 
 pw_proto_library(pw_trace_tokenized.protos
   SOURCES
@@ -124,18 +179,18 @@ pw_proto_library(pw_trace_tokenized.protos
 )
 
 pw_add_library(pw_trace_tokenized.rpc_service STATIC
+  HEADERS
+    public/pw_trace_tokenized/trace_rpc_service_nanopb.h
+  PUBLIC_INCLUDES
+    public
+  PUBLIC_DEPS
+    pw_trace_tokenized.core
+    pw_trace_tokenized.trace_buffer
+    pw_log
   SOURCES
     trace_rpc_service_nanopb.cc
   PRIVATE_DEPS
-    pw_assert
-    pw_log
-    pw_ring_buffer
-    pw_trace_tokenized.trace_buffer
     pw_trace_tokenized.protos.nanopb_rpc
-    pw_varint
-  PUBLIC_DEPS
-    pw_tokenizer
-    pw_status
 )
 
 pw_add_library(pw_trace_tokenized.base_trace_service STATIC
@@ -147,19 +202,70 @@ pw_add_library(pw_trace_tokenized.base_trace_service STATIC
     public
   PRIVATE_DEPS
     pw_log
-    pw_stream
-    pw_ring_buffer
-  PUBLIC_DEPS
-    pw_trace_tokenized
     pw_trace_tokenized.trace_buffer
+  PUBLIC_DEPS
+    pw_status
+    pw_stream
+    pw_trace_tokenized.core
 )
 
 pw_add_library(pw_trace_tokenized.trace_service_pwpb STATIC
   SOURCES
     trace_service_pwpb.cc
-  PRIVATE_DEPS
-    pw_chrono.system_clock
   PUBLIC_DEPS
     pw_trace_tokenized.base_trace_service
     pw_trace_tokenized.protos.pwpb_rpc
+)
+
+pw_add_library(pw_trace_tokenized.transfer_handler STATIC
+  HEADERS
+    public/pw_trace_tokenized/transfer_handler.h
+  SOURCES
+    transfer_handler.cc
+  PRIVATE_DEPS
+    pw_containers.inline_var_len_entry_queue
+    pw_containers.var_len_entry_queue
+    pw_log
+    pw_trace_tokenized.trace_buffer
+  PUBLIC_DEPS
+    pw_trace_tokenized.config
+    pw_transfer
+)
+
+if("${pw_trace_BACKEND}" STREQUAL "pw_trace_tokenized")
+pw_add_test(pw_trace_tokenized.transfer_handler_test
+  SOURCES
+    transfer_handler_test.cc
+  PRIVATE_DEPS
+    pw_string.builder
+    pw_tokenizer.decoder
+    pw_trace
+    pw_trace_tokenized
+    pw_trace_tokenized.decoder
+    pw_trace_tokenized.trace_buffer
+    pw_trace_tokenized.transfer_handler
+  GROUPS
+    modules
+    pw_trace_tokenized
+)
+endif()
+
+pw_add_library(pw_trace_tokenized.decoder STATIC
+  HEADERS
+    public/pw_trace_tokenized/decoder.h
+  SOURCES
+    decoder.cc
+  PUBLIC_INCLUDES
+    public
+  PUBLIC_DEPS
+    pw_trace_tokenized
+    pw_bytes
+    pw_log
+    pw_result
+    pw_status
+    pw_stream
+    pw_string
+    pw_tokenizer.decoder
+    pw_varint.stream
+    pw_third_party.fuchsia.stdcompat
 )

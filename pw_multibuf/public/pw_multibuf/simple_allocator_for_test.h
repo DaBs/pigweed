@@ -21,9 +21,12 @@
 #include "pw_allocator/synchronized_allocator.h"
 #include "pw_allocator/testing.h"
 #include "pw_assert/assert.h"
+#include "pw_multibuf/config.h"
 #include "pw_multibuf/simple_allocator.h"
 
 namespace pw::multibuf::test {
+
+/// @submodule{pw_multibuf,test}
 
 /// Simple, self-contained `pw::multibuf::MultiBufAllocator` for test use.
 template <size_t kDataSizeBytes = 1024, size_t kMetaSizeBytes = kDataSizeBytes>
@@ -48,5 +51,9 @@ class SimpleAllocatorForTest : public SimpleAllocator {
   allocator::test::AllocatorForTest<kMetaSizeBytes> alloc_;
   allocator::SynchronizedAllocator<sync::Mutex> meta_alloc_;
 };
+
+SimpleAllocatorForTest() -> SimpleAllocatorForTest<>;
+
+/// @}
 
 }  // namespace pw::multibuf::test

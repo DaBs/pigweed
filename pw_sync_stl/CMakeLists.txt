@@ -108,5 +108,5 @@ pw_add_library(pw_sync_stl.interrupt_spin_lock INTERFACE
     public_overrides
   PUBLIC_DEPS
     pw_sync.interrupt_spin_lock.facade
-    pw_sync.yield_core
+    pw_assert
 )

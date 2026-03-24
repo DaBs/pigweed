@@ -14,12 +14,9 @@
 
 #include "pw_bluetooth_sapphire/internal/host/gap/low_energy_advertising_manager.h"
 
-#include <cpp-string/string_printf.h>
 #include <pw_assert/check.h>
 
 #include "pw_bluetooth_sapphire/internal/host/common/log.h"
-#include "pw_bluetooth_sapphire/internal/host/common/random.h"
-#include "pw_bluetooth_sapphire/internal/host/common/slab_allocator.h"
 #include "pw_bluetooth_sapphire/internal/host/gap/low_energy_address_manager.h"
 #include "pw_bluetooth_sapphire/internal/host/gap/peer.h"
 #include "pw_bluetooth_sapphire/internal/host/hci-spec/util.h"
@@ -78,27 +75,6 @@ void AdvertisementInstance::Reset() {
   id_ = kInvalidAdvertisementId;
 }
 
-class LowEnergyAdvertisingManager::ActiveAdvertisement final {
- public:
-  explicit ActiveAdvertisement(const DeviceAddress& address,
-                               AdvertisementId id,
-                               bool extended_pdu)
-      : address_(address), id_(id), extended_pdu_(extended_pdu) {}
-
-  ~ActiveAdvertisement() = default;
-
-  const DeviceAddress& address() const { return address_; }
-  AdvertisementId id() const { return id_; }
-  bool extended_pdu() const { return extended_pdu_; }
-
- private:
-  DeviceAddress address_;
-  AdvertisementId id_;
-  bool extended_pdu_;
-
-  BT_DISALLOW_COPY_AND_ASSIGN_ALLOW_MOVE(ActiveAdvertisement);
-};
-
 LowEnergyAdvertisingManager::LowEnergyAdvertisingManager(
     hci::LowEnergyAdvertiser* advertiser,
     hci::LocalAddressDelegate* local_addr_delegate)
@@ -107,14 +83,6 @@ LowEnergyAdvertisingManager::LowEnergyAdvertisingManager(
       weak_self_(this) {
   PW_DCHECK(advertiser_);
   PW_DCHECK(local_addr_delegate_);
-}
-
-LowEnergyAdvertisingManager::~LowEnergyAdvertisingManager() {
-  // Turn off all the advertisements!
-  for (const auto& ad : advertisements_) {
-    advertiser_->StopAdvertising(ad.second->address(),
-                                 ad.second->extended_pdu());
-  }
 }
 
 void LowEnergyAdvertisingManager::StartAdvertising(
@@ -178,51 +146,41 @@ void LowEnergyAdvertisingManager::StartAdvertising(
           return;
         }
 
-        auto ad_ptr = std::make_unique<ActiveAdvertisement>(
-            result.value(),
-            AdvertisementId(self->next_advertisement_id_++),
-            options.extended_pdu);
         hci::LowEnergyAdvertiser::ConnectionCallback adv_conn_cb;
         if (connect_cb) {
-          adv_conn_cb = [self,
-                         id = ad_ptr->id(),
-                         on_connect_cb = std::move(connect_cb)](auto link) {
+          adv_conn_cb = [self, on_connect_cb = std::move(connect_cb)](
+                            hci::AdvertisementId advertisement_id, auto link) {
             bt_log(DEBUG, "gap-le", "received new connection");
 
             if (!self.is_alive()) {
               return;
             }
 
-            // remove the advertiser because advertising has stopped
-            self->advertisements_.erase(id);
-            on_connect_cb(id, std::move(link));
+            on_connect_cb(advertisement_id, std::move(link));
           };
         }
-        auto status_cb_wrapper = [self,
-                                  advertisement_ptr = std::move(ad_ptr),
-                                  result_cb = std::move(status_cb)](
-                                     hci::Result<> status) mutable {
-          if (!self.is_alive()) {
-            return;
-          }
+        auto status_cb_wrapper =
+            [self, result_cb = std::move(status_cb)](
+                hci::Result<hci::AdvertisementId> status) mutable {
+              if (!self.is_alive()) {
+                return;
+              }
 
-          if (status.is_error()) {
-            result_cb(AdvertisementInstance(), status);
-            return;
-          }
+              if (status.is_error()) {
+                result_cb(AdvertisementInstance(), status.take_error());
+                return;
+              }
 
-          auto id = advertisement_ptr->id();
-          self->advertisements_.emplace(id, std::move(advertisement_ptr));
-          auto stop_advertising_cb = [self](AdvertisementId stop_id) {
-            if (self.is_alive()) {
-              self->StopAdvertising(stop_id);
-            }
-          };
-          result_cb(AdvertisementInstance(id, std::move(stop_advertising_cb)),
-                    status);
-        };
+              auto stop_advertising_cb = [self](AdvertisementId stop_id) {
+                if (self.is_alive()) {
+                  self->advertiser_->StopAdvertising(stop_id);
+                }
+              };
+              result_cb(AdvertisementInstance(status.value(),
+                                              std::move(stop_advertising_cb)),
+                        fit::ok());
+            };
 
-        // Call StartAdvertising, with the callback
         self->advertiser_->StartAdvertising(result.value(),
                                             advertising_data,
                                             scan_response,
@@ -230,19 +188,6 @@ void LowEnergyAdvertisingManager::StartAdvertising(
                                             std::move(adv_conn_cb),
                                             std::move(status_cb_wrapper));
       });
-}
-
-bool LowEnergyAdvertisingManager::StopAdvertising(
-    AdvertisementId advertisement_id) {
-  auto it = advertisements_.find(advertisement_id);
-  if (it == advertisements_.end()) {
-    return false;
-  }
-
-  advertiser_->StopAdvertising(it->second->address(),
-                               it->second->extended_pdu());
-  advertisements_.erase(it);
-  return true;
 }
 
 }  // namespace bt::gap
